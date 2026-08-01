@@ -1,8 +1,7 @@
 <p align="center">
   <img src="./img/logo-light.svg" alt="Agra Logo" width="300" style="max-width: 100%; height: auto;"/>
+  <span style="font-size: 2.2em; font-weight: bold; vertical-align: middle;">Agra</span>
 </p>
-
-# Agra
 
 Ansible project untuk otomasi deployment dan lifecycle management monitoring stack production-grade. Grafana sebagai pusat visualisasi dashboard, Prometheus sebagai Time Series Database dan scraper engine metrics, serta Node Exporter untuk export OS & hardware metrics.
 
