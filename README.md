@@ -2,7 +2,7 @@
   <img src="./img/logo-light.svg" alt="Agra Logo" width="300" style="max-width: 100%; height: auto;"/>
 </p>
 
-<h1 align="center">Agra</h1>
+<h1 align="center">Agra - Ansible Deployment Monitoring Stack</h1>
 
 Ansible project untuk otomasi deployment dan lifecycle management monitoring stack production-grade. Grafana sebagai pusat visualisasi dashboard, Prometheus sebagai Time Series Database dan scraper engine metrics, serta Node Exporter untuk export OS & hardware metrics.
 
