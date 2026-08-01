@@ -1,4 +1,8 @@
-# Agra — Ansible Monitoring Stack Deployment
+<p align="center">
+  <img src="./img/logo-light.svg" alt="Agra Logo" width="140" style="max-width: 100%; height: auto;"/>
+</p>
+
+# Agra
 
 Ansible project untuk otomasi deployment dan lifecycle management monitoring stack production-grade. Grafana sebagai pusat visualisasi dashboard, Prometheus sebagai Time Series Database dan scraper engine metrics, serta Node Exporter untuk export OS & hardware metrics.
 

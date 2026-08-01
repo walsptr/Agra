@@ -1,0 +1,8 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">agra icon (filled background)</title>
+  <desc id="desc">Simbol radar-ping agra di atas background solid, untuk avatar</desc>
+  <rect width="120" height="120" rx="24" fill="#3D1A0A"/>
+  <circle cx="60" cy="60" r="10" fill="#F2793D"/>
+  <circle cx="60" cy="60" r="27" fill="none" stroke="#F2793D" stroke-width="6" opacity="0.6"/>
+  <circle cx="60" cy="60" r="44" fill="none" stroke="#F2793D" stroke-width="6" opacity="0.32"/>
+</svg>
