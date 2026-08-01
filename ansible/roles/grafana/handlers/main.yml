@@ -1,0 +1,28 @@
+---
+- name: restart grafana
+  ansible.builtin.debug:
+    msg: "Restart grafana triggered"
+  changed_when: true
+  notify:
+    - restart grafana docker
+    - restart grafana native
+
+- name: restart grafana docker
+  community.docker.docker_container:
+    name: "{{ grafana_container_name }}"
+    state: started
+    restart: true
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_grafana | default(true) | bool
+  ignore_errors: true
+
+- name: restart grafana native
+  ansible.builtin.service:
+    name: agra-grafana
+    state: restarted
+    daemon_reload: true
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_grafana | default(true) | bool
+  ignore_errors: true

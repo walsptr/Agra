@@ -1,0 +1,23 @@
+---
+- name: Common - Validate deployment mode
+  ansible.builtin.assert:
+    that:
+      - agra_deployment_mode is defined
+      - agra_deployment_mode in ['docker', 'native']
+    fail_msg: "agra_deployment_mode tidak valid! Diberikan: {{ agra_deployment_mode | default('TIDAK TERDEFINISI') }}. Kenapa: deployment mode wajib ditentukan di globals.yml agar role tahu mana implementasi yang dipakai. Perbaikan: set `agra_deployment_mode: docker` atau `native` di etc/agra/globals.yml."
+    quiet: true
+
+- name: Common - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Common - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_grafana | default(true) or enable_prometheus | default(true) or enable_node_exporter | default(true)
+
+- name: Common - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_grafana | default(true) or enable_prometheus | default(true) or enable_node_exporter | default(true)

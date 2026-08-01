@@ -1,0 +1,49 @@
+---
+enable_grafana: true
+enable_ha_grafana: false
+grafana_port: 3000
+grafana_container_name: agra-grafana
+grafana_image: grafana/grafana-oss
+grafana_tag: 11.2.0
+grafana_native_version: "11.2.0"
+grafana_data_dir: /var/lib/agra/grafana
+grafana_config_dir: /etc/grafana
+grafana_provisioning_dir: "{{ grafana_config_dir }}/provisioning"
+grafana_dashboards_override_dir: "/etc/agra/config/grafana/dashboards"
+grafana_admin_user: admin
+grafana_admin_password: "{{ vault_grafana_admin_password | default('admin') }}"
+
+grafana_database: sqlite
+grafana_database_ssl_mode: disable
+grafana_database_host: ""
+grafana_database_port: >-
+  {% if grafana_database == 'mysql' %}3306{% elif grafana_database == 'postgresql' %}5432{% else %}0{% endif %}
+grafana_database_name: grafana
+grafana_database_user: grafana
+grafana_database_password: "{{ vault_grafana_database_password | default('') }}"
+grafana_sqlite_path: "{{ grafana_data_dir }}/grafana.db"
+
+grafana_sqlite_sync_method: rsync
+grafana_sqlite_sync_interval: "*/5 * * * *"
+grafana_sqlite_sync_ssh_user: "{{ common_user | default('agra') }}"
+
+grafana_server_domain: "{{ inventory_hostname }}"
+grafana_server_root_url: >-
+  {% if monitoring_vip is defined and monitoring_vip | length > 0 %}
+  https://{{ monitoring_vip }}/
+  {%- elif enable_nginx | default(true) | bool %}
+  https://{{ inventory_hostname }}/
+  {%- else %}
+  http://{{ inventory_hostname }}:{{ grafana_port }}/
+  {%- endif %}
+grafana_server_protocol: http
+grafana_log_level: info
+grafana_secret_key: "{{ vault_grafana_secret_key | default('CHANGE_ME_GRAFANA_SECRET_KEY_IN_PASSWORDS_YML') }}"
+
+grafana_web_listen_address: >-
+  {% if enable_nginx | default(true) | bool %}127.0.0.1:{{ grafana_port }}{% else %}0.0.0.0:{{ grafana_port }}{% endif %}
+
+grafana_prometheus_datasource_name: Prometheus
+grafana_prometheus_datasource_uid: prometheus-main
+grafana_prometheus_datasource_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"
+grafana_install_method: binary

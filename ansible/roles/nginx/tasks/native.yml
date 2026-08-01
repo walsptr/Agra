@@ -1,0 +1,54 @@
+---
+- name: Nginx (Native) - Install nginx package (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - openssl
+      - ca-certificates
+    state: present
+    update_cache: true
+  when: ansible_facts['os_family'] == 'Debian'
+  tags: ['nginx', 'native', 'install']
+
+- name: Nginx (Native) - Install nginx package (RHEL/CentOS)
+  ansible.builtin.dnf:
+    name:
+      - nginx
+      - openssl
+      - ca-certificates
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+  tags: ['nginx', 'native', 'install']
+
+- name: Nginx (Native) - Wait for config dir to exist (from config.yml shared)
+  ansible.builtin.wait_for:
+    path: "{{ nginx_config_dir }}/nginx.conf"
+    state: present
+    timeout: 30
+  tags: ['nginx', 'native', 'service']
+
+- name: Nginx (Native) - Test nginx config syntax sebelum start (nginx -t)
+  ansible.builtin.command: nginx -t
+  register: _nginx_test
+  changed_when: false
+  ignore_errors: true
+  tags: ['nginx', 'native', 'validate']
+
+- name: Nginx (Native) - HARD FAIL jika nginx -t gagal
+  ansible.builtin.assert:
+    that:
+      - _nginx_test.rc == 0
+    fail_msg: >-
+      Config nginx GAGAL validasi (return code={{ _nginx_test.rc }}).
+      Pesan error: {{ _nginx_test.stderr_lines | default(_nginx_test.stdout_lines) | join(' | ') }}
+      Perbaiki syntax template di roles/nginx/templates/ atau custom override di
+      /etc/agra/config/nginx/* sebelum deploy ulang.
+  when: _nginx_test.rc is defined and _nginx_test.rc != 0
+  tags: ['nginx', 'native', 'validate']
+
+- name: Nginx (Native) - Enable and start nginx
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+  tags: ['nginx', 'native', 'service']

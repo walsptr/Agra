@@ -1,0 +1,111 @@
+---
+- name: Common - OS package cache update (Debian)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+  changed_when: false
+  tags: ['common', 'packages']
+
+- name: Common - OS package cache update (RedHat)
+  ansible.builtin.dnf:
+    update_cache: true
+  when: ansible_os_family == 'RedHat'
+  changed_when: false
+  tags: ['common', 'packages']
+
+- name: Common - Create group
+  ansible.builtin.group:
+    name: "{{ common_group }}"
+    system: true
+    state: present
+  tags: ['common', 'user']
+
+- name: Common - Create user
+  ansible.builtin.user:
+    name: "{{ common_user }}"
+    group: "{{ common_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ common_home_dir }}"
+    create_home: false
+    state: present
+  tags: ['common', 'user']
+
+- name: Common - Ensure base persist directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ common_user }}"
+    group: "{{ common_group }}"
+    mode: '0755'
+  loop:
+    - "{{ common_home_dir }}"
+    - "{{ common_etc_dir }}"
+  tags: ['common', 'dirs']
+
+- name: Common - Ensure user SSH directory exists for HA sync
+  ansible.builtin.file:
+    path: "{{ common_home_dir }}/.ssh"
+    state: directory
+    owner: "{{ common_user }}"
+    group: "{{ common_group }}"
+    mode: '0700'
+  tags: ['common', 'ssh']
+
+- name: Common - Install OS common packages
+  ansible.builtin.package:
+    name: "{{ common_os_packages }}"
+    state: present
+  tags: ['common', 'packages']
+
+- name: Common - Detect firewall tool
+  ansible.builtin.set_fact:
+    _common_firewall_detected: >-
+      {% if common_firewall_tool != 'auto' -%}
+      {{ common_firewall_tool }}
+      {%- elif ansible_facts.services['ufw.service'] is defined and ansible_facts.services['ufw.service'].state == 'running' -%}
+      ufw
+      {%- elif ansible_facts.services['firewalld.service'] is defined and ansible_facts.services['firewalld.service'].state == 'running' -%}
+      firewalld
+      {%- else -%}
+      none
+      {%- endif %}
+  changed_when: false
+  tags: ['common', 'firewall']
+
+- name: Common - Collect ports to open based on feature flags
+  ansible.builtin.set_fact:
+    _common_ports_tcp: >-
+      {{
+        (['22'] if True else []) +
+        (['80', '443'] if enable_nginx | default(true) else []) +
+        (['9090'] if (enable_prometheus | default(true) and not (enable_nginx | default(true))) else []) +
+        (['3000'] if (enable_grafana | default(true) and not (enable_nginx | default(true))) else [])
+      }}
+  changed_when: false
+  tags: ['common', 'firewall']
+
+- name: Common - Open firewall ports (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: "agra monitoring port {{ item }}"
+  loop: "{{ _common_ports_tcp | unique }}"
+  when:
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']
+
+- name: Common - Open firewall ports (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ _common_ports_tcp | unique }}"
+  when:
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']

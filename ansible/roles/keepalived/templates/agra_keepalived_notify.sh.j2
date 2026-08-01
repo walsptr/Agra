@@ -1,0 +1,38 @@
+#!/bin/bash
+# agra keepalived notify script — dipanggil oleh keepalived ketika state berubah:
+#   notify_master / notify_backup / notify_fault
+# Argumen $1 = type (MASTER|BACKUP|FAULT|STOP)
+set -u
+LOG_FILE="{{ keepalived_log_file }}"
+INSTANCE="{{ keepalived_vrrp_instance }}"
+VIP="{{ monitoring_vip }}"
+HOSTNAME="$(hostname)"
+
+log() {
+    local lvl="$1"; shift
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [NOTIFY ${lvl}] instance=${INSTANCE} vip=${VIP} host=${HOSTNAME} — $*" >> "${LOG_FILE}" 2>/dev/null || true
+    echo "[KEEPALIVED ${lvl}] instance=${INSTANCE} vip=${VIP} host=${HOSTNAME} — $*" 1>&2 || true
+}
+
+STATE="${1:-UNKNOWN}"
+case "${STATE}" in
+    MASTER|master)
+        log "INFO  -> STATE=MASTER (claim VIP ${VIP})"
+        [ -x /etc/agra/config/keepalived/post-master.sh ] && /etc/agra/config/keepalived/post-master.sh || true
+        ;;
+    BACKUP|backup)
+        log "INFO  -> STATE=BACKUP (release VIP ${VIP})"
+        [ -x /etc/agra/config/keepalived/post-backup.sh ] && /etc/agra/config/keepalived/post-backup.sh || true
+        ;;
+    FAULT|fault)
+        log "ERROR -> STATE=FAULT (unhealthy, weight {{ keepalived_weight }})"
+        [ -x /etc/agra/config/keepalived/post-fault.sh ] && /etc/agra/config/keepalived/post-fault.sh || true
+        ;;
+    STOP|stop)
+        log "WARN  -> STATE=STOP (keepalived stopped)"
+        ;;
+    *)
+        log "WARN  -> STATE=UNKNOWN args=\"$*\""
+        ;;
+esac
+exit 0

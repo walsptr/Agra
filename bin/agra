@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Bootstrap script for agra CLI.
+
+Menambahkan project root ke sys.path agar package agra bisa di-import tanpa install.
+Untuk production, sebaiknya `pip install -e .` via pyproject.toml (nanti tambah).
+"""
+from __future__ import annotations
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from agra.cli import main
+
+if __name__ == "__main__":
+    sys.exit(main())

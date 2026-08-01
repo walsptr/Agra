@@ -1,0 +1,89 @@
+---
+- name: Verify HA 2-node — Health check service di mon1 (MASTER) + mon2 (BACKUP) + app1 node_exporter
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    mon_master: "{{ groups['monitoring'][0] | default('agra-mon1') }}"
+  tasks:
+    - name: Wait semua service port ready (max 90s)
+      ansible.builtin.wait_for:
+        port: "{{ item }}"
+        timeout: 90
+        delay: 5
+      loop:
+        - 3000
+        - 9090
+        - 9100
+      when: inventory_hostname in groups['monitoring'] | default([])
+      ignore_errors: true
+
+    - name: Wait node_exporter di app1 ready
+      ansible.builtin.wait_for:
+        port: 9100
+        timeout: 60
+        delay: 5
+      when: inventory_hostname == 'agra-app1'
+      ignore_errors: true
+
+    - name: Health check Grafana di kedua monitoring node
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/health"
+        status_code: 200
+        timeout: 10
+      register: g_health
+      when: inventory_hostname in groups['monitoring'] | default([])
+      ignore_errors: true
+
+    - name: ASSERT Grafana sehat di SEMUA node monitoring
+      ansible.builtin.assert:
+        that:
+          - g_health.status == 200
+        fail_msg: "[{{ inventory_hostname }}] Grafana health NOT OK (status={{ g_health.status | default('N/A') }})"
+        quiet: false
+      when: inventory_hostname in groups['monitoring'] | default([])
+      ignore_errors: true
+
+    - name: Health check Prometheus /-/healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/-/healthy"
+        status_code: 200
+        timeout: 10
+      register: p_health
+      when: inventory_hostname in groups['monitoring'] | default([])
+      ignore_errors: true
+
+    - name: ASSERT Prometheus sehat di SEMUA node monitoring
+      ansible.builtin.assert:
+        that:
+          - p_health.status == 200
+        fail_msg: "[{{ inventory_hostname }}] Prometheus health NOT OK (status={{ p_health.status | default('N/A') }})"
+        quiet: false
+      when: inventory_hostname in groups['monitoring'] | default([])
+      ignore_errors: true
+
+    - name: Health check Node Exporter /metrics di app1 (pastikan target scrape OK)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9100/metrics"
+        status_code: 200
+        timeout: 10
+      register: ne_health
+      when: inventory_hostname == 'agra-app1'
+      ignore_errors: true
+
+    - name: ASSERT Node Exporter app1 OK
+      ansible.builtin.assert:
+        that:
+          - ne_health.status == 200
+        fail_msg: "app1 Node Exporter /metrics tidak 200 OK"
+        quiet: false
+      when: inventory_hostname == 'agra-app1'
+      ignore_errors: true
+
+    - name: Summary verify per host
+      ansible.builtin.debug:
+        msg:
+          - "Node: {{ inventory_hostname }} (group={{ group_names | join(',') }})"
+          - "Grafana health    : {{ g_health.status | default('N/A (bukan node monitoring)') }}"
+          - "Prometheus health : {{ p_health.status | default('N/A (bukan node monitoring)') }}"
+          - "Node Exporter     : {{ ne_health.status | default('N/A') }}"

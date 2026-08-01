@@ -1,0 +1,42 @@
+---
+- name: Nginx (Docker) - Pull image
+  community.docker.docker_image:
+    name: "{{ nginx_image }}:{{ nginx_tag }}"
+    source: pull
+    state: present
+  register: _ngx_img
+  until: _ngx_img is succeeded
+  retries: 5
+  delay: 3
+  tags: ['nginx', 'docker', 'image']
+
+- name: Nginx (Docker) - Remove old container if image changed
+  community.docker.docker_container:
+    name: "{{ nginx_container_name }}"
+    state: absent
+  when: _ngx_img is changed
+  tags: ['nginx', 'docker', 'container']
+
+- name: Nginx (Docker) - Start nginx container (host network untuk akses real 80/443)
+  community.docker.docker_container:
+    name: "{{ nginx_container_name }}"
+    image: "{{ nginx_image }}:{{ nginx_tag }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    volumes:
+      - "{{ nginx_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro"
+      - "{{ nginx_config_dir }}/sites-available:/etc/nginx/sites-available:ro"
+      - "{{ nginx_config_dir }}/sites-enabled:/etc/nginx/sites-enabled:ro"
+      - "{{ nginx_config_dir }}/conf.d:/etc/nginx/conf.d:ro"
+      - "{{ nginx_config_dir }}/ssl:/etc/nginx/ssl:ro"
+      - "{{ nginx_log_dir }}:/var/log/nginx:rw"
+      - "{{ nginx_cache_dir }}:/var/cache/nginx:rw"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:{{ nginx_http_port }}/ -O /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    comparisons:
+      '*': ignore
+  tags: ['nginx', 'docker', 'container']

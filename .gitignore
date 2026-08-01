@@ -1,0 +1,56 @@
+# Vault & passwords
+.vault_pass
+etc/agra/passwords.yml
+etc/agra/passwords.yml.bak
+
+# Ansible retry / temporary
+*.retry
+*.log
+ansible/facts.d/
+ansible/*.retry
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+agra.egg-info/
+.eggs/
+.pytest_cache/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.trae/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Molecule
+.molecule/
+tests/molecule/*/inventory
+tests/molecule/*/*-IDEMPOTENCE.retry
+
+# Ansible temp
+.ansible/
+
+# Backups (jika tarball disimpan di dalam repo secara tidak sengaja)
+*.tar.gz
+*.tgz
+.backup/
+var/
+
+# Misc system files
+.DS_Store
+Thumbs.db
+
+contexts/
+AGENTS.md

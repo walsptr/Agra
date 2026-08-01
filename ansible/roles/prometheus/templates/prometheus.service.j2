@@ -1,0 +1,23 @@
+[Unit]
+Description=agra Prometheus Server
+Documentation=https://prometheus.io/docs/introduction/overview/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ common_user | default('agra') }}
+Group={{ common_group | default('agra') }}
+ExecStart={{ prometheus_native_binary_path }} {{ _prometheus_extra_args }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths={{ prometheus_data_dir }} {{ prometheus_config_dir }}
+
+[Install]
+WantedBy=multi-user.target

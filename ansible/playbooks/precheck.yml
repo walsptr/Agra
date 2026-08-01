@@ -1,0 +1,223 @@
+---
+- name: 'AGRA — Preflight Validation / Precheck'
+  hosts: all
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    _precheck_report: {}
+    _precheck_pass: true
+  tags: ['always', 'precheck']
+
+  tasks:
+    - name: 'Precheck — Load globals.yml + passwords.yml'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+        - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+      ignore_errors: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (Kategori — TOPOLOGI) — Minimal ada 1 node group monitoring'
+      ansible.builtin.assert:
+        that:
+          - groups['monitoring'] is defined
+          - groups['monitoring'] | length >= 1
+        fail_msg: >-
+          groups['monitoring'] TIDAK TERDEFINISI atau KOSONG (jumlah={{ groups['monitoring'] | default([]) | length }}).
+          Agra monitoring stack minimal butuh 1 host di group inventory [monitoring].
+          Perbaiki: edit file inventory di inventory/all-in-one ATAU inventory/multinode,
+          tambahkan host ke group [monitoring] sesuai dokumentasi ARCHITECTURE.md §4.
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (TOPOLOGI) — node_exporter group terdefinisi'
+      ansible.builtin.assert:
+        that:
+          - groups['node_exporter'] is defined
+          - groups['node_exporter'] | length >= 1
+        fail_msg: >-
+          groups['node_exporter'] TIDAK ADA atau KOSONG (jumlah={{ groups['node_exporter'] | default([]) | length }}).
+          Node Exporter adalah minimal metrics agent — minimal harus ada 1 node untuk di-scrape.
+          Perbaiki: di inventory, gunakan `[node_exporter:children]` + masukkan group monitoring (dan app jika ada).
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (TOPOLOGI) — Multi-node WAJIB monitoring_vip'
+      ansible.builtin.assert:
+        that:
+          - (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0)
+            or
+            (monitoring_vip | default('') | length > 0)
+        fail_msg: >-
+          Multi-node HA: groups['monitoring']={{ groups['monitoring'] | length }} node TAPI monitoring_vip KOSONG.
+          Keepalived HA butuh Virtual IP. Perbaiki:
+          set `monitoring_vip: "x.x.x.x"` di inventory vars atau etc/agra/globals.yml.
+      when:
+        - groups['monitoring'] is defined
+        - groups['monitoring'] | length > 1
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (GRAFANA DB) — Mode DB valid'
+      ansible.builtin.assert:
+        that:
+          - grafana_database | default('sqlite') in ['sqlite', 'mysql', 'postgresql']
+        fail_msg: >-
+          grafana_database='{{ grafana_database | default("") }}' INVALID.
+          Hanya 3 mode yang didukung: sqlite (file lokal) | mysql (external) | postgresql (external).
+          Perbaiki globals.yml grafana_database ke salah satu dari 3.
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (GRAFANA DB) — External mysql/pg WAJIB host tidak kosong'
+      ansible.builtin.assert:
+        that:
+          - grafana_database_host | default('') | length > 0
+        fail_msg: >-
+          grafana_database='{{ grafana_database }}' external TAPI grafana_database_host KOSONG.
+          RULES §9: agra TIDAK install DB — user harus sudah punya external DB server.
+          Perbaiki set grafana_database_host di globals.yml atau inventory.
+      when:
+        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (GRAFANA DB) — Connectivity check ke external DB host port'
+      ansible.builtin.wait_for:
+        host: "{{ grafana_database_host }}"
+        port: "{{ grafana_database_port | int }}"
+        state: started
+        timeout: 5
+      when:
+        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+      run_once: true
+      delegate_to: localhost
+      register: _db_check
+      ignore_errors: true
+
+    - name: 'Precheck (GRAFANA DB) — Hard fail jika external DB tidak reachable'
+      ansible.builtin.assert:
+        that:
+          - _db_check is not failed
+        fail_msg: >-
+          External DB {{ grafana_database }} di {{ grafana_database_host }}:{{ grafana_database_port }}
+          TIDAK TERCAPAI dalam 5 detik. Grafana tidak akan bisa connect saat deploy.
+          Checklist perbaikan: (a) host/port benar, (b) firewall open, (c) service DB hidup.
+      when:
+        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+        - _db_check is failed
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (VERSI) — Docker variabel tag terisi jika mode docker'
+      ansible.builtin.assert:
+        that:
+          - item.tag | length > 0
+        fail_msg: >-
+          Mode docker tapi {{ item.name }}_tag KOSONG.
+          Tag wajib untuk reproducible deployment. Set {{ item.name }}_tag di globals.yml.
+      loop:
+        - { name: 'prometheus', tag: "{{ prometheus_tag | default('') }}" }
+        - { name: 'grafana', tag: "{{ grafana_tag | default('') }}" }
+        - { name: 'node_exporter', tag: "{{ node_exporter_tag | default('') }}" }
+      when:
+        - agra_deployment_mode == 'docker'
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (VERSI) — Native variabel version terisi jika mode native'
+      ansible.builtin.assert:
+        that:
+          - item.ver | length > 0
+        fail_msg: >-
+          Mode native tapi {{ item.name }}_native_version KOSONG.
+          Perlu spesifikasi versi untuk pin reproducible install native OS package.
+          Set {{ item.name }}_native_version di globals.yml.
+      loop:
+        - { name: 'prometheus', ver: "{{ prometheus_native_version | default('') }}" }
+        - { name: 'grafana', ver: "{{ grafana_native_version | default('') }}" }
+        - { name: 'node_exporter', ver: "{{ node_exporter_native_version | default('') }}" }
+      when:
+        - agra_deployment_mode == 'native'
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (TLS EXPIRY) — Cek sisa umur cert self-signed jika enable_https'
+      block:
+        - name: 'Precheck TLS — Stat cert file'
+          ansible.builtin.stat:
+            path: "{{ tls_cert_path }}"
+          register: _cert_stat
+        - name: 'Precheck TLS — Hitung days remaining via openssl x509'
+          ansible.builtin.command: >-
+            openssl x509 -in {{ tls_cert_path }} -noout -enddate
+          register: _cert_end
+          changed_when: false
+          failed_when: false
+          when: _cert_stat.stat is defined and _cert_stat.stat.exists
+        - name: 'Precheck TLS — WARNING kalau remaining < 30 hari'
+          ansible.builtin.debug:
+            msg: >-
+              ⚠️ PERINGATAN: TLS cert {{ tls_cert_path }} akan EXPIRED DALAM < 30 HARI
+              (enddate={{ _cert_end.stdout | default('N/A') }}). Jalankan `agra tls regenerate` untuk
+              generate cert self-signed baru (DESIGN §6, Task 13).
+          when:
+            - _cert_end.rc is defined
+            - _cert_end.rc == 0
+            - (('notAfter=' in _cert_end.stdout) or ('notAfter' in _cert_end.stdout))
+      when:
+        - enable_https | default(true) | bool
+        - tls_cert_path | default('') | length > 0
+      ignore_errors: true
+
+    - name: 'Precheck (SECRETS) — Warning jika passwords.yml plaintext TIDAK dienkripsi'
+      block:
+        - name: 'Precheck Secrets — Stat passwords.yml'
+          ansible.builtin.stat:
+            path: "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+          register: _pwd_stat
+          delegate_to: localhost
+        - name: 'Precheck Secrets — Try decrypt (jika vaulted = OK; plaintext = WARNING)'
+          ansible.builtin.command: >-
+            ansible-vault view {{ playbook_dir }}/../../etc/agra/passwords.yml
+          changed_when: false
+          failed_when: false
+          register: _vault_check
+          delegate_to: localhost
+          check_mode: false
+        - name: 'Precheck Secrets — WARNING kalau decrypt error TAPI file ISI'
+          ansible.builtin.debug:
+            msg: >-
+              ⚠️ PERINGATAN SECURITY: passwords.yml TIDAK dienkripsi / plaintext.
+              File dibiarkan plaintext TIDAK disarankan untuk production. Jalankan `ansible-vault encrypt
+              etc/agra/passwords.yml` untuk enkripsi dengan vault password (AGENTS.md §Batasan Keras).
+          when:
+            - _pwd_stat.stat is defined
+            - _pwd_stat.stat.size | default(0) > 50
+            - _vault_check.rc is defined
+            - _vault_check.rc != 0
+      ignore_errors: true
+      run_once: true
+
+    - name: 'Precheck (DEPLOYMENT MODE) — Mode docker/native valid'
+      ansible.builtin.assert:
+        that:
+          - agra_deployment_mode in ['docker', 'native']
+        fail_msg: >-
+          agra_deployment_mode='{{ agra_deployment_mode }}' INVALID.
+          Hanya support: 'docker' (default) atau 'native' (systemd).
+          Perbaiki globals.yml atau set via CLI env AGRA_DEPLOYMENT_MODE.
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck — SUMMARY SUCCESS'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA PRECHECK PASSED"
+          - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | default([]) | length }} node_exporter target(s)"
+          - "Deployment mode: {{ agra_deployment_mode }}"
+          - "Grafana database: {{ grafana_database | default('sqlite') }}"
+          - "HA: enable_ha_grafana={{ enable_ha_grafana | default(false) }}; keepalived={{ groups['monitoring'] | length > 1 }}"
+      run_once: true

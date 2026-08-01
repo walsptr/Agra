@@ -1,0 +1,51 @@
+---
+- name: Converge HA — Deploy monitoring stack 2 node (mon1 MASTER + mon2 BACKUP) + app1 target
+  hosts: all
+  gather_facts: true
+  become: true
+  serial: 1
+  vars:
+    agra_deployment_mode: docker
+    enable_grafana: true
+    enable_ha_grafana: true
+    grafana_database: sqlite
+    grafana_sqlite_sync_method: rsync
+    grafana_sqlite_sync_interval: "*/2 * * * *"
+    grafana_admin_password: "molecule_ha_test_admin"
+    grafana_secret_key: "MOLECULE_HA_TEST_GRAFANA_SECRET_987654321"
+    keepalived_auth_pass: "MOLECULE_HA_KEEPALIVED_123"
+    enable_prometheus: true
+    enable_node_exporter: true
+    enable_nginx: true
+    enable_https: false
+    expose_prometheus_via_nginx: true
+    monitoring_vip: "172.28.0.100"
+    monitoring_vip_interface: "eth0"
+    keepalived_router_id: 51
+    grafana_web_listen_address: "0.0.0.0:3000"
+    prometheus_web_listen_address: "0.0.0.0:9090"
+
+  tasks:
+    - name: Include role common
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/common
+
+    - name: Include role node_exporter
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/node_exporter
+
+    - name: Include role prometheus
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/prometheus
+
+    - name: Include role grafana
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/grafana
+
+    - name: Include role nginx
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/nginx
+
+    - name: Include role keepalived
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/keepalived

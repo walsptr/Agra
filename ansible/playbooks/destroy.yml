@@ -1,0 +1,123 @@
+---
+- name: 'AGRA — Destroy Monitoring Services (DEFAULT TIDAK PURGE DATA; opt-in purge via destroy_purge_data=true)'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  tags: ['destroy']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+
+  vars:
+    destroy_confirm: "{{ destroy_confirm | default(false) }}"
+    destroy_purge_data: "{{ destroy_purge_data | default(false) }}"
+
+  pre_tasks:
+    - name: 'Destroy (SAFETY LAYER 2) — ASSERT destroy_confirm=true'
+      ansible.builtin.assert:
+        that:
+          - destroy_confirm | bool
+        fail_msg: >-
+          ❌ DESTROY DIBLOKIR (RULES §8): destroy_confirm=false.
+          Operasi destroy BERSIFAT DESTRUKTIF (menghapus container/service monitoring).
+          Untuk benar-benar menjalankan: gunakan CLI `agra destroy --yes-i-really-mean-it`
+          (flag ini akan set destroy_confirm=true ke playbook ini).
+
+    - name: 'Destroy — Info run; destroy_purge_data status'
+      ansible.builtin.debug:
+        msg:
+          - "⚠️ MENJALANKAN DESTROY: destroy_purge_data={{ destroy_purge_data }}"
+          - "  purge=true: data_dir service (grafana.db, prometheus tsdb) AKAN DIHAPUS (TIDAK bisa recovery)"
+          - "  purge=false (DEFAULT): data_dir DITAHAN (aman redeploy nanti tanpa kehilangan data)"
+      run_once: true
+
+  tasks:
+    - name: 'Destroy — Docker mode: remove all agra containers'
+      block:
+        - name: 'Destroy (Docker) — Remove grafana container'
+          community.docker.docker_container:
+            name: "{{ grafana_container_name | default('agra-grafana') }}"
+            state: absent
+            force_kill: true
+          ignore_errors: true
+
+        - name: 'Destroy (Docker) — Remove prometheus container'
+          community.docker.docker_container:
+            name: "{{ prometheus_container_name | default('agra-prometheus') }}"
+            state: absent
+            force_kill: true
+          ignore_errors: true
+
+        - name: 'Destroy (Docker) — Remove node_exporter container'
+          community.docker.docker_container:
+            name: "{{ node_exporter_container_name | default('agra-node-exporter') }}"
+            state: absent
+            force_kill: true
+          ignore_errors: true
+
+        - name: 'Destroy (Docker) — Remove nginx container'
+          community.docker.docker_container:
+            name: "{{ nginx_container_name | default('agra-nginx') }}"
+            state: absent
+            force_kill: true
+          ignore_errors: true
+
+        - name: 'Destroy (Docker) — Remove keepalived container'
+          community.docker.docker_container:
+            name: "{{ keepalived_container_name | default('agra-keepalived') }}"
+            state: absent
+            force_kill: true
+          ignore_errors: true
+      when:
+        - agra_deployment_mode == 'docker'
+
+    - name: 'Destroy — Native mode: stop+disable services, remove systemd units'
+      block:
+        - name: 'Destroy (Native) — Stop & disable agra services'
+          ansible.builtin.service:
+            name: "{{ item }}"
+            state: stopped
+            enabled: false
+          loop:
+            - agra-grafana
+            - agra-prometheus
+            - agra-node-exporter
+            - nginx
+            - keepalived
+          ignore_errors: true
+
+        - name: 'Destroy (Native) — Remove systemd units agra-* dari /etc/systemd/system/'
+          ansible.builtin.file:
+            path: "/etc/systemd/system/{{ item }}"
+            state: absent
+          loop:
+            - agra-grafana.service
+            - agra-prometheus.service
+            - agra-node-exporter.service
+          ignore_errors: true
+
+        - name: 'Destroy (Native) — daemon-reload setelah hapus unit'
+          ansible.builtin.systemd:
+            daemon_reload: true
+          ignore_errors: true
+      when:
+        - agra_deployment_mode == 'native'
+
+    - name: 'Destroy (PURGE) — Delete service data directories JIKA destroy_purge_data=true'
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ grafana_data_dir | default('/var/lib/agra/grafana') }}"
+        - "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}"
+        - "{{ node_exporter_textfile_dir | default('') }}"
+      when:
+        - destroy_purge_data | bool
+        - item | length > 0
+
+    - name: 'Destroy — Info after run'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA DESTROY COMPLETE"
+          - "Data purged: {{ destroy_purge_data | default(false) }}"
+          - "Keepalived VIP sudah tidak dipasang; sistem operasi tidak disentuh; paket OS tidak di-uninstall"

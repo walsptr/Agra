@@ -1,0 +1,49 @@
+---
+- name: Keepalived (Docker) - WARNING keepalived docker BUTUH cap_add NET_ADMIN + host network
+  ansible.builtin.debug:
+    msg: >-
+      PERINGATAN: Keepalived mode docker MEMBUTUHKAN kernel module ip_vs loaded, cap_add NET_ADMIN,
+      host network mode. Jika bermasalah, gunakan agra_deployment_mode=native untuk keepalived
+      (role keepalived native install OS package, lebih stabil).
+  tags: ['keepalived', 'docker']
+
+- name: Keepalived (Docker) - Pull image
+  community.docker.docker_image:
+    name: "{{ keepalived_image }}:{{ keepalived_tag }}"
+    source: pull
+    state: present
+  register: _ka_img
+  until: _ka_img is succeeded
+  retries: 5
+  delay: 3
+  tags: ['keepalived', 'docker', 'image']
+
+- name: Keepalived (Docker) - Remove old container if image changed
+  community.docker.docker_container:
+    name: "{{ keepalived_container_name }}"
+    state: absent
+  when: _ka_img is changed
+  tags: ['keepalived', 'docker', 'container']
+
+- name: Keepalived (Docker) - Start container (host network + cap NET_ADMIN)
+  community.docker.docker_container:
+    name: "{{ keepalived_container_name }}"
+    image: "{{ keepalived_image }}:{{ keepalived_tag }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    capabilities:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+    volumes:
+      - "{{ keepalived_config_dir }}/keepalived.conf:/usr/local/etc/keepalived/keepalived.conf:ro"
+      - /usr/local/bin/agra_monitoring_healthcheck.sh:/usr/local/bin/agra_monitoring_healthcheck.sh:ro
+      - /usr/local/bin/agra_keepalived_notify.sh:/usr/local/bin/agra_keepalived_notify.sh:ro
+      - "{{ keepalived_log_file }}:{{ keepalived_log_file }}"
+    env:
+      KEEPALIVED_AUTOCONF: "false"
+      KEEPALIVED_CONF: "/usr/local/etc/keepalived/keepalived.conf"
+    comparisons:
+      '*': ignore
+  tags: ['keepalived', 'docker', 'container']

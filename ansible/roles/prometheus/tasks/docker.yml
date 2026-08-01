@@ -1,0 +1,40 @@
+---
+- name: Prometheus (Docker) - Pull image
+  community.docker.docker_image:
+    name: "{{ prometheus_image }}:{{ prometheus_tag }}"
+    source: pull
+    state: present
+  register: _prom_img
+  until: _prom_img is succeeded
+  retries: 5
+  delay: 3
+  tags: ['prometheus', 'docker', 'image']
+
+- name: Prometheus (Docker) - Remove old container if image changed
+  community.docker.docker_container:
+    name: "{{ prometheus_container_name }}"
+    state: absent
+  when: _prom_img is changed
+  tags: ['prometheus', 'docker', 'container']
+
+- name: Prometheus (Docker) - Start container (mount config + data)
+  community.docker.docker_container:
+    name: "{{ prometheus_container_name }}"
+    image: "{{ prometheus_image }}:{{ prometheus_tag }}"
+    state: started
+    restart_policy: always
+    user: "{{ prometheus_skip_head }}:0"
+    network_mode: host
+    volumes:
+      - "{{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro"
+      - "{{ prometheus_data_dir }}:{{ prometheus_data_dir }}:rw"
+    command: "{{ _prometheus_extra_args }}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://{{ prometheus_web_listen_address }}/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    comparisons:
+      '*': ignore
+  tags: ['prometheus', 'docker', 'container']

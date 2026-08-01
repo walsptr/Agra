@@ -1,0 +1,37 @@
+---
+- name: Keepalived - Skip otomatis jika single-node (groups monitoring <=1) atau force disable
+  ansible.builtin.meta: end_host
+  when: >
+    not (enable_keepalived | default(false) | bool)
+    or (groups['monitoring'] is defined and groups['monitoring'] | length <= 1)
+
+- name: Keepalived - Assert monitoring_vip WAJIB terisi jika multi-node HA
+  ansible.builtin.assert:
+    that:
+      - monitoring_vip | length > 0
+    fail_msg: >-
+      monitoring_vip KOSONG tapi HA keepalived AKTIF (groups['monitoring']={{ groups['monitoring'] | default([]) | length }} node).
+      Keepalived butuh Virtual IP untuk di-bind di node master. Perbaiki:
+      set `monitoring_vip: "x.x.x.x"` di inventory vars group monitoring ATAU di etc/agra/globals.yml.
+  tags: ['keepalived', 'validate']
+
+- name: Keepalived - Assert monitoring_vip_interface exists di host
+  ansible.builtin.assert:
+    that:
+      - monitoring_vip_interface in ansible_interfaces
+    fail_msg: >-
+      monitoring_vip_interface='{{ monitoring_vip_interface }}' TIDAK ADA di host ini. Interface yang ada: {{ ansible_interfaces | map('string') | list | join(', ') }}.
+      Keepalived memerlukan interface jaringan valid untuk bind VIP. Perbaiki di globals.yml
+      atau inventory dengan interface yang benar (mis. eth0, ens3, enp0s3).
+  tags: ['keepalived', 'validate']
+
+- name: Keepalived - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Keepalived - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when: agra_deployment_mode == 'docker'
+
+- name: Keepalived - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when: agra_deployment_mode == 'native'

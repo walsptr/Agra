@@ -1,0 +1,15 @@
+---
+enable_node_exporter: true
+node_exporter_port: 9100
+node_exporter_image: prom/node-exporter
+node_exporter_tag: v1.8.2
+node_exporter_native_version: "1.8.2"
+node_exporter_collectors_enabled: []
+node_exporter_collectors_disabled: []
+node_exporter_textfile_dir: ""
+node_exporter_config_dir: /etc/node_exporter
+node_exporter_log_level: info
+node_exporter_container_name: agra-node-exporter
+node_exporter_native_binary_path: /usr/local/bin/node_exporter
+node_exporter_native_binary_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_native_version }}/node_exporter-{{ node_exporter_native_version }}.linux-amd64.tar.gz"
+node_exporter_web_listen_address: "0.0.0.0:{{ node_exporter_port }}"

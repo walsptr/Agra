@@ -1,0 +1,101 @@
+---
+- import_playbook: precheck.yml
+  tags: ['always', 'precheck']
+
+- name: 'AGRA DEPLOY STEP 1 — Apply common role ke ALL hosts'
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'common']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: common
+
+- name: 'AGRA DEPLOY STEP 2 — Apply node_exporter ke group node_exporter'
+  hosts: node_exporter
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'node_exporter']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: node_exporter
+
+- name: 'AGRA DEPLOY STEP 3 — Apply prometheus ke group prometheus'
+  hosts: prometheus
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'prometheus']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: prometheus
+
+- name: 'AGRA DEPLOY STEP 4 — Apply grafana ke group grafana'
+  hosts: grafana
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'grafana']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: grafana
+
+- name: 'AGRA DEPLOY STEP 5 — Apply nginx ke group monitoring (jika enable_nginx=true)'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'nginx']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  tasks:
+    - name: 'Deploy — Apply role nginx jika enable_nginx=true'
+      ansible.builtin.include_role:
+        name: nginx
+      when:
+        - enable_nginx | default(true) | bool
+
+- name: 'AGRA DEPLOY STEP 6 — Apply keepalived KE SELURUH group monitoring HANYA JIKA groups monitoring > 1'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'keepalived', 'ha']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  tasks:
+    - name: 'Deploy — Apply role keepalived HANYA JIKA groups monitoring length > 1'
+      ansible.builtin.include_role:
+        name: keepalived
+      when:
+        - groups['monitoring'] is defined
+        - groups['monitoring'] | length > 1
+
+- name: 'AGRA DEPLOY SUMMARY'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tags: ['deploy']
+  vars:
+    access_url: >-
+      {% if (groups['monitoring'] | length > 1) and (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0) %}https://{{ hostvars[groups['monitoring'][0]]['monitoring_vip'] }}/grafana/
+      {%- elif enable_https | default(true) | bool %}https://{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}/grafana/
+      {%- else %}http://{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}/grafana/
+      {%- endif %}
+  tasks:
+    - name: 'Deploy — Summary access URL'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA DEPLOY SELESAI"
+          - "Grafana URL: {{ access_url | trim }}"
+          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat etc/agra/passwords.yml vault_grafana_admin_password (default fallback: admin)"
+          - "Prometheus: {% if expose_prometheus_via_nginx | default(false) | bool %}{{ access_url | trim | regex_replace('/grafana/', '/prometheus/') }}{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
+      vars:
+        enable_https: "{{ enable_https | default(true) | bool }}"
+        expose_prometheus_via_nginx: "{{ expose_prometheus_via_nginx | default(false) | bool }}"

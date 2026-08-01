@@ -1,0 +1,80 @@
+---
+- name: Keepalived (Config) - Ensure dirs exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ '0700' if item == keepalived_config_dir else '0755' }}"
+  loop:
+    - "{{ keepalived_config_dir }}"
+    - /usr/local/bin
+  tags: ['keepalived', 'config', 'dirs']
+
+- name: Keepalived (Config) - Ensure log file exists with rotate friendly perms
+  ansible.builtin.file:
+    path: "{{ keepalived_log_file }}"
+    state: touch
+    owner: root
+    group: adm
+    mode: '0644'
+    modification_time: preserve
+    access_time: preserve
+  changed_when: false
+  tags: ['keepalived', 'config', 'log']
+
+# Render COMBINED healthcheck script (DESIGN §4)
+- name: Keepalived (Config) - Render agra_monitoring_healthcheck.sh
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/keepalived/agra_monitoring_healthcheck.sh.j2', 'agra_monitoring_healthcheck.sh.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: /usr/local/bin/agra_monitoring_healthcheck.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: ['reload keepalived']
+  tags: ['keepalived', 'config', 'scripts']
+
+# Render NOTIFY script (master/backup/fault transitions)
+- name: Keepalived (Config) - Render agra_keepalived_notify.sh
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/keepalived/agra_keepalived_notify.sh.j2', 'agra_keepalived_notify.sh.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: /usr/local/bin/agra_keepalived_notify.sh
+    owner: root
+    group: root
+    mode: '0755'
+  notify: ['reload keepalived']
+  tags: ['keepalived', 'config', 'scripts']
+
+# Render keepalived.conf (priority formula + MASTER state untuk node group[0])
+- name: Keepalived (Config) - Render keepalived.conf via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/keepalived/keepalived.conf.j2', 'keepalived.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ keepalived_config_dir }}/keepalived.conf"
+    owner: root
+    group: root
+    mode: '0600'
+    backup: true
+    validate: 'keepalived -t -f %s 2>&1 || true'
+  notify: ['restart keepalived']
+  tags: ['keepalived', 'config', 'conf']
+
+# Deploy logrotate agra-keepalived
+- name: Keepalived (Config) - Deploy logrotate for keepalived log
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/agra-keepalived
+    content: |
+      {{ keepalived_log_file }} {
+          daily
+          rotate 14
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0644 root adm
+          copytruncate
+      }
+    owner: root
+    group: root
+    mode: '0644'
+  ignore_errors: true
+  tags: ['keepalived', 'config', 'logrotate']

@@ -1,0 +1,14 @@
+# agra node_exporter default env file
+# Override di /etc/agra/config/node_exporter/node_exporter.default.j2
+NODE_EXPORTER_PORT={{ node_exporter_port }}
+NODE_EXPORTER_LOG_LEVEL={{ node_exporter_log_level }}
+NODE_EXPORTER_EXTRA_ARGS="{{ _node_exporter_extra_args }}"
+{% if node_exporter_textfile_dir | length > 0 %}
+NODE_EXPORTER_TEXTFILE_DIR={{ node_exporter_textfile_dir }}
+{% endif %}
+{% for c in node_exporter_collectors_enabled %}
+NODE_EXPORTER_ENABLE_COLLECTOR_{{ c | upper }}=true
+{% endfor %}
+{% for c in node_exporter_collectors_disabled %}
+NODE_EXPORTER_DISABLE_COLLECTOR_{{ c | upper }}=true
+{% endfor %}

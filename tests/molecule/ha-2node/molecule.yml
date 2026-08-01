@@ -1,0 +1,107 @@
+---
+driver:
+  name: docker
+  provider:
+    name: docker
+
+platforms:
+  - name: agra-mon1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.11
+    environment:
+      container: docker
+
+  - name: agra-mon2
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.12
+    environment:
+      container: docker
+
+  - name: agra-app1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.21
+    environment:
+      container: docker
+
+networks:
+  - name: agra-ha-net
+    driver: bridge
+    ipam_config:
+      - subnet: 172.28.0.0/24
+        gateway: 172.28.0.1
+
+provisioner:
+  name: ansible
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+  inventory:
+    hosts:
+      all:
+        hosts:
+          agra-mon1:
+            ansible_connection: docker
+            ansible_host: 172.28.0.11
+          agra-mon2:
+            ansible_connection: docker
+            ansible_host: 172.28.0.12
+          agra-app1:
+            ansible_connection: docker
+            ansible_host: 172.28.0.21
+        children:
+          monitoring:
+            hosts:
+              agra-mon1:
+              agra-mon2:
+          node_exporter:
+            hosts:
+              agra-mon1:
+              agra-mon2:
+              agra-app1:
+    group_vars:
+      all:
+        ansible_python_interpreter: /usr/bin/python3
+        agra_deployment_mode: docker
+        enable_ha_grafana: true
+        grafana_database: sqlite
+        monitoring_vip: "172.28.0.100"
+        monitoring_vip_interface: "eth0"
+        keepalived_router_id: 51
+
+verifier:
+  name: ansible
+
+scenario:
+  name: ha-2node
+  test_sequence:
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - cleanup
+    - destroy

@@ -1,0 +1,249 @@
+---
+- import_playbook: precheck.yml
+  tags: ['always', 'precheck']
+
+- name: 'AGRA — Backup (Grafana tarball + Prometheus TSDB Snapshot API + Manifest YAML + S3 opt)'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  serial: 1
+  tags: ['backup']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+
+  vars:
+    backup_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
+    backup_include_prometheus_tsdb: "{{ backup_include_prometheus_tsdb | default(false) }}"
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short | default(ansible_date_time.epoch) }}"
+    backup_name: "agra-backup-{{ inventory_hostname }}-{{ backup_timestamp }}"
+    backup_stage_dir: "{{ backup_root_dir }}/{{ backup_name }}"
+    backup_tarball_path: "{{ backup_root_dir }}/{{ backup_name }}.tar.gz"
+    backup_manifest_path: "{{ backup_tarball_path | regex_replace('.tar.gz$', '.yml') }}"
+    backup_s3_bucket: "{{ backup_s3_bucket | default('') }}"
+    backup_s3_prefix: "{{ backup_s3_prefix | default('agra-backups') }}"
+    backup_retention_count: "{{ backup_retention_count | default(7) }}"
+
+  pre_tasks:
+    - name: 'Backup — Run hanya MASTER node = groups monitoring[0]'
+      ansible.builtin.meta: end_host
+      when:
+        - inventory_hostname != groups['monitoring'][0]
+      tags: ['always']
+
+  tasks:
+    - name: 'Backup — Ensure root backup dir exists'
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0750'
+      loop:
+        - "{{ backup_root_dir }}"
+        - "{{ backup_stage_dir }}"
+
+    - name: 'Backup (Grafana) — Staging copy grafana config+data ke stage dir'
+      block:
+        - name: 'Backup Grafana — Ensure grafana stage subdir'
+          ansible.builtin.file:
+            path: "{{ backup_stage_dir }}/grafana"
+            state: directory
+            owner: "{{ common_user | default('agra') }}"
+            group: "{{ common_group | default('agra') }}"
+            mode: '0750'
+
+        - name: 'Backup Grafana — Copy grafana.ini ke stage'
+          ansible.builtin.copy:
+            src: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+            dest: "{{ backup_stage_dir }}/grafana/grafana.ini"
+            remote_src: true
+          ignore_errors: true
+
+        - name: 'Backup Grafana — Copy provisioning dir ke stage'
+          ansible.builtin.copy:
+            src: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}"
+            dest: "{{ backup_stage_dir }}/grafana/provisioning"
+            remote_src: true
+            directory_mode: '0750'
+          ignore_errors: true
+
+        - name: 'Backup Grafana — Stage grafana.db via double copy'
+          block:
+            - name: 'Backup Grafana — Step 1 copy ke .temp'
+              ansible.builtin.copy:
+                src: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+                dest: "{{ backup_stage_dir }}/grafana/grafana.db.temp"
+                remote_src: true
+                force: true
+            - name: 'Backup Grafana — Step 2 sqlite3 backup (konsisten point-in-time)'
+              ansible.builtin.command:
+                cmd: >-
+                  sqlite3 "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+                  ".backup '{{ backup_stage_dir }}/grafana/grafana.db'"
+                creates: "{{ backup_stage_dir }}/grafana/grafana.db"
+              ignore_errors: true
+          ignore_errors: true
+
+    - name: 'Backup (Prometheus) — Trigger TSDB Snapshot via HTTP Admin API'
+      block:
+        - name: 'Backup Prometheus — Ensure prometheus stage subdir'
+          ansible.builtin.file:
+            path: "{{ backup_stage_dir }}/prometheus"
+            state: directory
+            owner: "{{ common_user | default('agra') }}"
+            group: "{{ common_group | default('agra') }}"
+            mode: '0750'
+
+        - name: 'Backup Prometheus — Trigger snapshot via Admin API POST tsdb snapshot'
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/api/v1/admin/tsdb/snapshot"
+            method: POST
+            body_format: json
+            status_code: 200
+            return_content: true
+            force_basic_auth: false
+          register: _prom_snap_resp
+          ignore_errors: true
+
+        - name: 'Backup Prometheus — Parse snapshot name response'
+          ansible.builtin.set_fact:
+            _prom_snapshot_name: "{{ (_prom_snap_resp.content | from_json).data.name if (_prom_snap_resp is defined and _prom_snap_resp.status == 200) else '' }}"
+            _prom_snapshot_dir: "{{ (_prom_snap_resp.content | from_json).data.snapshotName if (_prom_snap_resp is defined and _prom_snap_resp.status == 200) else '' }}"
+          ignore_errors: true
+
+        - name: 'Backup Prometheus — Copy snapshot dir ke stage dir'
+          ansible.builtin.copy:
+            src: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ _prom_snapshot_dir | default('') }}"
+            dest: "{{ backup_stage_dir }}/prometheus/tsdb-snapshot"
+            remote_src: true
+            directory_mode: '0750'
+          when:
+            - _prom_snapshot_dir | default('') | length > 0
+          ignore_errors: true
+      when:
+        - backup_include_prometheus_tsdb | default(false) | bool
+
+    - name: 'Backup — Pack stage dir ke tarball'
+      community.general.archive:
+        path: "{{ backup_stage_dir }}"
+        dest: "{{ backup_tarball_path }}"
+        format: gz
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0640'
+        force_archive: true
+      register: _tarball
+
+    - name: 'Backup — Generate manifest YAML'
+      ansible.builtin.copy:
+        dest: "{{ backup_manifest_path }}"
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0640'
+        content: |
+          # agra backup manifest — digenerate oleh backup.yml
+          # CLI `agra backup list` akan parse file ini
+          backup_name: {{ backup_name }}
+          backup_host: {{ inventory_hostname }}
+          backup_timestamp: {{ backup_timestamp }}
+          backup_date_human: {{ ansible_date_time.date }}T{{ ansible_date_time.time }}
+          ansible_version: {{ ansible_version.full }}
+          agra_deployment_mode: {{ agra_deployment_mode }}
+          backup_tarball_path: {{ backup_tarball_path }}
+          backup_tarball_size_bytes: {{ (_tarball is changed or _tarball is succeeded) | ternary(_tarball.size | default('unknown'), 'unknown') }}
+          backup_tarball_sha256: "SHA256_TODO"
+          backup_include_prometheus_tsdb: {{ backup_include_prometheus_tsdb | default(false) }}
+          components:
+            grafana:
+              database_mode: {{ grafana_database | default('sqlite') }}
+              datasource_prometheus_uid: {{ grafana_prometheus_datasource_uid | default('prometheus-main') }}
+            prometheus:
+              include_tsdb_snapshot: {{ backup_include_prometheus_tsdb | default(false) }}
+              retention_time: {{ prometheus_retention_time | default('') }}
+            inventory:
+              monitoring_nodes: {{ groups['monitoring'] | default([]) | to_yaml }}
+              node_exporter_nodes: {{ groups['node_exporter'] | default([]) | to_yaml }}
+          restore_instructions: |
+            1. agra restore --backup-name {{ backup_name }} --yes-i-really-mean-it
+            2. Untuk restore manual — tar -xzf {{ backup_tarball_path }} -C /tmp
+               → grafana/   config & grafana.db → copy ke grafana_config_dir / grafana_data_dir
+               → prometheus/ tsdb-snapshot → copy ke prometheus_data_dir/snapshots/ + promtool tsdb create-blocks-from
+          ...
+
+    - name: 'Backup — Apply retention (hapus backup tertua melebihi retention_count)'
+      block:
+        - name: 'Backup Retention — Find manifest files terurut'
+          ansible.builtin.find:
+            paths: "{{ backup_root_dir }}"
+            patterns: "agra-backup-*.yml"
+            file_type: file
+            age_stamp: mtime
+          register: _backup_manifests
+
+        - name: 'Backup Retention — List untuk retention'
+          ansible.builtin.set_fact:
+            _old_backups: "{{ (_backup_manifests.files | default([]) | sort(attribute='mtime', reverse=true) | list)[backup_retention_count | int:] }}"
+
+        - name: 'Backup Retention — Hapus backup lama + tarball'
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ _old_backups | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          ignore_errors: true
+
+        - name: 'Backup Retention — Hapus juga tarball terkait'
+          ansible.builtin.file:
+            path: "{{ item.path | regex_replace('.yml$', '.tar.gz') }}"
+            state: absent
+          loop: "{{ _old_backups | default([]) }}"
+          loop_control:
+            label: "{{ item.path | regex_replace('.yml$', '.tar.gz') }}"
+          ignore_errors: true
+
+    - name: 'Backup (S3) — Upload tarball + manifest ke S3 (jika vars terisi)'
+      block:
+        - name: 'S3 Upload tarball'
+          amazon.aws.s3_object:
+            bucket: "{{ backup_s3_bucket }}"
+            object: "{{ backup_s3_prefix }}/{{ backup_tarball_path | basename }}"
+            src: "{{ backup_tarball_path }}"
+            mode: put
+            permission: private
+          when:
+            - backup_s3_bucket | length > 0
+            - backup_s3_access_key | default('') | length > 0
+          ignore_errors: true
+          environment:
+            AWS_ACCESS_KEY_ID: "{{ backup_s3_access_key | default('') }}"
+            AWS_SECRET_ACCESS_KEY: "{{ backup_s3_secret_key | default('') }}"
+            AWS_DEFAULT_REGION: "{{ backup_s3_region | default('us-east-1') }}"
+
+        - name: 'S3 Upload manifest'
+          amazon.aws.s3_object:
+            bucket: "{{ backup_s3_bucket }}"
+            object: "{{ backup_s3_prefix }}/{{ backup_manifest_path | basename }}"
+            src: "{{ backup_manifest_path }}"
+            mode: put
+            permission: private
+          when:
+            - backup_s3_bucket | length > 0
+          ignore_errors: true
+
+    - name: 'Backup — Cleanup stage dir (tarball + manifest sudah ada)'
+      ansible.builtin.file:
+        path: "{{ backup_stage_dir }}"
+        state: absent
+      ignore_errors: true
+
+    - name: 'Backup — SUMMARY'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA BACKUP SELESAI (run hanya di MASTER node={{ inventory_hostname }})"
+          - "Tarball: {{ backup_tarball_path }}"
+          - "Manifest: {{ backup_manifest_path }}"
+          - "Size: ~{{ (_tarball.size | default(0) / (1024*1024)) | round(1) }} MB"
+          - "Include Prometheus TSDB snapshot: {{ backup_include_prometheus_tsdb | default(false) }}"
+          - "Retention — keep {{ backup_retention_count }} backups terbaru"

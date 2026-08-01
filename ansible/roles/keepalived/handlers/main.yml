@@ -1,0 +1,54 @@
+---
+- name: reload keepalived
+  ansible.builtin.debug:
+    msg: "Reload keepalived triggered"
+  changed_when: true
+  notify:
+    - reload keepalived native
+    - reload keepalived docker
+
+- name: restart keepalived
+  ansible.builtin.debug:
+    msg: "Restart keepalived triggered"
+  changed_when: true
+  notify:
+    - restart keepalived native
+    - restart keepalived docker
+
+- name: reload keepalived native
+  ansible.builtin.service:
+    name: "{{ keepalived_service_name }}"
+    state: reloaded
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_keepalived | default(false) | bool
+  ignore_errors: true
+
+- name: restart keepalived native
+  ansible.builtin.service:
+    name: "{{ keepalived_service_name }}"
+    state: restarted
+    daemon_reload: true
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_keepalived | default(false) | bool
+  ignore_errors: true
+
+- name: reload keepalived docker
+  community.docker.docker_container_exec:
+    container: "{{ keepalived_container_name }}"
+    command: "kill -HUP 1"
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_keepalived | default(false) | bool
+  ignore_errors: true
+
+- name: restart keepalived docker
+  community.docker.docker_container:
+    name: "{{ keepalived_container_name }}"
+    state: started
+    restart: true
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_keepalived | default(false) | bool
+  ignore_errors: true

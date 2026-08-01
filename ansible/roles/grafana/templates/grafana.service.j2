@@ -1,0 +1,31 @@
+[Unit]
+Description=agra Grafana Server
+Documentation=https://grafana.com/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ common_user | default('agra') }}
+Group={{ common_group | default('agra') }}
+WorkingDirectory={{ grafana_data_dir }}
+ExecStart=/usr/sbin/grafana-server \
+  --config={{ grafana_config_dir }}/grafana.ini \
+  --homepath=/usr/share/grafana \
+  cfg:default.paths.data={{ grafana_data_dir }} \
+  cfg:default.paths.logs={{ grafana_data_dir }}/log \
+  cfg:default.paths.plugins={{ grafana_data_dir }}/plugins \
+  cfg:default.paths.provisioning={{ grafana_provisioning_dir }}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=10000
+TimeoutStopSec=20
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths={{ grafana_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

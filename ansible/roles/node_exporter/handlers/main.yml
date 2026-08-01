@@ -1,0 +1,28 @@
+---
+- name: restart node_exporter
+  ansible.builtin.debug:
+    msg: "Restart handler triggered"
+  changed_when: true
+  notify:
+    - restart node_exporter docker
+    - restart node_exporter native
+
+- name: restart node_exporter docker
+  community.docker.docker_container:
+    name: "{{ node_exporter_container_name }}"
+    state: started
+    restart: true
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_node_exporter | default(true) | bool
+  ignore_errors: true
+
+- name: restart node_exporter native
+  ansible.builtin.service:
+    name: agra-node-exporter
+    state: restarted
+    daemon_reload: true
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_node_exporter | default(true) | bool
+  ignore_errors: true

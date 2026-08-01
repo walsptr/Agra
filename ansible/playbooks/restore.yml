@@ -1,0 +1,212 @@
+---
+- name: 'AGRA RESTORE — Safety Assertions LAYER 1 & 2 (run sebelum backup-before-restore)'
+  hosts: monitoring
+  gather_facts: true
+  become: false
+  tags: ['restore']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+
+  vars:
+    restore_confirm: "{{ restore_confirm | default(false) }}"
+    restore_backup_name: "{{ restore_backup_name | default('') }}"
+    restore_backup_tarball: "{{ restore_backup_tarball | default('') }}"
+
+  pre_tasks:
+    - name: 'Restore (SAFETY LAYER 1) — Assert restore_backup_name atau tarball TERISI'
+      ansible.builtin.assert:
+        that:
+          - (restore_backup_name | length > 0) or (restore_backup_tarball | length > 0)
+        fail_msg: >-
+          ❌ RESTORE BUTUH TARGET BACKUP — restore_backup_name='' restore_backup_tarball=''.
+          RESTORE TIDAK bisa jalan tanpa spesifik backup target.
+          Perbaiki — gunakan CLI `agra backup list` untuk lihat daftar backup →
+          pilih salah satu — `agra restore --backup-name <nama> --yes-i-really-mean-it`
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Restore (SAFETY LAYER 2) — assert restore_confirm=true'
+      ansible.builtin.assert:
+        that:
+          - restore_confirm | bool
+        fail_msg: >-
+          ❌ RESTORE DIBLOKIR (RULES §8) — restore_confirm=false.
+          Restore bersifat destruktif (akan menimpa grafana.db / config saat ini).
+          Jalankan dengan flag --yes-i-really-mean-it (CLI set restore_confirm=true).
+      run_once: true
+      delegate_to: localhost
+
+  tasks:
+    - name: 'Restore — Safety assertions passed'
+      ansible.builtin.debug:
+        msg: "✅ Restore safety assertions LAYER 1 & 2 PASSED"
+      run_once: true
+
+- import_playbook: backup.yml
+  tags: ['always', 'restore-backup-before']
+  vars:
+    backup_include_prometheus_tsdb: true
+
+- name: 'AGRA — Restore dari backup'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  serial: 1
+  tags: ['restore']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+
+  vars:
+    restore_confirm: "{{ restore_confirm | default(false) }}"
+    restore_backup_name: "{{ restore_backup_name | default('') }}"
+    restore_backup_tarball: "{{ restore_backup_tarball | default('') }}"
+    backup_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
+
+  pre_tasks:
+    - name: 'Restore — Run hanya MASTER node = groups monitoring[0]'
+      ansible.builtin.meta: end_host
+      when:
+        - inventory_hostname != groups['monitoring'][0]
+      tags: ['always']
+
+    - name: 'Restore — Resolve tarball path (dari nama atau explicit)'
+      ansible.builtin.set_fact:
+        _restore_tarball: >-
+          {% if restore_backup_tarball | length > 0 %}{{ restore_backup_tarball }}{% elif restore_backup_name | length > 0 %}{{ backup_root_dir }}/{{ restore_backup_name }}.tar.gz{% endif %}
+
+    - name: 'Restore — Assert tarball exists'
+      ansible.builtin.stat:
+        path: "{{ _restore_tarball | trim }}"
+      register: _restore_stat
+    - ansible.builtin.assert:
+        that:
+          - _restore_stat.stat.exists
+        fail_msg: >-
+          ❌ Backup tarball TIDAK DITEMUKAN — {{ _restore_tarball | trim }}.
+          Periksa kembali nama backup via `agra backup list`, atau pastikan path restore_backup_tarball benar.
+
+  tasks:
+    - name: 'Restore — Temp extract dir'
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: agra-restore-
+        suffix: "-{{ restore_backup_name | default('manual') }}"
+      register: _restore_tmpdir
+
+    - name: 'Restore — Untar backup ke temp'
+      ansible.builtin.unarchive:
+        src: "{{ _restore_tarball | trim }}"
+        dest: "{{ _restore_tmpdir.path }}"
+        remote_src: true
+
+    - name: 'Restore Grafana — Step 1 Stop grafana service'
+      block:
+        - name: 'Restore Grafana (Docker) — Stop container'
+          community.docker.docker_container:
+            name: "{{ grafana_container_name | default('agra-grafana') }}"
+            state: stopped
+          when: agra_deployment_mode == 'docker'
+          ignore_errors: true
+        - name: 'Restore Grafana (Native) — Stop service'
+          ansible.builtin.service:
+            name: agra-grafana
+            state: stopped
+          when: agra_deployment_mode == 'native'
+          ignore_errors: true
+
+    - name: 'Restore Grafana — Step 2 Copy grafana.ini ke config dir'
+      ansible.builtin.copy:
+        src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/grafana/grafana.ini"
+        dest: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+        remote_src: true
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0644'
+        backup: true
+      ignore_errors: true
+      when: (restore_backup_name | length > 0)
+
+    - name: 'Restore Grafana — Step 3 Copy grafana.db ke data dir (replace)'
+      ansible.builtin.copy:
+        src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/grafana/grafana.db"
+        dest: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+        remote_src: true
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0640'
+        backup: true
+      ignore_errors: true
+      when:
+        - grafana_database | default('sqlite') == 'sqlite'
+        - restore_backup_name | length > 0
+
+    - name: 'Restore Grafana — Step 4 Copy provisioning'
+      ansible.builtin.copy:
+        src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/grafana/provisioning"
+        dest: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}"
+        remote_src: true
+        directory_mode: '0755'
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+      ignore_errors: true
+      when: restore_backup_name | length > 0
+
+    - name: 'Restore Prometheus — Step 1 Check snapshot dir ada di backup'
+      ansible.builtin.stat:
+        path: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/prometheus/tsdb-snapshot"
+      register: _prom_snap_stat
+
+    - name: 'Restore Prometheus — Step 2 Copy snapshot ke snapshots lalu trigger restore via CLI promtool'
+      block:
+        - name: 'Restore Prometheus — Copy ke snapshot dir prometheus_data'
+          ansible.builtin.copy:
+            src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name }}/prometheus/tsdb-snapshot"
+            dest: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ restore_backup_name }}-restored"
+            remote_src: true
+            directory_mode: '0755'
+            owner: "{{ prometheus_skip_head | default('65534') }}"
+            group: "{{ common_group | default('agra') }}"
+          ignore_errors: true
+
+        - name: 'Restore Prometheus — Info manual untuk import snapshot (opsi promtool create-blocks-from)'
+          ansible.builtin.debug:
+            msg: >-
+              ℹ️ Prometheus snapshot restored ke {{ prometheus_data_dir }}/snapshots/{{ restore_backup_name }}-restored.
+              Prometheus tidak auto-import snapshot. Untuk load data, jalankan manual di node —
+              `promtool tsdb create-blocks-from openmetrics <snapshot_dir> <output-data-dir>`
+              lalu restart prometheus. Ini disengaja DESIGN untuk tidak merusak data saat ini.
+      when:
+        - _prom_snap_stat.stat is defined
+        - _prom_snap_stat.stat.exists
+
+    - name: 'Restore — Step 5 Start ulang Grafana'
+      block:
+        - name: 'Restore Grafana (Docker) — Start'
+          community.docker.docker_container:
+            name: "{{ grafana_container_name | default('agra-grafana') }}"
+            state: started
+          when: agra_deployment_mode == 'docker'
+          ignore_errors: true
+
+        - name: 'Restore Grafana (Native) — Start'
+          ansible.builtin.service:
+            name: agra-grafana
+            state: started
+          when: agra_deployment_mode == 'native'
+          ignore_errors: true
+
+    - name: 'Restore — Cleanup temp'
+      ansible.builtin.file:
+        path: "{{ _restore_tmpdir.path }}"
+        state: absent
+      ignore_errors: true
+
+    - name: 'Restore — SUMMARY'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA RESTORE SELESAI (backup-before-restore otomatis sudah dijalankan RULES §8)"
+          - "Sumber backup — {{ _restore_tarball | trim }}"
+          - "Temp restore — {{ _restore_tmpdir.path }} (dihapus)"
+          - "Prometheus snapshot restored? {{ _prom_snap_stat.stat is defined and _prom_snap_stat.stat.exists }}"

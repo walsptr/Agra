@@ -1,0 +1,48 @@
+---
+- name: Node Exporter (Docker) - Ensure image pulled
+  community.docker.docker_image:
+    name: "{{ node_exporter_image }}:{{ node_exporter_tag }}"
+    source: pull
+    state: present
+  register: _node_exporter_img
+  until: _node_exporter_img is succeeded
+  retries: 5
+  delay: 3
+  tags: ['node_exporter', 'docker', 'image']
+
+- name: Node Exporter (Docker) - Remove previous container if image updated
+  community.docker.docker_container:
+    name: "{{ node_exporter_container_name }}"
+    state: absent
+  when: _node_exporter_img is changed
+  tags: ['node_exporter', 'docker', 'container']
+
+- name: Node Exporter (Docker) - Start container
+  community.docker.docker_container:
+    name: "{{ node_exporter_container_name }}"
+    image: "{{ node_exporter_image }}:{{ node_exporter_tag }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    user: root
+    pid_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - "{{ node_exporter_config_dir }}:/etc/node_exporter:ro"
+      - "{% if node_exporter_textfile_dir | length > 0 %}{{ node_exporter_textfile_dir }}:{{ node_exporter_textfile_dir }}:ro{% endif %}"
+    command: >-
+      --path.procfs=/host/proc
+      --path.sysfs=/host/sys
+      --path.rootfs=/rootfs
+      {{ _node_exporter_extra_args }}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:{{ node_exporter_port }}/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    comparisons:
+      '*': ignore
+  tags: ['node_exporter', 'docker', 'container']

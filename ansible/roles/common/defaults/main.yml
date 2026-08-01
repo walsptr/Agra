@@ -1,0 +1,28 @@
+---
+common_user: agra
+common_group: agra
+common_home_dir: /var/lib/agra
+common_etc_dir: /etc/agra
+common_ssh_key_type: ed25519
+
+common_os_packages:
+  - python3-pip
+  - rsync
+  - openssl
+  - curl
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - cron
+  - acl
+
+common_firewall_tool: auto
+common_firewall_ports_tcp: []
+
+common_docker_package_name: "{{ 'docker.io' if ansible_os_family == 'Debian' else 'docker-ce' }}"
+common_docker_python_sdk_package: docker
+common_podman_python_sdk_package: podman-py
+common_docker_network_name: agra_network
+common_docker_network_driver: bridge
+common_docker_service_name: docker
+common_podman_service_name: podman

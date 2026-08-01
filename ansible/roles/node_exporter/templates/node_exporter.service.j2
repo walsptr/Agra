@@ -1,0 +1,21 @@
+[Unit]
+Description=agra Prometheus Node Exporter
+Documentation=https://github.com/prometheus/node_exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ common_user | default('agra') }}
+Group={{ common_group | default('agra') }}
+EnvironmentFile=-{{ node_exporter_config_dir }}/node_exporter.default
+ExecStart={{ node_exporter_native_binary_path }} {{ _node_exporter_extra_args }}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={% if node_exporter_textfile_dir | length > 0 %}{{ node_exporter_textfile_dir }}{% endif %}
+
+[Install]
+WantedBy=multi-user.target

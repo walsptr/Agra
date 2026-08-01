@@ -1,0 +1,28 @@
+---
+enable_prometheus: true
+prometheus_port: 9090
+prometheus_retention_time: 15d
+prometheus_retention_size: ""
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+prometheus_data_dir: /var/lib/agra/prometheus
+prometheus_image: prom/prometheus
+prometheus_tag: v2.53.0
+prometheus_native_version: "2.53.0"
+expose_prometheus_via_nginx: false
+prometheus_config_dir: /etc/prometheus
+prometheus_file_sd_dir: "{{ prometheus_config_dir }}/file_sd"
+prometheus_rules_dir: "{{ prometheus_config_dir }}/rules"
+prometheus_log_level: info
+prometheus_container_name: agra-prometheus
+prometheus_native_binary_path: /usr/local/bin/prometheus
+prometheus_native_binary_url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_native_version }}/prometheus-{{ prometheus_native_version }}.linux-amd64.tar.gz"
+prometheus_native_tools_path: /usr/local/bin/promtool
+prometheus_web_external_url: ""
+prometheus_web_listen_address: >-
+  {% if enable_nginx | default(true) | bool and not (expose_prometheus_via_nginx | default(false) | bool) %}
+  127.0.0.1:{{ prometheus_port }}
+  {%- else %}
+  0.0.0.0:{{ prometheus_port }}
+  {%- endif %}
+prometheus_skip_head: "65534"

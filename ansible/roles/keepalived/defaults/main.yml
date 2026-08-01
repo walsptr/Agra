@@ -1,0 +1,35 @@
+---
+# SCHEMA §5 — Keepalived (HA monitoring cluster)
+# PENTING: enable_keepalived HANYA untuk force-disable secara manual; normalnya otomatis
+# dari inventory: groups['monitoring']|length > 1 (ARCHITECTURE §5.1, DESIGN §4)
+enable_keepalived: "{{ groups['monitoring'] | default([]) | length > 1 }}"
+
+monitoring_vip: ""
+monitoring_vip_interface: "{{ ansible_default_ipv4['interface'] | default('eth0') }}"
+
+keepalived_router_id: 51
+keepalived_vrrp_instance: VI_MONITORING_01
+keepalived_auth_pass: "{{ vault_keepalived_auth_pass | default('CHANGE_ME_KEEPALIVED_AUTH_PASSWORD_IN_PASSWORDS_YML') }}"
+keepalived_check_interval: 2
+keepalived_fall_count: 3
+keepalived_rise_count: 2
+keepalived_weight: -20
+keepalived_script_name: chk_agra_monitoring
+keepalived_log_file: /var/log/agra-keepalived.log
+keepalived_config_dir: /etc/keepalived
+keepalived_container_name: agra-keepalived
+
+# Priority formula: index 0 (group master) = HIGHEST = MASTER
+# DESIGN §4: priority = 101 + (100 - 100*index)  →  201, 101, 1, ...
+keepalived_priority: "{{ 101 + (100 - (groups['monitoring'].index(inventory_hostname) if groups['monitoring'] is defined and inventory_hostname in groups['monitoring'] else 0) * 100) | int }}"
+
+keepalived_state: "{{ 'MASTER' if (groups['monitoring'] is defined and groups['monitoring'][0] == inventory_hostname) else 'BACKUP' }}"
+
+grafana_health_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/health"
+prometheus_health_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/-/healthy"
+nginx_health_url: "http://127.0.0.1/healthz"
+
+keepalived_native_package_name: keepalived
+keepalived_service_name: keepalived
+keepalived_image: osixia/keepalived
+keepalived_tag: "2.0.20"

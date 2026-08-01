@@ -1,0 +1,27 @@
+---
+- name: Grafana - Skip if disabled
+  ansible.builtin.meta: end_host
+  when: not (enable_grafana | default(true) | bool)
+
+- name: Grafana - Validate HA config (pre-condition, run selalu)
+  ansible.builtin.include_tasks: validate_ha.yml
+  when: enable_ha_grafana | default(false) | bool or grafana_database in ['mysql','postgresql']
+
+- name: Grafana - Include HA SQLite sync tasks JIKA enable_ha_grafana=true + sqlite + multi-node
+  ansible.builtin.include_tasks: ha_sqlite_sync.yml
+  when:
+    - enable_ha_grafana | default(false) | bool
+    - grafana_database == 'sqlite'
+    - groups['monitoring'] is defined
+    - groups['monitoring'] | length > 1
+
+- name: Grafana - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Grafana - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when: agra_deployment_mode == 'docker'
+
+- name: Grafana - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when: agra_deployment_mode == 'native'

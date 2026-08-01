@@ -1,0 +1,33 @@
+---
+- name: Prepare host untuk test molecule (install minimal deps)
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Install python3 & pip
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-pip
+          - curl
+          - ca-certificates
+        state: present
+        update_cache: true
+      ignore_errors: true
+
+    - name: Install docker python SDK via pip (opsional jika mode docker)
+      ansible.builtin.pip:
+        name:
+          - docker
+          - PyYAML
+        state: present
+      ignore_errors: true
+
+    - name: Pastikan direktori /etc/agra & /var/lib/agra ada
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /etc/agra
+        - /var/lib/agra

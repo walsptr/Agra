@@ -1,0 +1,78 @@
+# Grafana config — agra default template
+# OVERRIDE DENGAN: /etc/agra/config/grafana/grafana.ini.j2 (first_found)
+
+[paths]
+data = {{ grafana_data_dir }}
+temp_data_lifetime = 24h
+logs = {{ grafana_data_dir }}/log
+plugins = {{ grafana_data_dir }}/plugins
+provisioning = {{ grafana_provisioning_dir }}
+
+[server]
+protocol = {{ grafana_server_protocol }}
+http_port = {{ grafana_port }}
+domain = {{ grafana_server_domain }}
+root_url = {{ grafana_server_root_url }}
+static_root_path = public
+enable_gzip = true
+
+[database]
+{% if grafana_database == 'sqlite' %}
+type = sqlite3
+path = {{ grafana_sqlite_path }}
+cache_mode = private
+wal = true
+{% elif grafana_database == 'mysql' %}
+type = mysql
+host = {{ grafana_database_host }}:{{ grafana_database_port }}
+name = {{ grafana_database_name }}
+user = {{ grafana_database_user }}
+password = {{ grafana_database_password }}
+ssl_mode = {{ grafana_database_ssl_mode }}
+max_open_conn = 100
+max_idle_conn = 100
+conn_max_lifetime = 14400
+{% elif grafana_database == 'postgresql' %}
+type = postgres
+host = {{ grafana_database_host }}:{{ grafana_database_port }}
+name = {{ grafana_database_name }}
+user = {{ grafana_database_user }}
+password = {{ grafana_database_password }}
+ssl_mode = {{ grafana_database_ssl_mode }}
+{% endif %}
+
+[security]
+admin_user = {{ grafana_admin_user }}
+admin_password = {{ grafana_admin_password }}
+secret_key = {{ grafana_secret_key }}
+disable_brute_force_login_protection = false
+
+[users]
+allow_sign_up = false
+auto_assign_org = true
+auto_assign_org_role = Viewer
+
+[auth.anonymous]
+enabled = false
+
+[log]
+mode = console file
+level = {{ grafana_log_level }}
+
+[log.file]
+log_rotate = true
+max_lines = 1000000
+max_size_shift = 28
+daily_rotate = true
+max_days = 7
+
+[analytics]
+reporting_enabled = false
+check_for_updates = true
+check_for_plugin_updates = false
+
+[metrics]
+enabled            = true
+environment        = production
+
+[feature_toggles]

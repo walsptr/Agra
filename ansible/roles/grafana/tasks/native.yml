@@ -1,0 +1,132 @@
+---
+- name: Grafana (Native) - Check installed version
+  ansible.builtin.shell: |
+    set -o pipefail
+    if [ -x /usr/sbin/grafana-server ]; then
+      /usr/sbin/grafana-server -v 2>&1 | grep -oE 'Version [0-9]+\.[0-9]+\.[0-9]+' | awk '{print $2}'
+    elif [ -x /usr/local/bin/grafana ]; then
+      /usr/local/bin/grafana server --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+    else
+      echo "NOT_INSTALLED"
+    fi
+  args:
+    executable: /bin/bash
+  register: _gf_installed_ver
+  changed_when: false
+  check_mode: false
+  tags: ['grafana', 'native', 'install']
+
+- name: Grafana (Native) - Install via OS package repo (apt/dnf)
+  block:
+    - name: Grafana (Native/Debian) - Add Grafana apt repo key
+      ansible.builtin.apt_key:
+        url: https://apt.grafana.com/gpg.key
+        state: present
+        keyring: /etc/apt/trusted.gpg.d/grafana.gpg
+      when: ansible_facts['os_family'] == 'Debian'
+      until: true is succeeded
+
+    - name: Grafana (Native/Debian) - Add apt repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/trusted.gpg.d/grafana.gpg] https://apt.grafana.com/ stable main"
+        state: present
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Grafana (Native/Debian) - Install grafana pinned version
+      ansible.builtin.apt:
+        name: "grafana={{ grafana_native_version }}"
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Grafana (Native/RHEL) - Add yum repo
+      ansible.builtin.yum_repository:
+        name: grafana
+        description: Grafana YUM Repo
+        baseurl: https://rpm.grafana.com/oss/rpm
+        gpgcheck: true
+        gpgkey: https://rpm.grafana.com/gpg.key
+        enabled: true
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Grafana (Native/RHEL) - Install grafana pinned version
+      ansible.builtin.dnf:
+        name: "grafana-{{ grafana_native_version }}-1"
+        state: present
+        disable_gpg_check: false
+      when: ansible_facts['os_family'] == 'RedHat'
+  when: _gf_installed_ver.stdout != grafana_native_version
+  ignore_errors: true
+  tags: ['grafana', 'native', 'install']
+
+- name: Grafana (Native) - Fallback binary tarball jika OS package gagal/skip
+  block:
+    - name: Grafana (Native/Tarball) - Download tarball
+      ansible.builtin.get_url:
+        url: "https://dl.grafana.com/oss/release/grafana-{{ grafana_native_version }}.linux-amd64.tar.gz"
+        dest: "/tmp/grafana-{{ grafana_native_version }}.tar.gz"
+        force: false
+        mode: '0644'
+      register: _dl
+      until: _dl is succeeded
+      retries: 5
+      delay: 3
+
+    - name: Grafana (Native/Tarball) - Extract tarball
+      ansible.builtin.unarchive:
+        src: "/tmp/grafana-{{ grafana_native_version }}.tar.gz"
+        dest: /tmp/
+        remote_src: true
+        creates: "/tmp/grafana-v{{ grafana_native_version }}/bin/grafana-server"
+
+    - name: Grafana (Native/Tarball) - Install binary + configs default
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+        remote_src: true
+      loop:
+        - { src: '/tmp/grafana-v{{ grafana_native_version }}/bin/grafana-server', dest: '/usr/sbin/grafana-server', mode: '0755' }
+        - { src: '/tmp/grafana-v{{ grafana_native_version }}/bin/grafana', dest: '/usr/local/bin/grafana', mode: '0755' }
+
+    - name: Grafana (Native/Tarball) - Cleanup temp
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/grafana-{{ grafana_native_version }}.tar.gz"
+        - "/tmp/grafana-v{{ grafana_native_version }}"
+  when: _gf_installed_ver.stdout != grafana_native_version
+  tags: ['grafana', 'native', 'install']
+
+- name: Grafana (Native) - Override systemd unit via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/grafana.service.j2', 'grafana.service.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: /etc/systemd/system/agra-grafana.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: ['restart grafana']
+  tags: ['grafana', 'native', 'systemd']
+
+- name: Grafana (Native) - Disable default grafana-server unit (supaya tidak conflict)
+  ansible.builtin.service:
+    name: grafana-server
+    state: stopped
+    enabled: false
+  ignore_errors: true
+  tags: ['grafana', 'native', 'systemd']
+
+- name: Grafana (Native) - systemd daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  tags: ['grafana', 'native', 'systemd']
+
+- name: Grafana (Native) - Enable and start agra-grafana
+  ansible.builtin.service:
+    name: agra-grafana
+    state: started
+    enabled: true
+  tags: ['grafana', 'native', 'service']

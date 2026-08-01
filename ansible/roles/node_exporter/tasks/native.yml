@@ -1,0 +1,78 @@
+---
+- name: Node Exporter (Native) - Check if binary exists with correct version
+  ansible.builtin.shell: |
+    set -o pipefail
+    if [ -x {{ node_exporter_native_binary_path }} ]; then
+      {{ node_exporter_native_binary_path }} --version 2>&1 | head -1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | tr -d 'v'
+    else
+      echo "NOT_INSTALLED"
+    fi
+  args:
+    executable: /bin/bash
+  register: _node_exporter_installed_version
+  changed_when: false
+  check_mode: false
+  tags: ['node_exporter', 'native', 'binary']
+
+- name: Node Exporter (Native) - Download and extract binary
+  block:
+    - name: Node Exporter (Native) - Download release tarball
+      ansible.builtin.get_url:
+        url: "{{ node_exporter_native_binary_url }}"
+        dest: /tmp/node_exporter-{{ node_exporter_native_version }}.tar.gz
+        mode: '0644'
+        force: false
+      register: _node_exporter_download
+      until: _node_exporter_download is succeeded
+      retries: 5
+      delay: 3
+
+    - name: Node Exporter (Native) - Extract tarball to temp
+      ansible.builtin.unarchive:
+        src: /tmp/node_exporter-{{ node_exporter_native_version }}.tar.gz
+        dest: /tmp/
+        remote_src: true
+        creates: /tmp/node_exporter-{{ node_exporter_native_version }}.linux-amd64/node_exporter
+
+    - name: Node Exporter (Native) - Install binary
+      ansible.builtin.copy:
+        src: /tmp/node_exporter-{{ node_exporter_native_version }}.linux-amd64/node_exporter
+        dest: "{{ node_exporter_native_binary_path }}"
+        owner: root
+        group: root
+        mode: '0755'
+        remote_src: true
+      notify: ['restart node_exporter']
+
+    - name: Node Exporter (Native) - Cleanup temp files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/node_exporter-{{ node_exporter_native_version }}.tar.gz
+        - /tmp/node_exporter-{{ node_exporter_native_version }}.linux-amd64
+  when: _node_exporter_installed_version.stdout != node_exporter_native_version
+  tags: ['node_exporter', 'native', 'binary']
+
+- name: Node Exporter (Native) - Render systemd unit
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/node_exporter/node_exporter.service.j2', 'node_exporter.service.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: /etc/systemd/system/agra-node-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: ['restart node_exporter']
+  tags: ['node_exporter', 'native', 'systemd']
+
+- name: Node Exporter (Native) - Systemd daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: _node_exporter_installed_version.stdout != node_exporter_native_version
+  tags: ['node_exporter', 'native', 'systemd']
+
+- name: Node Exporter (Native) - Enable and start service
+  ansible.builtin.service:
+    name: agra-node-exporter
+    state: started
+    enabled: true
+  tags: ['node_exporter', 'native', 'service']

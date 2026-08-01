@@ -1,0 +1,48 @@
+---
+- name: Grafana (Docker) - Pull image
+  community.docker.docker_image:
+    name: "{{ grafana_image }}:{{ grafana_tag }}"
+    source: pull
+    state: present
+  register: _gf_img
+  until: _gf_img is succeeded
+  retries: 5
+  delay: 3
+  tags: ['grafana', 'docker', 'image']
+
+- name: Grafana (Docker) - Remove old container if image changed
+  community.docker.docker_container:
+    name: "{{ grafana_container_name }}"
+    state: absent
+  when: _gf_img is changed
+  tags: ['grafana', 'docker', 'container']
+
+- name: Grafana (Docker) - Start container
+  community.docker.docker_container:
+    name: "{{ grafana_container_name }}"
+    image: "{{ grafana_image }}:{{ grafana_tag }}"
+    state: started
+    restart_policy: always
+    user: "472:0"
+    network_mode: host
+    volumes:
+      - "{{ grafana_config_dir }}:/etc/grafana:ro"
+      - "{{ grafana_data_dir }}:/var/lib/grafana:rw"
+    env:
+      GF_SECURITY_ADMIN_USER: "{{ grafana_admin_user }}"
+      GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_HTTP_PORT: "{{ grafana_port | string }}"
+      GF_SERVER_DOMAIN: "{{ grafana_server_domain }}"
+      GF_SERVER_ROOT_URL: "{{ grafana_server_root_url }}"
+      GF_LOG_LEVEL: "{{ grafana_log_level }}"
+      GF_SECURITY_SECRET_KEY: "{{ grafana_secret_key }}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://{{ grafana_web_listen_address }}/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    comparisons:
+      '*': ignore
+  tags: ['grafana', 'docker', 'container']

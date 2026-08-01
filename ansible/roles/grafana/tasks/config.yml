@@ -1,0 +1,61 @@
+---
+- name: Grafana (Config) - Ensure dirs exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0755'
+    recurse: false
+  loop:
+    - "{{ grafana_config_dir }}"
+    - "{{ grafana_data_dir }}"
+    - "{{ grafana_provisioning_dir }}/datasources"
+    - "{{ grafana_provisioning_dir }}/dashboards"
+    - "{{ grafana_provisioning_dir }}/notifiers"
+    - "{{ grafana_provisioning_dir }}/plugins"
+  tags: ['grafana', 'config', 'dirs']
+
+- name: Grafana (Config) - Render grafana.ini via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/grafana.ini.j2', 'grafana.ini.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_config_dir }}/grafana.ini"
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0640'
+  notify: ['restart grafana']
+  tags: ['grafana', 'config']
+
+- name: Grafana (Config) - Render provisioning datasource prometheus-main
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/datasources/prometheus.yml.j2', 'provisioning/datasources/prometheus.yml.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_provisioning_dir }}/datasources/prometheus.yml"
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0644'
+  notify: ['restart grafana']
+  tags: ['grafana', 'config', 'provisioning']
+
+- name: Grafana (Config) - Render provisioning dashboards provider
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/dashboards/all.yml.j2', 'provisioning/dashboards/all.yml.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_provisioning_dir }}/dashboards/all.yml"
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0644'
+  notify: ['restart grafana']
+  tags: ['grafana', 'config', 'provisioning']
+
+- name: Grafana (Config) - Copy user dashboard JSON from override dir ke provisioning dashboards (jika ada)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ grafana_provisioning_dir }}/dashboards/"
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0644'
+    remote_src: true
+  with_fileglob:
+    - "{{ grafana_dashboards_override_dir }}/*.json"
+  notify: ['restart grafana']
+  ignore_errors: true
+  tags: ['grafana', 'config', 'dashboards']

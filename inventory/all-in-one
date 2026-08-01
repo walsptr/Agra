@@ -1,0 +1,11 @@
+[monitoring]
+localhost ansible_connection=local ansible_host=127.0.0.1
+
+[node_exporter:children]
+monitoring
+
+[grafana:children]
+monitoring
+
+[prometheus:children]
+monitoring

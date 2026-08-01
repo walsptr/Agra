@@ -1,0 +1,71 @@
+---
+- import_playbook: precheck.yml
+  tags: ['always', 'precheck']
+
+- name: 'AGRA UPGRADE — Phase 1 (STANDBY NODES first, idx 1++)'
+  hosts: "{{ groups['monitoring'][1:] | default([]) }}"
+  gather_facts: true
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+  tags: ['upgrade']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: common
+    - role: node_exporter
+      when: inventory_hostname in groups['node_exporter'] | default([])
+    - role: prometheus
+      when: inventory_hostname in groups['prometheus'] | default([])
+    - role: grafana
+      when: inventory_hostname in groups['grafana'] | default([])
+    - role: nginx
+      when: enable_nginx | default(true) | bool
+    - role: keepalived
+      when:
+        - groups['monitoring'] is defined
+        - groups['monitoring'] | length > 1
+
+- name: 'AGRA UPGRADE — Phase 2 (MASTER NODE LAST, idx 0 = groups monitoring[0])'
+  hosts: "{{ [groups['monitoring'][0]] }}"
+  gather_facts: true
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+  tags: ['upgrade']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+  roles:
+    - role: common
+    - role: node_exporter
+      when: inventory_hostname in groups['node_exporter'] | default([])
+    - role: prometheus
+      when: inventory_hostname in groups['prometheus'] | default([])
+    - role: grafana
+      when: inventory_hostname in groups['grafana'] | default([])
+    - role: nginx
+      when: enable_nginx | default(true) | bool
+    - role: keepalived
+      when:
+        - groups['monitoring'] is defined
+        - groups['monitoring'] | length > 1
+
+- name: 'AGRA UPGRADE SUMMARY'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tags: ['upgrade']
+  pre_tasks:
+    - name: 'Upgrade — Compute rollback order (DESIGN §7 standby first = groups[1:] + groups[0] last)'
+      ansible.builtin.set_fact:
+        monitoring_upgrade_order: "{{ (groups['monitoring'][1:] | default([])) + [groups['monitoring'][0]] }}"
+      run_once: true
+      delegate_to: localhost
+  tasks:
+    - name: 'Upgrade — Selesai'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA ROLLING UPGRADE SELESAI (serial 1, standby first → master last — DESIGN §7)"
+          - "Urutan aktual — standby={{ groups['monitoring'][1:] | default([]) }} → master=[{{ groups['monitoring'][0] | default('N/A') }}]"

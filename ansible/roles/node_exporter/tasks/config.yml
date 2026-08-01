@@ -1,0 +1,65 @@
+---
+- name: Node Exporter (Config) - Ensure config directory exists
+  ansible.builtin.file:
+    path: "{{ node_exporter_config_dir }}"
+    state: directory
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0755'
+  tags: ['node_exporter', 'config', 'dirs']
+
+- name: Node Exporter (Config) - Ensure textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: "{{ common_user | default('agra') }}"
+    group: "{{ common_group | default('agra') }}"
+    mode: '0755'
+  when:
+    - node_exporter_textfile_dir is defined
+    - node_exporter_textfile_dir | length > 0
+  tags: ['node_exporter', 'config', 'textfile']
+
+- name: Node Exporter (Config) - Build enabled collectors args
+  ansible.builtin.set_fact:
+    _node_exporter_collectors_args: >-
+      {{
+        (_node_exporter_collectors_args | default([])) +
+        ['--collector.' ~ item]
+      }}
+  loop: "{{ node_exporter_collectors_enabled | default([]) }}"
+  changed_when: false
+  tags: ['node_exporter', 'config', 'collectors']
+
+- name: Node Exporter (Config) - Build disabled collectors args
+  ansible.builtin.set_fact:
+    _node_exporter_collectors_args: >-
+      {{
+        (_node_exporter_collectors_args | default([])) +
+        ['--no-collector.' ~ item]
+      }}
+  loop: "{{ node_exporter_collectors_disabled | default([]) }}"
+  changed_when: false
+  tags: ['node_exporter', 'config', 'collectors']
+
+- name: Node Exporter (Config) - Render default env file (native) via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/node_exporter/node_exporter.default.j2', 'node_exporter.default.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ node_exporter_config_dir }}/node_exporter.default"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: ['restart node_exporter']
+  tags: ['node_exporter', 'config']
+
+- name: Node Exporter (Config) - Build extra args string
+  ansible.builtin.set_fact:
+    _node_exporter_extra_args: >-
+      --web.listen-address={{ node_exporter_web_listen_address }}
+      --log.level={{ node_exporter_log_level }}
+      {% if node_exporter_textfile_dir | length > 0 %}
+      --collector.textfile.directory={{ node_exporter_textfile_dir }}
+      {% endif %}
+      {{ _node_exporter_collectors_args | default([]) | join(' ') }}
+  changed_when: false
+  tags: ['node_exporter', 'config']

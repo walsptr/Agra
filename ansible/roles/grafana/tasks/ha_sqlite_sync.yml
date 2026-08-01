@@ -1,0 +1,160 @@
+---
+# Grafana HA SQLite Sync via rsync double-buffer (DESIGN.md §4.3 Grafana HA)
+# HANYA BERJALAN JIKA: enable_ha_grafana=true AND grafana_database=sqlite AND groups['monitoring']|length > 1
+# Topology: groups['monitoring'][0] = MASTER (source of truth grafana.db)
+#           groups['monitoring'][1..] = STANDBY (tarik file grafana.db dari master via rsync double-buffer)
+# Double-buffer: rsync ke grafana.db.new dulu → mv atomik replace grafana.db (hindari partial write)
+
+- name: Grafana (HA SQLite) - Vars: set node_role
+  ansible.builtin.set_fact:
+    _grafana_ha_master_host: "{{ groups['monitoring'][0] }}"
+    _grafana_ha_master_ip: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}"
+    _grafana_ha_node_role: "{{ 'master' if groups['monitoring'][0] == inventory_hostname else 'standby' }}"
+  changed_when: false
+  tags: ['grafana', 'ha', 'sync', 'vars']
+
+- name: Grafana (HA SQLite) - Info node role
+  ansible.builtin.debug:
+    msg: "Grafana HA: inventory_hostname={{ inventory_hostname }} role={{ _grafana_ha_node_role }} master={{ _grafana_ha_master_host }} ({{ _grafana_ha_master_ip }})"
+  tags: ['grafana', 'ha', 'sync']
+
+# MASTER NODE:
+# 1. Generate SSH key untuk user agra (jika belum ada) di ~agra/.ssh/id_ed25519
+# 2. Output public key content → standby nodes akan authorized_keys
+- block:
+    - name: Grafana (HA SQLite / MASTER) - Ensure agra user .ssh dir 0700
+      ansible.builtin.file:
+        path: "/home/{{ common_user | default('agra') }}/.ssh"
+        state: directory
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0700'
+
+    - name: Grafana (HA SQLite / MASTER) - Generate SSH key ed25519 (creates guard, idempotent)
+      community.crypto.openssh_keypair:
+        path: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
+        type: ed25519
+        size: 256
+        state: present
+        force: false
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: '0600'
+        comment: "agra-grafana-sync@{{ inventory_hostname }}"
+      register: _ssh_key_master
+      ignore_errors: true
+
+    - name: Grafana (HA SQLite / MASTER) - Generate SSH fallback ssh-keygen jika module tidak ada (creates guard)
+      ansible.builtin.command:
+        cmd: "ssh-keygen -t ed25519 -a 100 -f /home/{{ common_user | default('agra') }}/.ssh/id_ed25519 -N '' -C 'agra-grafana-sync@{{ inventory_hostname }}'"
+        creates: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
+      become: true
+      become_user: "{{ common_user | default('agra') }}"
+      when: _ssh_key_master is failed or _ssh_key_master is skipped
+
+    - name: Grafana (HA SQLite / MASTER) - Fetch public key content
+      ansible.builtin.slurp:
+        src: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519.pub"
+      register: _master_pubkey_slurp
+  when:
+    - _grafana_ha_node_role == 'master'
+  tags: ['grafana', 'ha', 'sync', 'master', 'ssh']
+
+# STANDBY NODES:
+# 1. Deploy rsync double-buffer script /usr/local/bin/agra_grafana_rsync.sh
+# 2. Add MASTER pubkey ke ~agra/.ssh/authorized_keys standby (trust SSH dari master)
+# 3. Tambahkan known_hosts standby ke master (agar master pertama connect tidak prompt host key)
+# 4. Setup cron job di standby: setiap grafana_sqlite_sync_interval tarik grafana.db baru dari master via rsync + double-buffer
+- block:
+    - name: Grafana (HA SQLite / STANDBY) - Ensure agra user .ssh dir + authorized_keys exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: "{{ item.state | default('directory') }}"
+        owner: "{{ common_user | default('agra') }}"
+        group: "{{ common_group | default('agra') }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "/home/{{ common_user | default('agra') }}/.ssh", mode: '0700' }
+        - { path: "/home/{{ common_user | default('agra') }}/.ssh/authorized_keys", state: touch, mode: '0600' }
+      tags: ['grafana', 'ha', 'sync', 'standby', 'ssh']
+
+    - name: Grafana (HA SQLite / STANDBY) - Add master public key ke authorized_keys standby
+      ansible.posix.authorized_key:
+        user: "{{ common_user | default('agra') }}"
+        state: present
+        key: "{{ hostvars[_grafana_ha_master_host]['_master_pubkey_slurp']['content'] | b64decode | trim }}"
+        key_options: 'command="rsync --server --sender -logDtprze.iLsfxC . {{ grafana_data_dir }}/",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding'
+        exclusive: false
+        manage_dir: false
+      ignore_errors: true
+      tags: ['grafana', 'ha', 'sync', 'standby', 'ssh']
+
+    - name: Grafana (HA SQLite / STANDBY) - Render rsync double-buffer script /usr/local/bin/agra_grafana_rsync.sh
+      ansible.builtin.template:
+        src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/ha/grafana_sqlite_rsync.sh.j2', 'grafana_sqlite_rsync.sh.j2'], 'paths': [role_path + '/templates']}) }}"
+        dest: /usr/local/bin/agra_grafana_rsync.sh
+        owner: root
+        group: root
+        mode: '0755'
+      tags: ['grafana', 'ha', 'sync', 'standby', 'script']
+
+    - name: Grafana (HA SQLite / STANDBY) - Ensure log file for rsync script
+      ansible.builtin.file:
+        path: /var/log/agra-grafana-sync.log
+        state: touch
+        owner: "{{ common_user | default('agra') }}"
+        group: adm
+        mode: '0644'
+        modification_time: preserve
+        access_time: preserve
+      changed_when: false
+
+    - name: Grafana (HA SQLite / STANDBY) - Deploy logrotate for sync log
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/agra-grafana-sync
+        content: |
+          /var/log/agra-grafana-sync.log {
+              daily
+              rotate 14
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0644 agra adm
+              copytruncate
+          }
+        owner: root
+        group: root
+        mode: '0644'
+      ignore_errors: true
+
+    - name: Grafana (HA SQLite / STANDBY) - Setup cron job rsync sync interval grafana_sqlite_sync_interval
+      ansible.builtin.cron:
+        name: "agra-grafana-sqlite-rsync-sync"
+        user: "{{ common_user | default('agra') }}"
+        job: "/usr/local/bin/agra_grafana_rsync.sh >> /var/log/agra-grafana-sync.log 2>&1"
+        minute: "{{ grafana_sqlite_sync_interval.split()[0] if '*' in grafana_sqlite_sync_interval else '*' }}"
+        hour: "{{ grafana_sqlite_sync_interval.split()[1] if grafana_sqlite_sync_interval.split() | length > 1 else '*' }}"
+        day: "{{ grafana_sqlite_sync_interval.split()[2] if grafana_sqlite_sync_interval.split() | length > 2 else '*' }}"
+        month: "{{ grafana_sqlite_sync_interval.split()[3] if grafana_sqlite_sync_interval.split() | length > 3 else '*' }}"
+        weekday: "{{ grafana_sqlite_sync_interval.split()[4] if grafana_sqlite_sync_interval.split() | length > 4 else '*' }}"
+        cron_file: agra-grafana-sync
+        state: present
+      tags: ['grafana', 'ha', 'sync', 'standby', 'cron']
+
+    # MASTER SIDE: add standby host fingerprints ke known_hosts master (agar rsync dari master ke standby NO PROMPT)
+    - name: Grafana (HA SQLite / MASTER) - Known-hosts master → scan standby
+      ansible.builtin.known_hosts:
+        path: "/home/{{ common_user | default('agra') }}/.ssh/known_hosts"
+        name: "{{ hostvars[item]['ansible_host'] | default(item) }}"
+        key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519,rsa ' + (hostvars[item]['ansible_host'] | default(item)) + ' 2>/dev/null') }}"
+        state: present
+      become: true
+      become_user: "{{ common_user | default('agra') }}"
+      loop: "{{ groups['monitoring'][1:] }}"
+      when: inventory_hostname == _grafana_ha_master_host
+      ignore_errors: true
+      tags: ['grafana', 'ha', 'sync', 'master', 'ssh']
+  when:
+    - _grafana_ha_node_role == 'standby'
+  tags: ['grafana', 'ha', 'sync', 'standby']

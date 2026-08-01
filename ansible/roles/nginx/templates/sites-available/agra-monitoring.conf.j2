@@ -1,0 +1,90 @@
+{% if enable_https | default(true) | bool %}
+server {
+    listen {{ nginx_http_port }} default_server;
+    listen [::]:{{ nginx_http_port }} default_server;
+    server_name {{ server_name }};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen {{ nginx_https_port }} ssl http2 default_server;
+    listen [::]:{{ nginx_https_port }} ssl http2 default_server;
+    server_name {{ server_name }};
+
+    ssl_certificate {{ tls_cert_path }};
+    ssl_certificate_key {{ tls_key_path }};
+    {% if tls_ca_path and tls_ca_path | length > 0 %}
+    ssl_trusted_certificate {{ tls_ca_path }};
+    {% endif %}
+
+    add_header Strict-Transport-Security "max-age={{ tls_hsts_max_age }}{% if tls_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if tls_hsts_preload %}; preload{% endif %}" always;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+{% else %}
+server {
+    listen {{ nginx_http_port }} default_server;
+    listen [::]:{{ nginx_http_port }} default_server;
+    server_name {{ server_name }};
+{% endif %}
+
+    location = / {
+        return 302 /grafana/;
+    }
+
+    location /grafana/ {
+        proxy_pass {{ grafana_backend_url }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Authorization $http_authorization;
+        proxy_pass_header Authorization;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+        proxy_buffering off;
+    }
+
+    location /grafana/api/live/ {
+        proxy_pass {{ grafana_backend_url }}/api/live/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }
+
+    location /prometheus/ {
+{% if expose_prometheus_via_nginx | default(false) | bool %}
+        proxy_pass {{ prometheus_backend_url }}/prometheus/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+{% else %}
+        return 403 "Prometheus UI access DISABLED via agra flag 'expose_prometheus_via_nginx=false'. Set ke true di globals.yml + re-deploy jika ingin expose (PERINGATAN: resiko security, Prometheus default tidak auth)";
+{% endif %}
+    }
+
+    location = /prometheus {
+        return 301 /prometheus/;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

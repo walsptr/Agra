@@ -1,0 +1,15 @@
+---
+- name: Prometheus - Skip if disabled
+  ansible.builtin.meta: end_host
+  when: not (enable_prometheus | default(true) | bool)
+
+- name: Prometheus - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Prometheus - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when: agra_deployment_mode == 'docker'
+
+- name: Prometheus - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when: agra_deployment_mode == 'native'

@@ -1,0 +1,15 @@
+---
+- name: Node Exporter - Skip if disabled
+  ansible.builtin.meta: end_host
+  when: not (enable_node_exporter | default(true) | bool)
+
+- name: Node Exporter - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Node Exporter - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when: agra_deployment_mode == 'docker'
+
+- name: Node Exporter - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when: agra_deployment_mode == 'native'

@@ -1,0 +1,17 @@
+---
+- import_playbook: playbooks/precheck.yml
+  tags: ['always', 'precheck']
+- import_playbook: playbooks/deploy.yml
+  tags: ['deploy']
+- import_playbook: playbooks/upgrade_monitoring.yml
+  tags: ['upgrade']
+- import_playbook: playbooks/rollback.yml
+  tags: ['rollback']
+- import_playbook: playbooks/destroy.yml
+  tags: ['destroy']
+- import_playbook: playbooks/backup.yml
+  tags: ['backup']
+- import_playbook: playbooks/restore.yml
+  tags: ['restore']
+- import_playbook: playbooks/genpwd.yml
+  tags: ['genpwd']

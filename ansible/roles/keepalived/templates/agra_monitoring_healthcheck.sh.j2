@@ -1,0 +1,50 @@
+#!/bin/bash
+# agra combined health check untuk keepalived vrrp_script
+# EXIT 0 = SEHAT (Grafana 200 AND Prometheus 200)
+# EXIT 1 = TIDAK SEHAT (salah satu atau keduanya gagal)
+# DESIGN.md §4: 1 service gagal = 1 host gagal (full combined, bukan OR)
+set -u
+set -o pipefail
+
+LOG_FILE="{{ keepalived_log_file }}"
+GRAFANA_URL="{{ grafana_health_url }}"
+PROM_URL="{{ prometheus_health_url }}"
+TIMEOUT="{{ keepalived_check_interval | int + 1 }}"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [HEALTHCHECK] $*" >> "${LOG_FILE}" 2>/dev/null || true
+}
+
+GRAFANA_OK=false
+PROM_OK=false
+
+# Cek Grafana /api/health — status harus "ok"
+if GRAFANA_OUT=$(curl -sf -m "${TIMEOUT}" -o /dev/null -w "%{http_code}" "${GRAFANA_URL}" 2>/dev/null); then
+    if [ "${GRAFANA_OUT}" = "200" ]; then
+        GRAFANA_OK=true
+    else
+        log "WARN Grafana HTTP=${GRAFANA_OUT} (expected 200)"
+    fi
+else
+    log "WARN Grafana UNREACHABLE (curl exit=$?)"
+fi
+
+# Cek Prometheus /-/healthy — harus Prometheus OK / Healthy
+if PROM_OUT=$(curl -sf -m "${TIMEOUT}" -o /dev/null -w "%{http_code}" "${PROM_URL}" 2>/dev/null); then
+    if [ "${PROM_OUT}" = "200" ]; then
+        PROM_OK=true
+    else
+        log "WARN Prometheus HTTP=${PROM_OUT} (expected 200)"
+    fi
+else
+    log "WARN Prometheus UNREACHABLE (curl exit=$?)"
+fi
+
+# KEDUA HARUS OK — DESIGN §4 combined
+if [ "${GRAFANA_OK}" = "true" ] && [ "${PROM_OK}" = "true" ]; then
+    log "OK Grafana=200 Prometheus=200 — combined health PASSED"
+    exit 0
+else
+    log "FAIL Grafana_ok=${GRAFANA_OK} Prom_ok=${PROM_OK} — combined health FAILED (exit 1)"
+    exit 1
+fi

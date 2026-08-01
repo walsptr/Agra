@@ -1,0 +1,101 @@
+---
+- name: Grafana (HA Validate) - Assert grafana_database salah satu dari 3 mode valid
+  ansible.builtin.assert:
+    that:
+      - grafana_database in ['sqlite', 'mysql', 'postgresql']
+    fail_msg: >-
+      Nilai grafana_database='{{ grafana_database }}' INVALID.
+      Grafana HANYA support 3 mode database: sqlite|mysql|postgresql.
+      Perbaiki di globals.yml (line grafana_database) dengan salah satu dari 3 mode di atas.
+  tags: ['grafana', 'validate', 'ha']
+
+- name: Grafana (HA Validate) - External DB (mysql/pg) WAJIB ada host
+  ansible.builtin.assert:
+    that:
+      - grafana_database_host | length > 0
+    fail_msg: >-
+      grafana_database_host TIDAK BOLEH kosong saat grafana_database='{{ grafana_database }}'.
+      Karena {{ grafana_database }} adalah external database (RULES.md §9: agra tidak
+      menginstall DB, hanya connect). Perbaiki: set `grafana_database_host: hostname/IP` di globals.yml.
+  when: grafana_database in ['mysql', 'postgresql']
+  tags: ['grafana', 'validate', 'ha']
+
+# =========== NEW: ASSERT KOMBINASI enable_ha_grafana + DATABASE MODE ===========
+- name: Grafana (HA Validate) - enable_ha_grafana + sqlite WAJIB multi-node
+  ansible.builtin.assert:
+    that:
+      - groups['monitoring'] | default([]) | length > 1
+    fail_msg: >-
+      enable_ha_grafana=true TAPI grafana_database='sqlite' dengan groups['monitoring']={{ groups['monitoring'] | default([]) | length }} node (single).
+      HA sqlite sync (rsync) BERARTI harus ada minimal 2 node monitoring (master + standby).
+      Perbaiki: (a) tambahkan node ke group monitoring di inventory, ATAU (b) pindah ke external DB
+      mysql/postgresql (centralized DB tanpa sync file), ATAU (c) nonaktifkan enable_ha_grafana=false.
+  when:
+    - enable_ha_grafana | default(false) | bool
+    - grafana_database == 'sqlite'
+  tags: ['grafana', 'validate', 'ha']
+
+- name: Grafana (HA Validate) - enable_ha_grafana + mysql/pg WAJIB grafana_database_host tidak kosong (redundant cek)
+  ansible.builtin.assert:
+    that:
+      - grafana_database_host | length > 0
+    fail_msg: >-
+      enable_ha_grafana=true DENGAN grafana_database='{{ grafana_database }}' TAPI grafana_database_host KOSONG.
+      HA external mode Grafana BERARTI SEMUA node harus connect ke DATABASE CENTRAL external yang sama.
+      Perbaiki: set grafana_database_host di globals.yml atau inventory group_vars monitoring.
+  when:
+    - enable_ha_grafana | default(false) | bool
+    - grafana_database in ['mysql','postgresql']
+  tags: ['grafana', 'validate', 'ha']
+
+- name: Grafana (HA Validate) - WARNING: enable_ha_grafana=false TAPI multi-node + sqlite = PERINGATAN (tidak fail, hanya debug)
+  ansible.builtin.debug:
+    msg: >-
+      PERINGATAN: groups['monitoring']={{ groups['monitoring'] | default([]) | length }} node TAPI enable_ha_grafana=false
+      DAN grafana_database='sqlite'. Ini BERARTI setiap node punya grafana.db SENDIRI — dashboard/user/config
+      TIDAK AKAN TER-SYNC antar node. Untuk HA sync sqlite set enable_ha_grafana=true, atau gunakan
+      external mysql/postgresql.
+  when:
+    - not (enable_ha_grafana | default(false) | bool)
+    - groups['monitoring'] is defined
+    - groups['monitoring'] | length > 1
+    - grafana_database == 'sqlite'
+  tags: ['grafana', 'validate', 'ha']
+
+# Assert: grafana_database=sqlite tapi external host di-set (konflik konsep)
+- name: Grafana (HA Validate) - JANGAN set grafana_database_host jika grafana_database=sqlite (lokal DB file)
+  ansible.builtin.assert:
+    that:
+      - grafana_database_host | length == 0
+    fail_msg: >-
+      grafana_database='sqlite' TAPI grafana_database_host='{{ grafana_database_host }}' diisi. Konsep BENTROK:
+      sqlite = file LOKAL di node, grafana_database_host adalah external DB (mysql/pg).
+      Perbaiki: (a) hapus grafana_database_host jika ingin sqlite lokal, ATAU (b) ubah grafana_database ke mysql/postgresql.
+  when: grafana_database == 'sqlite'
+  tags: ['grafana', 'validate', 'ha']
+# =========== END OF NEW ASSERT BLOCK ===========
+
+- name: Grafana (HA Validate) - External DB connectivity check via wait_for
+  ansible.builtin.wait_for:
+    host: "{{ grafana_database_host }}"
+    port: "{{ grafana_database_port | int }}"
+    state: started
+    timeout: 5
+    delay: 0
+  when: grafana_database in ['mysql', 'postgresql']
+  register: _db_conn_check
+  ignore_errors: true
+  tags: ['grafana', 'validate', 'ha']
+
+- name: Grafana (HA Validate) - HARD FAIL jika external DB tidak connect
+  ansible.builtin.assert:
+    that:
+      - _db_conn_check is not failed
+    fail_msg: >-
+      External {{ grafana_database }} database di host {{ grafana_database_host }}:{{ grafana_database_port }} TIDAK TERCAPAI (timeout 5 detik).
+      Grafana tidak dapat berjalan dengan konfigurasi ini. Periksa: (a) host benar, (b) port benar,
+      (c) firewall tidak memblokir, (d) service {{ grafana_database }} di host tersebut benar-benar hidup.
+  when:
+    - grafana_database in ['mysql', 'postgresql']
+    - _db_conn_check is failed
+  tags: ['grafana', 'validate', 'ha']

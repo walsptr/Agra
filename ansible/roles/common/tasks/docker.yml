@@ -1,0 +1,73 @@
+---
+- name: Common (Docker) - Install docker prerequisites (Debian)
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+  when: ansible_os_family == 'Debian'
+  tags: ['common', 'docker', 'packages']
+
+- name: Common (Docker) - Install docker packages (Debian)
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - python3-docker
+    state: present
+  when: ansible_os_family == 'Debian'
+  tags: ['common', 'docker', 'packages']
+
+- name: Common (Docker) - Install docker packages (RedHat)
+  ansible.builtin.dnf:
+    name:
+      - docker
+      - python3-docker
+    state: present
+  when: ansible_os_family == 'RedHat'
+  tags: ['common', 'docker', 'packages']
+
+- name: Common (Docker) - Start and enable docker service
+  ansible.builtin.service:
+    name: "{{ common_docker_service_name }}"
+    state: started
+    enabled: true
+  ignore_errors: true
+  tags: ['common', 'docker', 'service']
+
+- name: Common (Docker) - Try podman if docker not available
+  block:
+    - name: Common (Docker/Podman) - Install podman packages (fallback)
+      ansible.builtin.package:
+        name:
+          - podman
+          - "{{ common_podman_python_sdk_package }}"
+        state: present
+      when: common_docker_service_name not in ansible_facts.services
+
+    - name: Common (Docker/Podman) - Add user to docker group
+      ansible.builtin.user:
+        name: "{{ common_user }}"
+        groups: docker
+        append: true
+      when: "'docker' in ansible_facts.groups"
+
+    - name: Common (Docker/Podman) - Add user to podman group
+      ansible.builtin.user:
+        name: "{{ common_user }}"
+        groups: podman
+        append: true
+      when: "'podman' in ansible_facts.groups"
+  tags: ['common', 'docker']
+
+- name: Common (Docker) - Ensure agra docker network exists
+  community.docker.docker_network:
+    name: "{{ common_docker_network_name }}"
+    driver: "{{ common_docker_network_driver }}"
+    state: present
+  register: _common_docker_net_result
+  ignore_errors: true
+  when: not ((_common_docker_net_result is defined and _common_docker_net_result.failed) | default(false))
+  tags: ['common', 'docker', 'network']

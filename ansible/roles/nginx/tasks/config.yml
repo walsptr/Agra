@@ -1,0 +1,158 @@
+---
+- name: Nginx (Config) - Ensure dirs exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ common_user | default('root') }}"
+    group: "{{ common_group | default('root') }}"
+    mode: "{{ '0750' if 'ssl' in item else '0755' }}"
+  loop:
+    - "{{ nginx_config_dir }}"
+    - "{{ nginx_sites_available_dir }}"
+    - "{{ nginx_sites_enabled_dir }}"
+    - "{{ nginx_confd_dir }}"
+    - "{{ nginx_config_dir }}/ssl"
+    - "{{ nginx_log_dir }}"
+    - "{{ nginx_cache_dir }}"
+  tags: ['nginx', 'config', 'dirs']
+
+- name: Nginx (SSL) - Build self-signed cert+key
+  block:
+    - name: Nginx (SSL) - Set subject_alt_name list
+      ansible.builtin.set_fact:
+        _nginx_san_list: >-
+          {{
+            ['DNS:' + tls_self_signed_cn,
+              'DNS:localhost',
+              'IP:127.0.0.1']
+            + (['IP:' + monitoring_vip] if (monitoring_vip is defined and monitoring_vip | length > 0 else [])
+          }}
+
+    - name: Nginx (SSL) - Generate 2048-bit RSA private key (creates guard)
+      community.crypto.openssl_privatekey:
+        path: "{{ tls_key_path }}"
+        type: RSA
+        size: 2048
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      register: _ssl_key
+      ignore_errors: true
+
+    - name: Nginx (SSL) - FALLBACK shell openssl key jika module tidak tersedia (creates guard)
+      ansible.builtin.command:
+        cmd: "openssl genrsa -out {{ tls_key_path }} 2048"
+        creates: "{{ tls_key_path }}"
+      when: _ssl_key is failed
+      no_log: false
+
+    - name: Nginx (SSL) - Generate self-signed certificate (creates guard)
+      community.crypto.x509_certificate:
+        path: "{{ tls_cert_path }}"
+        privatekey_path: "{{ tls_key_path }}"
+        provider: selfsigned
+        selfsigned_not_after: "+{{ tls_self_signed_days_valid }}d"
+        owner: root
+        group: root
+        mode: '0644'
+        subject:
+          CN: "{{ tls_self_signed_cn }}"
+          C: "{{ tls_self_signed_country }}"
+          ST: "{{ tls_self_signed_state }}"
+          L: "{{ tls_self_signed_locality }}"
+          O: "{{ tls_self_signed_organization }}"
+          OU: "{{ tls_self_signed_organizational_unit }}"
+        subject_alt_name: "{{ _nginx_san_list }}"
+      register: _ssl_cert
+      ignore_errors: true
+
+    - name: Nginx (SSL) - FALLBACK shell openssl req jika module tidak tersedia (creates guard)
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -new -x509 -key {{ tls_key_path }}
+          -out {{ tls_cert_path }}
+          -days {{ tls_self_signed_days_valid }}
+          -subj "/C={{ tls_self_signed_country }}/ST={{ tls_self_signed_state }}/L={{ tls_self_signed_locality }}/O={{ tls_self_signed_organization }}/OU={{ tls_self_signed_organizational_unit }}/CN={{ tls_self_signed_cn }}"
+        creates: "{{ tls_cert_path }}"
+      when: _ssl_cert is failed or _ssl_key is failed
+  when:
+    - enable_https | default(true) | bool
+    - tls_self_signed_generate | default(true) | bool
+    - tls_cert_path == nginx_config_dir + '/ssl/agra.crt' or (tls_cert_path | dirname == nginx_config_dir + '/ssl' and (tls_cert_path is not exists or ansible_check_mode is true))
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)
+  ansible.builtin.command:
+    cmd: "openssl dhparam -out {{ tls_dhparam_path }} {{ tls_dhparam_bits | int }}"
+    creates: "{{ tls_dhparam_path }}"
+  environment:
+    RANDFILE: /tmp/.rnd
+  async: 300
+  poll: 10
+  when: enable_https | default(true) | bool
+  ignore_errors: true
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL Custom) - Copy custom cert user dari /etc/agra/config/nginx/ssl/
+  block:
+    - name: Nginx (SSL Custom) - Check override cert/key di /etc/agra/config/nginx/ssl/
+      ansible.builtin.stat:
+        path: "/etc/agra/config/nginx/ssl/{{ item }}"
+      loop:
+        - agra.crt
+        - agra.key
+        - agra-ca.crt
+      register: _custom_ssl_stat
+
+    - name: Nginx (SSL Custom) - Copy custom cert jika ada
+      ansible.builtin.copy:
+        src: "/etc/agra/config/nginx/ssl/{{ item.item }}"
+        dest: "{{ nginx_config_dir }}/ssl/{{ item.item }}"
+        owner: root
+        group: root
+        mode: "{{ '0600' if item.item == 'agra.key' else '0644' }}"
+        remote_src: true
+      loop: "{{ _custom_ssl_stat.results }}"
+      when: item.stat is defined and item.stat.exists
+      notify: ['reload nginx']
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (Config) - Render nginx.conf via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/nginx.conf.j2', 'nginx.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_config_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'conf']
+
+- name: Nginx (Config) - Render agra-monitoring site available via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/agra-monitoring.conf.j2', 'sites-available/agra-monitoring.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'site']
+
+- name: Nginx (Config) - Enable agra-monitoring site (symlink to sites-enabled)
+  ansible.builtin.file:
+    src: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
+    dest: "{{ nginx_sites_enabled_dir }}/agra-monitoring.conf"
+    state: link
+    force: true
+  notify: ['reload nginx']
+  ignore_errors: true
+  tags: ['nginx', 'config', 'site']
+
+- name: Nginx (Config) - Disable default.conf from conf.d jika ada
+  ansible.builtin.file:
+    path: "{{ nginx_confd_dir }}/default.conf"
+    state: absent
+  notify: ['reload nginx']
+  tags: ['nginx', 'config', 'site']

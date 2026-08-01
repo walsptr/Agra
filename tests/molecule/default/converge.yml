@@ -1,0 +1,39 @@
+---
+- name: Converge — Jalankan deploy monitoring stack 1 node all-in-one
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    agra_deployment_mode: docker
+    enable_grafana: true
+    enable_prometheus: true
+    enable_node_exporter: true
+    enable_nginx: true
+    enable_https: false
+    grafana_admin_password: "molecule_test_admin"
+    grafana_database: sqlite
+    grafana_secret_key: "CHANGE_ME_MOLECULE_TEST_SECRET_KEY_12345"
+    keepalived_auth_pass: "CHANGE_ME_MOLECULE"
+    grafana_web_listen_address: "0.0.0.0:3000"
+    prometheus_web_listen_address: "0.0.0.0:9090"
+
+  tasks:
+    - name: Include role common
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/common
+
+    - name: Include role node_exporter
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/node_exporter
+
+    - name: Include role prometheus
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/prometheus
+
+    - name: Include role grafana
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/grafana
+
+    - name: Include role nginx
+      ansible.builtin.include_role:
+        name: ../../../ansible/roles/nginx

@@ -1,0 +1,15 @@
+---
+- name: Nginx - Skip if disabled
+  ansible.builtin.meta: end_host
+  when: not (enable_nginx | default(true) | bool)
+
+- name: Nginx - Include shared config tasks
+  ansible.builtin.include_tasks: config.yml
+
+- name: Nginx - Include docker deployment tasks
+  ansible.builtin.include_tasks: docker.yml
+  when: agra_deployment_mode == 'docker'
+
+- name: Nginx - Include native deployment tasks
+  ansible.builtin.include_tasks: native.yml
+  when: agra_deployment_mode == 'native'

@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agra"
+version = "0.1.0"
+description = "Ansible deployment + lifecycle management monitoring stack (Grafana + Prometheus + Node Exporter, Kolla-Ansible pattern)"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [{name = "Agra Contributors"}]
+keywords = ["ansible", "grafana", "prometheus", "monitoring", "deployment", "kolla"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+ansible = ["ansible-core>=2.16"]
+full = ["ansible>=2.16", "PyYAML>=6.0"]
+dev = ["ansible-lint>=24", "molecule>=24", "molecule-plugins[docker]>=24"]
+
+[project.scripts]
+# ======= INI YANG PENTING: entry point command `agra` =======
+# Setelah pip install -e . → exec `agra` langsung jalan, TANPA bin/agra
+agra = "agra.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/example/agra"
+Documentation = "https://github.com/example/agra/blob/main/contexts/ARCHITECTURE.md"
+Source = "https://github.com/example/agra"
+Issues = "https://github.com/example/agra/issues"
+
+[tool.setuptools.packages.find]
+include = ["agra*"]
+exclude = ["tests*", "ansible*", "etc*", "inventory*", "contexts*"]
+
+[tool.setuptools.package-data]
+agra = ["**/*.py"]

@@ -1,0 +1,66 @@
+---
+- name: Verify — Health check endpoint untuk setiap service
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Tunggu port Grafana 3000 ready (max 60s)
+      ansible.builtin.wait_for:
+        port: 3000
+        timeout: 60
+        delay: 5
+      ignore_errors: true
+
+    - name: Tunggu port Prometheus 9090 ready (max 60s)
+      ansible.builtin.wait_for:
+        port: 9090
+        timeout: 60
+        delay: 5
+      ignore_errors: true
+
+    - name: Tunggu port Node Exporter 9100 ready
+      ansible.builtin.wait_for:
+        port: 9100
+        timeout: 60
+        delay: 5
+      ignore_errors: true
+
+    - name: Health check Grafana /api/health → HARUS 200 OK
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/health"
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: grafana_health
+      ignore_errors: true
+
+    - name: ASSERT Grafana sehat
+      ansible.builtin.assert:
+        that:
+          - grafana_health.status == 200
+        fail_msg: "Grafana /api/health tidak return 200. Status={{ grafana_health.status | default('TIMEOUT/UNREACHABLE') }}"
+        quiet: false
+      ignore_errors: true
+
+    - name: Health check Prometheus /-/healthy → HARUS 200 OK
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/-/healthy"
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: prometheus_health
+      ignore_errors: true
+
+    - name: ASSERT Prometheus sehat
+      ansible.builtin.assert:
+        that:
+          - prometheus_health.status == 200
+        fail_msg: "Prometheus /-/healthy tidak return 200. Status={{ prometheus_health.status | default('TIMEOUT/UNREACHABLE') }}"
+        quiet: false
+      ignore_errors: true
+
+    - name: Debug summary hasil verify
+      ansible.builtin.debug:
+        msg:
+          - "Grafana /api/health: status={{ grafana_health.status | default('N/A') }}"
+          - "Prometheus /-/healthy: status={{ prometheus_health.status | default('N/A') }}"

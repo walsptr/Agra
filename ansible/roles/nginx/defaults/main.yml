@@ -1,0 +1,56 @@
+---
+enable_nginx: true
+enable_https: true
+expose_prometheus_via_nginx: false
+
+nginx_container_name: agra-nginx
+nginx_image: nginx
+nginx_tag: "1.27-alpine"
+nginx_native_version: ""
+nginx_install_method: native
+
+nginx_config_dir: /etc/nginx
+nginx_sites_available_dir: "{{ nginx_config_dir }}/sites-available"
+nginx_sites_enabled_dir: "{{ nginx_config_dir }}/sites-enabled"
+nginx_confd_dir: "{{ nginx_config_dir }}/conf.d"
+nginx_log_dir: /var/log/nginx
+nginx_cache_dir: /var/cache/nginx
+nginx_run_dir: /var/run
+nginx_pid_path: /var/run/nginx.pid
+
+nginx_worker_processes: auto
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+nginx_client_max_body_size: 25m
+
+tls_self_signed_generate: true
+tls_self_signed_cn: "{{ monitoring_vip | default(inventory_hostname) }}"
+tls_self_signed_days_valid: 3650
+tls_self_signed_country: ID
+tls_self_signed_state: Jakarta
+tls_self_signed_locality: Jakarta
+tls_self_signed_organization: agra-monitoring
+tls_self_signed_organizational_unit: it
+
+tls_cert_path: "{{ nginx_config_dir }}/ssl/agra.crt"
+tls_key_path: "{{ nginx_config_dir }}/ssl/agra.key"
+tls_ca_path: "{{ nginx_config_dir }}/ssl/agra-ca.crt"
+tls_dhparam_path: "{{ nginx_config_dir }}/ssl/dhparam.pem"
+tls_dhparam_bits: 2048
+tls_protocols: "TLSv1.2 TLSv1.3"
+tls_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+tls_prefer_server_ciphers: "on"
+tls_session_timeout: "1d"
+tls_session_cache: "shared:SSL:10m"
+tls_session_tickets: "off"
+tls_stapling: "on"
+tls_stapling_verify: "on"
+tls_hsts_max_age: "31536000"
+tls_hsts_include_subdomains: true
+tls_hsts_preload: false
+
+grafana_backend_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}"
+prometheus_backend_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"
+server_name: "{{ monitoring_vip | default(inventory_hostname) }} _"
+nginx_http_port: 80
+nginx_https_port: 443

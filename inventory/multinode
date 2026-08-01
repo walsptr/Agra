@@ -1,0 +1,22 @@
+[monitoring]
+mon1 ansible_host=10.0.0.11
+mon2 ansible_host=10.0.0.12
+
+[app]
+app1 ansible_host=10.0.0.21
+app2 ansible_host=10.0.0.22
+
+[node_exporter:children]
+monitoring
+app
+
+[grafana:children]
+monitoring
+
+[prometheus:children]
+monitoring
+
+[monitoring:vars]
+monitoring_vip=10.0.0.100
+monitoring_vip_interface=eth0
+enable_ha_grafana=true
