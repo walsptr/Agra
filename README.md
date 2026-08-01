@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./img/logo-light.svg" alt="Agra Logo" width="140" style="max-width: 100%; height: auto;"/>
+  <img src="./img/logo-light.svg" alt="Agra Logo" width="300" style="max-width: 100%; height: auto;"/>
 </p>
 
 # Agra
