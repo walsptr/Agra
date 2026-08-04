@@ -54,7 +54,6 @@
     group: root
     mode: '0600'
     backup: true
-    validate: 'keepalived -t -f %s 2>&1 || true'
   notify: ['restart keepalived']
   tags: ['keepalived', 'config', 'conf']
 

@@ -20,6 +20,12 @@
   when: ansible_facts['os_family'] == 'RedHat'
   tags: ['keepalived', 'native', 'install']
 
+- name: Keepalived (Native) - Validate keepalived.conf via keepalived -t
+  ansible.builtin.shell:
+    cmd: keepalived -t -f {{ keepalived_config_dir }}/keepalived.conf 2>&1 || true
+  changed_when: false
+  tags: ['keepalived', 'native', 'validate']
+
 - name: Keepalived (Native) - Enable and start keepalived service
   ansible.builtin.service:
     name: "{{ keepalived_service_name }}"

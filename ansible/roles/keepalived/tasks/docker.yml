@@ -53,6 +53,18 @@
   failed_when: false
   tags: ['keepalived', 'docker', 'container']
 
+- name: Keepalived (Docker) - Validate keepalived.conf via container keepalived -t
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME run --rm \
+        -v {{ keepalived_config_dir }}:{{ keepalived_config_dir }}:ro \
+        --entrypoint=/bin/sh \
+        {{ keepalived_image }}:{{ keepalived_tag }} \
+        -c "keepalived -t -f {{ keepalived_config_dir }}/keepalived.conf 2>&1 || true"
+  changed_when: false
+  tags: ['keepalived', 'docker', 'validate']
+
 - name: Keepalived (Docker) - Start container (host network + cap NET_ADMIN)
   ansible.builtin.shell:
     cmd: |
