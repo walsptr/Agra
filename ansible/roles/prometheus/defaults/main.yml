@@ -19,10 +19,5 @@ prometheus_native_binary_path: /usr/local/bin/prometheus
 prometheus_native_binary_url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_native_version }}/prometheus-{{ prometheus_native_version }}.linux-amd64.tar.gz"
 prometheus_native_tools_path: /usr/local/bin/promtool
 prometheus_web_external_url: ""
-prometheus_web_listen_address: >-
-  {% if enable_nginx | default(true) | bool and not (expose_prometheus_via_nginx | default(false) | bool) %}
-  127.0.0.1:{{ prometheus_port }}
-  {%- else %}
-  0.0.0.0:{{ prometheus_port }}
-  {%- endif %}
+prometheus_web_listen_address: "{{ ((enable_nginx | default(true) | bool) and not (expose_prometheus_via_nginx | default(false) | bool)) | ternary('127.0.0.1:' ~ prometheus_port, '0.0.0.0:' ~ prometheus_port) | trim }}"
 prometheus_skip_head: "65534"
