@@ -17,8 +17,9 @@ grafana_image: grafana/grafana
 grafana_tag: "11.2.0"
 grafana_native_version: "11.2.0"
 grafana_data_dir: /var/lib/agra/grafana
-grafana_database_password: "{{ vault_grafana_database_password | default('') }}"
-grafana_admin_password: "{{ vault_grafana_admin_password | default('admin') }}"
+grafana_database_password: ""
+grafana_admin_password: "admin"
+grafana_secret_key: "CHANGE_ME_GRAFANA_SECRET_KEY_MIN_32_CHARS"
 
 # 3. Prometheus
 enable_prometheus: true
@@ -49,7 +50,7 @@ keepalived_router_id: 51
 keepalived_check_interval: 2
 keepalived_fall_count: 3
 keepalived_rise_count: 2
-keepalived_auth_pass: "{{ vault_keepalived_auth_pass | default('') }}"
+keepalived_auth_pass: ""
 
 # 6. Nginx/TLS
 enable_nginx: true
@@ -69,7 +70,7 @@ backup_s3_enabled: false
 backup_s3_bucket: ""
 backup_s3_endpoint: ""
 backup_s3_region: ""
-backup_s3_access_key: "{{ vault_backup_s3_access_key | default('') }}"
-backup_s3_secret_key: "{{ vault_backup_s3_secret_key | default('') }}"
+backup_s3_access_key: ""
+backup_s3_secret_key: ""
 enable_scheduled_backup: false
 backup_schedule_cron: "0 2 * * *"

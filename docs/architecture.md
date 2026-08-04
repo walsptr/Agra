@@ -64,7 +64,7 @@ agra/
 │   ├── cli.py                         # Main entry point click/argparse
 │   └── commands/                      # 9 module: check, genpwd, deploy, upgrade, rollback, destroy, backup, restore, tls
 ├── ansible/
-│   ├── ansible.cfg                    # Config ansible (vault_password_file, roles_path, dll)
+│   ├── ansible.cfg                    # Config ansible (roles_path, dll)
 │   ├── site.yml                       # Master playbook deploy penuh
 │   ├── playbooks/                     # Playbook per lifecycle stage
 │   │   ├── precheck.yml               # Semua assert validasi terpusat
@@ -94,7 +94,7 @@ agra/
 │   └── multinode                      # 2+ node monitoring HA + host tambahan dimonitor
 ├── etc/agra/                          # Template config default untuk di-copy ke /etc/agra managed host
 │   ├── globals.yml                    # Non-secret vars (157+)
-│   ├── passwords.yml                  # Secret vars (wajib di-vault)
+│   ├── passwords.yml                  # Secret vars (plaintext chmod 0600, di .gitignore)
 │   └── config/                        # Custom config override user — first_found priority
 │       ├── grafana/                   # override grafana.ini.j2, dashboards/*.json
 │       ├── prometheus/                # override prometheus.yml.j2
@@ -104,7 +104,6 @@ agra/
 ├── tests/molecule/                    # Test per role (idempotency, HA 2-node, dst)
 ├── requirements.txt                   # PyYAML, dll (TIDAK termasuk ansible-core)
 ├── setup.py / pyproject.toml          # pip install -e . → entry point `agra`
-├── .vault_pass                        # Master password ansible-vault (gitignore!)
 └── .gitignore
 ```
 
@@ -227,7 +226,7 @@ Daftar 9 perintah `agra` (lihat [commands.md](./commands.md) untuk detail penuh 
 | Command | Fungsi Singkat |
 |---|---|
 | `agra check` | Preflight validation (read-only) |
-| `agra genpwd` | Generate random passwords → vault encrypt |
+| `agra genpwd` | Generate random passwords 14 karakter plaintext (chmod 0600) |
 | `agra deploy` | Deploy/reconfigure stack (idempotent) |
 | `agra upgrade` | Rolling upgrade serial:1 + backup otomatis |
 | `agra rollback` | Rollback versi + warning downgrade major |

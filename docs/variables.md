@@ -2,7 +2,7 @@
 
 Referensi lengkap seluruh variabel konfigurasi agra, dikelompokkan per kategori sesuai komponen. Lokasi utama:
 - **Non-secret**: `etc/agra/globals.yml`
-- **Secret (wajib di-vault)**: `etc/agra/passwords.yml` (direferensikan dengan prefix `vault_*`)
+- **Secret**: `etc/agra/passwords.yml` (stored plaintext — chmod 0600 + included via group_vars/all.yml, sudah di .gitignore)
 
 Konvensi penamaan:
 - Flag boolean: **prefix `enable_`** (contoh: `enable_grafana`, `enable_https`)
@@ -56,14 +56,14 @@ Semua variabel untuk deployment Grafana (visualisasi dashboard), termasuk 3 opsi
 | `grafana_provisioning_dir` | string | `{{ grafana_config_dir }}/provisioning` | Root provisioning (datasources, dashboards, plugins, notifiers) |
 | `grafana_dashboards_override_dir` | string | `/etc/agra/config/grafana/dashboards` | Path override dashboard JSON user (taruh `.json` disini → auto-load) |
 | `grafana_admin_user` | string | `admin` | Username admin dashboard Grafana |
-| `grafana_admin_password` | string (secret) | vault ref | Password admin dashboard → via `vault_grafana_admin_password` dari passwords.yml |
+| `grafana_admin_password` | string (secret) | `admin` | Password admin dashboard → ref passwords.yml field `grafana_admin_password` (override default "admin") |
 | `grafana_database` | string | `sqlite` | Backend database: `sqlite` \| `mysql` \| `postgresql` |
 | `grafana_database_ssl_mode` | string | `disable` | SSL mode koneksi DB: `disable` \| `require` \| `verify-ca` \| `verify-full` |
 | `grafana_database_host` | string | `""` | Host/IP database (WAJIB diisi jika mysql/postgresql. DB external yang sudah ada — agra TIDAK install DB) |
 | `grafana_database_port` | int (computed) | conditional | 3306 (mysql), 5432 (postgresql), 0 (sqlite) |
 | `grafana_database_name` | string | `grafana` | Nama database |
 | `grafana_database_user` | string | `grafana` | User database |
-| `grafana_database_password` | string (secret) | vault ref | Password database → ref `vault_grafana_database_password` |
+| `grafana_database_password` | string (secret) | `""` | Password database → ref passwords.yml field `grafana_database_password` |
 | `grafana_sqlite_path` | string | `{{ grafana_data_dir }}/grafana.db` | Path absolute file sqlite database |
 | `grafana_sqlite_sync_method` | string | `rsync` | Metode sinkronisasi sqlite antar node untuk HA |
 | `grafana_sqlite_sync_interval` | string | `*/5 * * * *` | Cron expression interval sync (default tiap 5 menit) |
@@ -72,7 +72,7 @@ Semua variabel untuk deployment Grafana (visualisasi dashboard), termasuk 3 opsi
 | `grafana_server_root_url` | string (computed) | conditional | Root URL full. Otomatis pakai `monitoring_vip` jika HA, else host+port via nginx |
 | `grafana_server_protocol` | string | `http` | Protocol internal backend Grafana (http/https). HTTPS di-terminate oleh Nginx. |
 | `grafana_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
-| `grafana_secret_key` | string (secret) | vault ref | Secret key untuk signing session, CSRF, remember cookie → `vault_grafana_secret_key` |
+| `grafana_secret_key` | string (secret) | `CHANGE_ME_GRAFANA_SECRET_KEY_MIN_32_CHARS` | Secret key untuk signing session, CSRF, remember cookie → ref passwords.yml field `grafana_secret_key` |
 | `grafana_web_listen_address` | string (computed) | conditional | Bind address. `127.0.0.1:3000` jika Nginx aktif (recommended), else `0.0.0.0:3000` |
 | `grafana_prometheus_datasource_name` | string | `Prometheus` | Nama display datasource Prometheus di UI Grafana |
 | `grafana_prometheus_datasource_uid` | string | `prometheus-main` | UID datasource stabil (untuk referensi di dashboard JSON via `uid`) |
@@ -150,7 +150,7 @@ Keepalived untuk Virtual IP (VRRP v2) cluster monitoring multi-node. **Otomatis 
 | `monitoring_vip_interface` | string | computed | Interface network untuk bind VIP. Default: `ansible_default_ipv4.interface` → fallback `eth0` |
 | `keepalived_router_id` | int | `51` | VRRP virtual router ID 0-255. **HARUS UNIK** antar VRRP cluster di segmen L2 yang sama. |
 | `keepalived_vrrp_instance` | string | `VI_MONITORING_01` | Nama VRRP instance di keepalived.conf |
-| `keepalived_auth_pass` | string (secret) | vault ref | Password autentikasi VRRP (plaintext) → ref `vault_keepalived_auth_pass` |
+| `keepalived_auth_pass` | string (secret) | `""` | Password autentikasi VRRP (plaintext) → ref passwords.yml field `keepalived_auth_pass` |
 | `keepalived_check_interval` | int | `2` | Interval health check (detik) |
 | `keepalived_fall_count` | int | `3` | Jumlah kegagalan berturut-turut sebelum node dianggap unhealthy → VIP pindah |
 | `keepalived_rise_count` | int | `2` | Jumlah sukses berturut sebelum node dianggap sehat kembali |
@@ -245,22 +245,22 @@ Backup local-first (default), opsional mirror ke S3-compatible object storage.
 | `backup_s3_bucket` | string | `""` | Nama bucket S3 |
 | `backup_s3_endpoint` | string | `""` | Endpoint S3-compatible. Kosong = AWS S3 standar; isi untuk MinIO, Cloudflare R2, dll |
 | `backup_s3_region` | string | `""` | Region S3 (AWS) |
-| `backup_s3_access_key` | string (secret) | `""` | Access key S3 → ref `vault_backup_s3_access_key` |
-| `backup_s3_secret_key` | string (secret) | `""` | Secret key S3 → ref `vault_backup_s3_secret_key` |
+| `backup_s3_access_key` | string (secret) | `""` | Access key S3 → ref passwords.yml field `backup_s3_access_key` |
+| `backup_s3_secret_key` | string (secret) | `""` | Secret key S3 → ref passwords.yml field `backup_s3_secret_key` |
 | `enable_scheduled_backup` | bool | `false` | Aktifkan backup terjadwal via cron di control node |
 | `backup_schedule_cron` | string | `0 2 * * *` | Jadwal cron backup otomatis (default: jam 2 pagi setiap hari) |
 
 ---
 
-## 8. Passwords (Vaulted)
+## 8. Passwords
 
-Semua variabel di bawah ini **hanya boleh didefinisikan di `etc/agra/passwords.yml`** yang ter-encrypt ansible-vault. Di `globals.yml` cukup direferensikan (contoh: `grafana_admin_password: "{{ vault_grafana_admin_password }}"`).
+Semua variabel di bawah ini **didefinisikan di `etc/agra/passwords.yml`** dalam format plaintext dengan chmod 0600 (hanya owner bisa baca). File ini SUDAH termasuk di `.gitignore` — JANGAN commit plaintext ke git. Variabel dari `passwords.yml` dioverride ke `globals.yml` dan role defaults secara otomatis oleh `group_vars/all.yml` (priority inventory > role defaults).
 
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
-| `vault_grafana_admin_password` | string (secret) | generate via `agra genpwd` | Password login admin dashboard Grafana |
-| `vault_grafana_database_password` | string (secret) | generate via `agra genpwd` | Password koneksi database Grafana (untuk backend mysql/postgresql external) |
-| `vault_grafana_secret_key` | string (secret) | generate via `agra genpwd` | Secret key signing: session cookie, CSRF token, remember-me cookie |
-| `vault_keepalived_auth_pass` | string (secret) | generate via `agra genpwd` | Password autentikasi VRRP keepalived (antar node monitoring cluster) |
-| `vault_backup_s3_access_key` | string (secret) | generate via `agra genpwd` | Access key credential untuk S3 backup mirror |
-| `vault_backup_s3_secret_key` | string (secret) | generate via `agra genpwd` | Secret key credential untuk S3 backup mirror |
+| `grafana_admin_password` | string (secret) | generate via `agra genpwd` (14 chars) | Password login admin dashboard Grafana |
+| `grafana_database_password` | string (secret) | generate via `agra genpwd` (14 chars) | Password koneksi database Grafana (untuk backend mysql/postgresql external) |
+| `grafana_secret_key` | string (secret) | generate via `agra genpwd` (14 chars) | Secret key signing: session cookie, CSRF token, remember-me cookie |
+| `keepalived_auth_pass` | string (secret) | generate via `agra genpwd` (14 chars) | Password autentikasi VRRP keepalived (antar node monitoring cluster) |
+| `backup_s3_access_key` | string (secret) | generate via `agra genpwd` (14 chars) | Access key credential untuk S3 backup mirror |
+| `backup_s3_secret_key` | string (secret) | generate via `agra genpwd` (14 chars) | Secret key credential untuk S3 backup mirror |

@@ -11,7 +11,7 @@ grafana_config_dir: /etc/grafana
 grafana_provisioning_dir: "{{ grafana_config_dir }}/provisioning"
 grafana_dashboards_override_dir: "/etc/agra/config/grafana/dashboards"
 grafana_admin_user: admin
-grafana_admin_password: "{{ vault_grafana_admin_password | default('admin') }}"
+grafana_admin_password: "admin"
 
 grafana_database: sqlite
 grafana_database_ssl_mode: disable
@@ -20,7 +20,7 @@ grafana_database_port: >-
   {% if grafana_database == 'mysql' %}3306{% elif grafana_database == 'postgresql' %}5432{% else %}0{% endif %}
 grafana_database_name: grafana
 grafana_database_user: grafana
-grafana_database_password: "{{ vault_grafana_database_password | default('') }}"
+grafana_database_password: ""
 grafana_sqlite_path: "{{ grafana_data_dir }}/grafana.db"
 
 grafana_sqlite_sync_method: rsync
@@ -38,7 +38,7 @@ grafana_server_root_url: >-
   {%- endif %}
 grafana_server_protocol: http
 grafana_log_level: info
-grafana_secret_key: "{{ vault_grafana_secret_key | default('CHANGE_ME_GRAFANA_SECRET_KEY_IN_PASSWORDS_YML') }}"
+grafana_secret_key: "CHANGE_ME_DEFAULT_SECRET_KEY"
 
 grafana_web_listen_address: >-
   {% if enable_nginx | default(true) | bool %}127.0.0.1:{{ grafana_port }}{% else %}0.0.0.0:{{ grafana_port }}{% endif %}

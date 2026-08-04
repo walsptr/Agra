@@ -14,14 +14,13 @@ agra check [OPTIONS]
 ### Deskripsi
 Jalankan seluruh pre-flight validation secara terpusat dari `playbooks/precheck.yml`. Command ini **read-only**, tidak pernah memodifikasi managed host. Dijalankan otomatis di awal `agra deploy`, `agra upgrade`, `agra rollback` — bisa dipanggil standalone untuk validasi tanpa aksi.
 
-Validasi mencakup: konektivitas ansible + become, ketersediaan `monitoring_vip` untuk HA, reachability database external (mysql/postgresql), expiry TLS cert, ketersediaan ruang disk, validasi format inventory, dan deteksi `passwords.yml` plaintext.
+Validasi mencakup: konektivitas ansible + become, ketersediaan `monitoring_vip` untuk HA, reachability database external (mysql/postgresql), expiry TLS cert, ketersediaan ruang disk, dan validasi format inventory.
 
 ### Flags List
 | Flag | Tipe | Default | Deskripsi |
 |---|---|---|---|
 | `-i, --inventory <PATH>` | string | auto-detect | Path file inventory (wajib jika tidak `inventory/all-in-one`) |
 | `-e, --extra-vars <KV>` | string | — | Extra vars format `key=value` atau `@file.yml` |
-| `--no-vault` | bool | false | Skip validasi vault (tidak disarankan production) |
 | `--warnings-as-errors` | bool | false | Treat warning sebagai hard fail |
 | `-t, --tags <TAGS>` | string | — | Hanya jalankan precheck tag tertentu (mis. `tls`, `ha`) |
 | `-l, --limit <HOST>` | string | — | Batasi precheck ke host/subset tertentu |
@@ -54,30 +53,24 @@ agra genpwd [OPTIONS]
 ```
 
 ### Deskripsi
-Generate random password aman (32 karakter URL-safe, cryptographically secure) ke `etc/agra/passwords.yml`. **Idempotent secara default**: field password yang sudah terisi TIDAK ditimpa. Password yang di-generate meliputi 6 field: `vault_grafana_admin_password`, `vault_grafana_database_password`, `vault_grafana_secret_key`, `vault_keepalived_auth_pass`, `vault_backup_s3_access_key`, `vault_backup_s3_secret_key`.
+Generate random password aman (14 karakter URL-safe, cryptographically secure) ke `etc/agra/passwords.yml` dalam format plaintext dengan chmod 0600. **Idempotent secara default**: file passwords.yml yang sudah terisi TIDAK ditimpa kecuali dengan `--force`. Password yang di-generate meliputi 6 field: `grafana_admin_password`, `grafana_database_password`, `grafana_secret_key`, `keepalived_auth_pass`, `backup_s3_access_key`, `backup_s3_secret_key`.
 
 ### Flags List
 | Flag | Tipe | Default | Deskripsi |
 |---|---|---|---|
-| `--vault` | bool | false | Setelah generate → langsung `ansible-vault encrypt` file passwords.yml |
-| `--force` | bool | false | **Timpa SEMUA password existing** (wajib hati-hati) |
-| `--length <INT>` | int | 32 | Panjang password per field (min 16) |
-| `--output <PATH>` | string | `etc/agra/passwords.yml` | Custom output path |
-| `--rotate <LIST>` | string | — | Rotate spesifik field saja (comma-separated: `grafana_admin,keepalived_auth_pass`) |
-| `--no-special-chars` | bool | false | Hanya alphanumeric (tanpa simbol) |
-| `--dry-run` | bool | false | Cetak password ke stdout TANPA menulis file |
-| `-y, --yes` | bool | false | Non-interactive skip konfirmasi `--force` |
+| `--force` | bool | false | **Timpa SEMUA password existing** (wajib hati-hati — backup otomatis dibuat dulu) |
+| `-v, --verbose` | level | 0 | Verbosity output ansible |
 
 ### Contoh
 ```bash
-# Generate + encrypt langsung (SARANKAN untuk production)
-agra genpwd --vault
+# Generate password 14 karakter plaintext (chmod 0600 otomatis)
+agra genpwd
 
-# Kelihatan passwordnya tanpa tulis file (dev/testing)
-agra genpwd --dry-run
+# Re-generate SEMUA password (overwrite existing, backup otomatis dibuat)
+agra genpwd --force
 
-# Rotate specific password saja (misal lupa admin grafana)
-agra genpwd --rotate grafana_admin --vault -y
+# Verifikasi isi file (hanya owner yang bisa baca)
+cat etc/agra/passwords.yml
 ```
 
 ---

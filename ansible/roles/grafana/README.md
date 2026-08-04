@@ -38,7 +38,7 @@ grafana_database_host: "db.example.com"
 grafana_database_port: 5432
 grafana_database_name: "grafana_prod"
 grafana_database_user: "grafana"
-# grafana_database_password via vault_grafana_database_password di passwords.yml
+# grafana_database_password via passwords.yml field grafana_database_password
 ```
 
 Custom dashboard JSON: taruh file `.json` di `/etc/agra/config/grafana/dashboards/` — otomatis tersalin ke provisioning provider setiap deploy. Custom `grafana.ini` override via `/etc/agra/config/grafana/grafana.ini.j2`.

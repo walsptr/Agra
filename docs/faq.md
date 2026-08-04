@@ -122,20 +122,19 @@ ip a | grep -A 2 "10.0.0.100"
 
 ---
 
-## Q5: Lupa password master vault (.vault_pass) apakah bisa direcover? Bagaimana jalan keluarnya?
+## Q5: Bagaimana jika saya lupa password admin Grafana / ingin reset semua password?
 
-**Jawaban:** Sayangnya **TIDAK BISA** (hilang permanen demi keamanan desain Ansible Vault — AES-256, tanpa backdoor). File `passwords.yml` yang dienkripsi tidak akan pernah bisa didecrypt tanpa vault pass yang sama persis.
+**Jawaban:** Jalankan `agra genpwd --force` untuk generate ulang SEMUA 6 password di `passwords.yml`. Peringatan: Ini AKAN MENIMPA passwords.yml LAMA. Password admin Grafana dan secret key Grafana AKAN BERUBAH. Setelah itu jalankan re-deploy agar credential baru terinject ke semua service.
 
-**Jalan keluar (satu-satunya): Generate ulang passwords dengan flag `--force`:**
+**Tidak ada cara recover password lama jika sudah ter-overwrite.** Backup dulu file passwords.yml sebelum force jika perlu.
 
 ```bash
-# ⚠️ PERINGATAN KERAS: Ini AKAN MENIMPA passwords.yml LAMA.
-# Password admin Grafana yang LAMA (vault_grafana_admin_password)
-# dan secret key Grafana LAMA (vault_grafana_secret_key) AKAN DIGANTI.
-# Setelah deploy, admin user Grafana login menggunakan PASSWORD BARU ini.
-touch .vault_pass && echo "master-password-BARU-yang-diingat" > .vault_pass
-chmod 0600 .vault_pass
-agra genpwd --vault --force
+# ⚠️ PERINGATAN KERAS: Ini AKAN MENIMPA SEMUA password di passwords.yml LAMA.
+# Sebelum force, backup dulu jika perlu:
+cp etc/agra/passwords.yml etc/agra/passwords.yml.bak
+
+# Generate ulang SEMUA password (otomatis buat backup .bak-epoch duluan)
+agra genpwd --force
 ```
 
 Kemudian re-deploy stack agar credential baru terinject:

@@ -9,7 +9,7 @@
   vars:
     passwords_file: "{{ playbook_dir }}/../../etc/agra/passwords.yml"
     pwd_charset: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-    pwd_length: 32
+    pwd_length: 14
     genpwd_force: "{{ genpwd_force | default(false) }}"
 
   tasks:
@@ -43,17 +43,17 @@
     - name: 'GenPwd — Generate 6 random passwords via community.general.random_string lookup'
       ansible.builtin.set_fact:
         _pwd_grafana_admin: >-
-          {{ lookup('community.general.random_string', length=pwd_length, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
+          {{ lookup('community.general.random_string', length=14, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
         _pwd_grafana_db: >-
-          {{ lookup('community.general.random_string', length=pwd_length, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
+          {{ lookup('community.general.random_string', length=14, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
         _pwd_keepalived: >-
-          {{ lookup('community.general.random_string', length=8, override_special='', base64=false, min_lower=2, min_upper=2, min_numeric=2) }}
+          {{ lookup('community.general.random_string', length=14, override_special='', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
         _pwd_grafana_secret_key: >-
-          {{ lookup('community.general.random_string', length=48, override_special='-_.', base64=false, min_lower=8, min_upper=8, min_numeric=8) }}
+          {{ lookup('community.general.random_string', length=14, override_special='-_.', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
         _pwd_backup_s3_access: >-
-          {{ lookup('community.general.random_string', length=20, override_special='', base64=false, min_lower=5, min_upper=5, min_numeric=5) }}
+          {{ lookup('community.general.random_string', length=14, override_special='', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
         _pwd_backup_s3_secret: >-
-          {{ lookup('community.general.random_string', length=40, override_special='-_/', base64=false, min_lower=10, min_upper=10, min_numeric=10) }}
+          {{ lookup('community.general.random_string', length=14, override_special='-_/', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
       ignore_errors: true
       register: _lookup_pwd
 
@@ -77,12 +77,12 @@
                   chars = base + extra
                   return ''.join(secrets.choice(chars) for _ in range(n))
               out = {
-                'vault_grafana_admin_password': gen({{ pwd_length }}),
-                'vault_grafana_database_password': gen({{ pwd_length }}),
-                'vault_grafana_secret_key': gen(48, extra='-.'),
-                'vault_keepalived_auth_pass': gen(8),
-                'vault_backup_s3_access_key': gen(20),
-                'vault_backup_s3_secret_key': gen(40, extra='-_/'),
+                'grafana_admin_password': gen(14),
+                'grafana_database_password': gen(14),
+                'grafana_secret_key': gen(14),
+                'keepalived_auth_pass': gen(14),
+                'backup_s3_access_key': gen(14),
+                'backup_s3_secret_key': gen(14),
               }
               sys.stdout.write(json.dumps(out, indent=2))
 
@@ -98,12 +98,12 @@
 
         - name: 'GenPwd (Fallback) — Set fact dari output py'
           ansible.builtin.set_fact:
-            _pwd_grafana_admin: "{{ _gen_pwd_map['vault_grafana_admin_password'] }}"
-            _pwd_grafana_db: "{{ _gen_pwd_map['vault_grafana_database_password'] }}"
-            _pwd_grafana_secret_key: "{{ _gen_pwd_map['vault_grafana_secret_key'] }}"
-            _pwd_keepalived: "{{ _gen_pwd_map['vault_keepalived_auth_pass'] }}"
-            _pwd_backup_s3_access: "{{ _gen_pwd_map['vault_backup_s3_access_key'] }}"
-            _pwd_backup_s3_secret: "{{ _gen_pwd_map['vault_backup_s3_secret_key'] }}"
+            _pwd_grafana_admin: "{{ _gen_pwd_map['grafana_admin_password'] }}"
+            _pwd_grafana_db: "{{ _gen_pwd_map['grafana_database_password'] }}"
+            _pwd_grafana_secret_key: "{{ _gen_pwd_map['grafana_secret_key'] }}"
+            _pwd_keepalived: "{{ _gen_pwd_map['keepalived_auth_pass'] }}"
+            _pwd_backup_s3_access: "{{ _gen_pwd_map['backup_s3_access_key'] }}"
+            _pwd_backup_s3_secret: "{{ _gen_pwd_map['backup_s3_secret_key'] }}"
 
         - name: 'GenPwd (Fallback) — Cleanup temp py'
           ansible.builtin.file:
@@ -112,42 +112,38 @@
       when:
         - _lookup_pwd is failed or (_pwd_grafana_admin | default('') | length == 0)
 
-    - name: 'GenPwd — Tulis passwords.yml (vault friendly PREFIX vault_)'
+    - name: 'GenPwd — Tulis passwords.yml (TANPA VAULT, plaintext 14 chars)'
       ansible.builtin.copy:
         dest: "{{ passwords_file }}"
         mode: '0600'
-        owner: "{{ ansible_env.USER }}"
-        group: "{{ ansible_env.USER }}"
         content: |
           # ============================================================
-          # etc/agra/passwords.yml — AGRA SECRETS (VAULT PREFIX — vault_)
-          # Generated — {{ ansible_date_time.date | default('today') }}T{{ ansible_date_time.time | default('') }}
+          # etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
+          # Generated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
           #
-          # ❗ PRODUKSI — ENKRIPSI DENGAN `ansible-vault encrypt etc/agra/passwords.yml`
-          # ❗ JANGAN commit PLAINTEXT passwords.yml ke GIT (sudah di .gitignore)
-          # ❗ JANGAN HAPUS PREFIX `vault_` DARI NAMA VARIABEL (SCHEMA §8)
+          # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600. JANGAN PERNAH commit PLAINTEXT passwords.yml ke GIT (SUDAH di .gitignore). Jika butuh enkripsi, pakai tool external seperti git-crypt / blackbox / sops.
           # ============================================================
 
           # Grafana admin password (login ke UI https //vip/grafana/)
-          vault_grafana_admin_password: "{{ _pwd_grafana_admin }}"
+          grafana_admin_password: "{{ _pwd_grafana_admin }}"
 
           # Grafana external database password (mysql / postgresql)
-          vault_grafana_database_password: "{{ _pwd_grafana_db }}"
+          grafana_database_password: "{{ _pwd_grafana_db }}"
 
           # Grafana [security] secret_key (signing session cookies, link sharing)
-          vault_grafana_secret_key: "{{ _pwd_grafana_secret_key }}"
+          grafana_secret_key: "{{ _pwd_grafana_secret_key }}"
 
-          # Keepalived VRRP authentication password (8 char, antar node sync)
-          vault_keepalived_auth_pass: "{{ _pwd_keepalived }}"
+          # Keepalived VRRP authentication password (antar node sync)
+          keepalived_auth_pass: "{{ _pwd_keepalived }}"
 
           # S3 access credentials (backup.yml — HANYA jika backup_s3_bucket di-set)
-          vault_backup_s3_access_key: "{{ _pwd_backup_s3_access }}"
-          vault_backup_s3_secret_key: "{{ _pwd_backup_s3_secret }}"
+          backup_s3_access_key: "{{ _pwd_backup_s3_access }}"
+          backup_s3_secret_key: "{{ _pwd_backup_s3_secret }}"
       no_log: true
 
     - name: 'GenPwd — Success info'
       ansible.builtin.debug:
         msg:
-          - "✅ AGRA GENPWD SELESAI → 6 random password ditulis ke {{ passwords_file }}"
-          - "ℹ️ Passwords dalam format vault-friendly prefix `vault_` → aman di-refer globals.yml via `{{ vault_... | default('fallback') }}`"
-          - "ℹ️ SELANJUTNYA (opsional untuk production) — `ansible-vault encrypt etc/agra/passwords.yml`"
+          - "✅ AGRA GENPWD SELESAI → 6 random password 14 karakter ditulis ke {{ passwords_file }}"
+          - "ℹ️ Passwords dalam plaintext. MODE 0600 hanya owner bisa baca. FILE INI TERMASUK .gitignore JANGAN di-commit."
+          - "ℹ️ SELANJUTNYA: Edit globals.yml sesuai environment, lalu jalankan `agra check` lalu `agra deploy`."

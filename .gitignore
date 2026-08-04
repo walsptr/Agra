@@ -1,5 +1,4 @@
-# Vault & passwords
-.vault_pass
+# Passwords & sensitive files (JANGAN commit ke git!)
 etc/agra/passwords.yml
 etc/agra/passwords.yml.bak
 

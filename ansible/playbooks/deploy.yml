@@ -94,7 +94,7 @@
         msg:
           - "✅ AGRA DEPLOY SELESAI"
           - "Grafana URL: {{ access_url | trim }}"
-          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat etc/agra/passwords.yml vault_grafana_admin_password (default fallback: admin)"
+          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat etc/agra/passwords.yml field grafana_admin_password (default fallback: admin jika belum run genpwd)"
           - "Prometheus: {% if expose_prometheus_via_nginx | default(false) | bool %}{{ access_url | trim | regex_replace('/grafana/', '/prometheus/') }}{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
       vars:
         enable_https: "{{ enable_https | default(true) | bool }}"

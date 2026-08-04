@@ -9,7 +9,7 @@ monitoring_vip_interface: "{{ ansible_default_ipv4['interface'] | default('eth0'
 
 keepalived_router_id: 51
 keepalived_vrrp_instance: VI_MONITORING_01
-keepalived_auth_pass: "{{ vault_keepalived_auth_pass | default('CHANGE_ME_KEEPALIVED_AUTH_PASSWORD_IN_PASSWORDS_YML') }}"
+keepalived_auth_pass: ""
 keepalived_check_interval: 2
 keepalived_fall_count: 3
 keepalived_rise_count: 2

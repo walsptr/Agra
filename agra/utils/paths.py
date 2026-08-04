@@ -60,7 +60,4 @@ def ansible_env() -> Dict[str, str]:
     env = os.environ.copy()
     env.setdefault("ANSIBLE_ROLES_PATH", str(ANSIBLE_DIR / "roles"))
     env.setdefault("ANSIBLE_CONFIG", str(PROJECT_ROOT / "ansible.cfg"))
-    vp = PROJECT_ROOT / ".vault_pass"
-    if vp.exists():
-        env.setdefault("ANSIBLE_VAULT_PASSWORD_FILE", str(vp))
     return env

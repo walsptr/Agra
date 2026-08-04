@@ -19,17 +19,12 @@ pip install -e .                   # Install entry point → command `agra` lang
 
 ## Quickstart 5 Langkah
 
-1. **Init Vault Password**:
+1. **Generate Passwords**:
    ```bash
-   touch .vault_pass && echo "your-vault-master-password" > .vault_pass && chmod 0600 .vault_pass
+   agra genpwd
    ```
 
-2. **Generate Passwords**:
-   ```bash
-   agra genpwd --vault
-   ```
-
-3. **Edit Konfigurasi & Inventory**:
+2. **Edit Konfigurasi & Inventory**:
    Edit `$EDITOR etc/agra/globals.yml` — setidaknya 3 variabel berikut:
    ```yaml
    agra_deployment_mode: docker     # docker | native
@@ -38,12 +33,12 @@ pip install -e .                   # Install entry point → command `agra` lang
    ```
    Kemudian edit inventory: pilih `inventory/all-in-one` (single node) atau `inventory/multinode` (multi-node HA).
 
-4. **Preflight Check**:
+3. **Preflight Check**:
    ```bash
    agra check -i inventory/all-in-one
    ```
 
-5. **Deploy**:
+4. **Deploy**:
    ```bash
    agra deploy -i inventory/all-in-one
    ```
@@ -53,8 +48,8 @@ pip install -e .                   # Install entry point → command `agra` lang
 
 | COMMAND | FUNGSI | CONTOH |
 |---|---|---|
-| `agra check` | Jalankan preflight validation (topologi, TLS expiry, konektivitas DB, secret plaintext warning). Read-only, tidak modifikasi host. | `agra check -i inventory/multinode -v` |
-| `agra genpwd` | Generate 6 random passwords ke `passwords.yml`. Idempotent, tidak overwrite existing. `--vault` langsung encrypt. | `agra genpwd --vault --force` |
+| `agra check` | Jalankan preflight validation (topologi, TLS expiry, konektivitas DB). Read-only, tidak modifikasi host. | `agra check -i inventory/multinode -v` |
+| `agra genpwd` | Generate 6 random passwords 14 karakter ke `passwords.yml` (plaintext chmod 0600). Idempotent, tidak overwrite existing kecuali --force. | `agra genpwd --force` |
 | `agra deploy` | Deploy/reconfigure monitoring stack (idempotent, run berulang OK). Precheck otomatis jalan duluan. | `agra deploy -i inventory/all-in-one -t grafana` |
 | `agra upgrade` | Rolling upgrade serial:1 (standby dulu, master terakhir), max_fail 0. Backup otomatis sebelum upgrade. | `agra upgrade --grafana-tag 11.3.0 --prometheus-tag v2.54.1` |
 | `agra rollback` | Rollback ke versi sebelumnya via `--*-tag` atau `-e extra_vars`. Warning eksplisit untuk downgrade major. | `agra rollback --prometheus-tag v2.53.0 --yes` |

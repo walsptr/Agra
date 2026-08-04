@@ -21,8 +21,6 @@ MULTINODE_INVENTORY: Path = INVENTORY_DIR / "multinode"
 
 BACKUP_ROOT_DIR: Path = Path("/var/lib/agra/backups")
 
-VAULT_PASSWORD_FILE: Path = PROJECT_ROOT / ".vault_pass"
-
 PLAYBOOKS = {
     "precheck": PLAYBOOK_DIR / "precheck.yml",
     "deploy": PLAYBOOK_DIR / "deploy.yml",

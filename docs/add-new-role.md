@@ -143,7 +143,7 @@ Pengecekan Step 3:
 - ✅ Flag boolean: `enable_*` prefix? (YA: `enable_alertmanager`, `enable_ha_alertmanager`)
 - ✅ Versi dipisah docker vs native? (YA: `alertmanager_tag` XOR `alertmanager_native_version`)
 - ✅ Semua path punya `_dir` / `_path` suffix? (YA)
-- ✅ Tidak ada secret plaintext disini? (YA — secret kalau ada masuk `passwords.yml` sebagai `vault_*`)
+- ✅ Tidak ada secret plaintext disini? (YA — secret kalau ada masuk `passwords.yml` sebagai plaintext, tidak perlu prefix. Pastikan passwords.yml sudah di .gitignore + chmod 0600)
 
 ---
 

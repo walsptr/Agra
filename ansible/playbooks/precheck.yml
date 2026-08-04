@@ -172,34 +172,6 @@
         - tls_cert_path | default('') | length > 0
       ignore_errors: true
 
-    - name: 'Precheck (SECRETS) — Warning jika passwords.yml plaintext TIDAK dienkripsi'
-      block:
-        - name: 'Precheck Secrets — Stat passwords.yml'
-          ansible.builtin.stat:
-            path: "{{ playbook_dir }}/../../etc/agra/passwords.yml"
-          register: _pwd_stat
-          delegate_to: localhost
-        - name: 'Precheck Secrets — Try decrypt (jika vaulted = OK; plaintext = WARNING)'
-          ansible.builtin.command: >-
-            ansible-vault view {{ playbook_dir }}/../../etc/agra/passwords.yml
-          changed_when: false
-          failed_when: false
-          register: _vault_check
-          delegate_to: localhost
-          check_mode: false
-        - name: 'Precheck Secrets — WARNING kalau decrypt error TAPI file ISI'
-          ansible.builtin.debug:
-            msg: >-
-              ⚠️ PERINGATAN SECURITY: passwords.yml TIDAK dienkripsi / plaintext.
-              File dibiarkan plaintext TIDAK disarankan untuk production. Jalankan `ansible-vault encrypt
-              etc/agra/passwords.yml` untuk enkripsi dengan vault password (AGENTS.md §Batasan Keras).
-          when:
-            - _pwd_stat.stat is defined
-            - _pwd_stat.stat.size | default(0) > 50
-            - _vault_check.rc is defined
-            - _vault_check.rc != 0
-      ignore_errors: true
-      run_once: true
 
     - name: 'Precheck (DEPLOYMENT MODE) — Mode docker/native valid'
       ansible.builtin.assert:

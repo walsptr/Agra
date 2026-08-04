@@ -56,18 +56,9 @@ agra --help       # → keluar daftar 9 command
 
 ---
 
-## 2. Init Config (Vault Password + globals.yml)
+## 2. Init Config (globals.yml)
 
-**Step 2A: Init Ansible Vault master password** — file ini dipakai untuk encrypt/decrypt `etc/agra/passwords.yml`:
-```bash
-touch .vault_pass
-echo "your-vault-master-password-min-12-chars-strong" > .vault_pass
-chmod 0600 .vault_pass
-```
-
-> ⚠️ **JANGAN commit `.vault_pass` dan `passwords.yml` plaintext ke git**. Keduanya sudah ada di `.gitignore` default.
-
-**Step 2B: Review dan edit `etc/agra/globals.yml`** — file ini adalah single source of truth untuk semua feature flag, versi service, dan path:
+**Step 2A: Review dan edit `etc/agra/globals.yml`** — file ini adalah single source of truth untuk semua feature flag, versi service, dan path:
 ```bash
 $EDITOR etc/agra/globals.yml
 ```
@@ -90,31 +81,30 @@ monitoring_vip: 10.0.0.100
 
 ## 3. GenPwd — Generate Password Random
 
-`agra genpwd` mengisi field kosong di `etc/agra/passwords.yml` dengan random string aman (32 chars, URL-safe). **Idempotent** — field yang sudah terisi TIDAK ditimpa kecuali pakai `--force`.
+`agra genpwd` mengisi field kosong di `etc/agra/passwords.yml` dengan random string aman (14 chars, URL-safe). **Idempotent** — field yang sudah terisi TIDAK ditimpa kecuali pakai `--force`. File passwords.yml disimpan dalam plaintext dengan chmod 0600 (hanya owner bisa baca) dan SUDAH termasuk di dalam `.gitignore`.
 
 ```bash
-# Generate password → langsung ansible-vault encrypt (SARANKAN)
-agra genpwd --vault
+# Generate password 14 karakter (plaintext, chmod 0600)
+agra genpwd
 
-# Verifikasi file ter-encrypt
-ansible-vault view etc/agra/passwords.yml
-# Masukkan .vault_pass → keluar 6 field:
-#   vault_grafana_admin_password
-#   vault_grafana_database_password
-#   vault_grafana_secret_key
-#   vault_keepalived_auth_pass
-#   vault_backup_s3_access_key
-#   vault_backup_s3_secret_key
+# Verifikasi file isi field:
+cat etc/agra/passwords.yml
+# Keluar 6 field:
+#   grafana_admin_password
+#   grafana_database_password
+#   grafana_secret_key
+#   keepalived_auth_pass
+#   backup_s3_access_key
+#   backup_s3_secret_key
 ```
 
 Opsi lain:
 ```bash
-# Generate tanpa encrypt (tidak disarankan production)
-agra genpwd
-
-# Re-generate SEMUA password (overwrite existing) + encrypt
-agra genpwd --force --vault
+# Re-generate SEMUA password (overwrite existing)
+agra genpwd --force
 ```
+
+> ⚠️ **PRODUKSI**: File `passwords.yml` disimpan plaintext. Lindungi dengan `chmod 0600` (sudah otomatis di-set oleh `agra genpwd`). JANGAN PERNAH commit file ini ke git (sudah di `.gitignore`). Jika butuh enkripsi, gunakan tool external seperti git-crypt, blackbox, atau sops.
 
 ---
 
@@ -199,7 +189,7 @@ Yang divalidasi (list tidak lengkap):
 - ✅ `monitoring_vip` terisi jika `groups['monitoring'] | length > 1`
 - ✅ Jika `grafana_database: mysql/postgresql` → `wait_for` ke host:port reachable
 - ✅ TLS self-signed expiry ≥ 30 hari (warning jika < 30)
-- ✅ `passwords.yml` ter-vault (warning jika plaintext di production)
+- ✅ `passwords.yml` permissions 0600 dan field terisi (warning jika masih kosong)
 - ✅ Jumlah node monitoring untuk HA ≥ 2
 - ✅ OS package manager siap (apt/yum/dnf cache update)
 - ✅ Ruang disk cukup untuk TSDB Prometheus
@@ -263,9 +253,9 @@ curl -k https://10.0.0.100/grafana/api/health
 
 1. Buka browser ke `https://<IP>/grafana` (single) atau `https://<VIP>/grafana` (HA)
 2. Username: `admin`
-3. Password: decrypt `vault_grafana_admin_password`:
+3. Password: lihat field `grafana_admin_password` di `passwords.yml`:
    ```bash
-   ansible-vault view etc/agra/passwords.yml | grep vault_grafana_admin_password
+   cat etc/agra/passwords.yml | grep grafana_admin_password
    ```
 4. Default datasource **Prometheus (UID: prometheus-main)** sudah tersambung otomatis
 5. Cek **Explore → Metrics browser** → ketik `node_cpu_seconds_total` → Run query → harus ada data dari semua host `[node_exporter]`
