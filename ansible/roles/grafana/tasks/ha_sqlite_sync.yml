@@ -5,7 +5,7 @@
 #           groups['monitoring'][1..] = STANDBY (tarik file grafana.db dari master via rsync double-buffer)
 # Double-buffer: rsync ke grafana.db.new dulu → mv atomik replace grafana.db (hindari partial write)
 
-- name: Grafana (HA SQLite) - Vars: set node_role
+- name: "Grafana (HA SQLite) - Vars: set node_role"
   ansible.builtin.set_fact:
     _grafana_ha_master_host: "{{ groups['monitoring'][0] }}"
     _grafana_ha_master_ip: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}"

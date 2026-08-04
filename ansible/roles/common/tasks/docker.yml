@@ -37,7 +37,7 @@
   ignore_errors: true
   tags: ['common', 'docker', 'service']
 
-- name: Common (Docker/Podman) - Check runtime availability: docker installed? group exists?
+- name: "Common (Docker/Podman) - Check runtime availability: docker installed? group exists?"
   ansible.builtin.shell:
     cmd: |
       set -e

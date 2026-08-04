@@ -48,7 +48,7 @@
     - grafana_database in ['mysql','postgresql']
   tags: ['grafana', 'validate', 'ha']
 
-- name: Grafana (HA Validate) - WARNING: enable_ha_grafana=false TAPI multi-node + sqlite = PERINGATAN (tidak fail, hanya debug)
+- name: "Grafana (HA Validate) - WARNING: enable_ha_grafana=false TAPI multi-node + sqlite = PERINGATAN (tidak fail, hanya debug)"
   ansible.builtin.debug:
     msg: >-
       PERINGATAN: groups['monitoring']={{ groups['monitoring'] | default([]) | length }} node TAPI enable_ha_grafana=false

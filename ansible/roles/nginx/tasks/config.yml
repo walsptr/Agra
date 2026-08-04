@@ -74,7 +74,7 @@
     - tls_cert_path == nginx_config_dir + '/ssl/agra.crt' or (tls_cert_path | dirname == nginx_config_dir + '/ssl' and (tls_cert_path is not exists or ansible_check_mode is true))
   tags: ['nginx', 'config', 'ssl']
 
-- name: Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)
+- name: "Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)"
   ansible.builtin.command:
     cmd: "openssl dhparam -out {{ tls_dhparam_path }} {{ tls_dhparam_bits | int }}"
     creates: "{{ tls_dhparam_path }}"
