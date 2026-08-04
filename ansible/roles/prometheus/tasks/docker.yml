@@ -53,7 +53,7 @@
         -v {{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro \
         --entrypoint=/bin/promtool \
         {{ prometheus_image }}:{{ prometheus_tag }} \
-        check config-files {{ prometheus_config_dir }}/prometheus.yml
+        check config {{ prometheus_config_dir }}/prometheus.yml
   changed_when: false
   tags: ['prometheus', 'docker', 'validate']
 
