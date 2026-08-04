@@ -124,7 +124,7 @@
     - name: 'Backup — Pack stage dir ke tarball (bare shell tar czf, idempotent creates guard)'
       ansible.builtin.shell:
         cmd: |
-          set -euo pipefail
+          set -e
           DST="{{ backup_tarball_path }}"
           SRC="{{ backup_stage_dir }}"
           OWNER="{{ common_user | default('agra') }}"
@@ -142,6 +142,7 @@
           exit 2
       args:
         creates: "{{ backup_tarball_path }}"
+        executable: /bin/bash
       register: _tarball
       changed_when: _tarball.rc is defined and _tarball.rc == 2
       failed_when: _tarball.rc is defined and _tarball.rc not in [0, 2]

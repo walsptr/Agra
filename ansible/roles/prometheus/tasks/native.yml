@@ -1,7 +1,6 @@
 ---
 - name: Prometheus (Native) - Check installed binary version
   ansible.builtin.shell: |
-    set -o pipefail
     if [ -x {{ prometheus_native_binary_path }} ]; then
       {{ prometheus_native_binary_path }} --version 2>&1 | head -1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | tr -d 'v'
     else

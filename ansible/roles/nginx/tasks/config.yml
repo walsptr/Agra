@@ -36,13 +36,14 @@
           echo "CHANGED: RSA 2048 private key generated"
       args:
         creates: "{{ tls_key_path }}"
+        executable: /bin/bash
       register: _ssl_key
       changed_when: _ssl_key.rc is defined
 
     - name: Nginx (SSL) - Generate self-signed certificate (bare shell openssl req x509, creates guard)
       ansible.builtin.shell:
         cmd: |
-          set -euo pipefail
+          set -e
           KEY_PATH="{{ tls_key_path }}"
           CRT_PATH="{{ tls_cert_path }}"
           DAYS="{{ tls_self_signed_days_valid }}"
@@ -64,6 +65,7 @@
           echo "CHANGED: self-signed x509 cert generated, CN=${CN}, days=${DAYS}"
       args:
         creates: "{{ tls_cert_path }}"
+        executable: /bin/bash
       register: _ssl_cert
       changed_when: _ssl_cert.rc is defined
   when:

@@ -40,11 +40,11 @@
 - name: Common (Docker/Podman) - Check runtime availability: docker installed? group exists?
   ansible.builtin.shell:
     cmd: |
-      set -euo pipefail
+      set -e
       # Check 1: docker CLI binary exist? (artinya docker sudah di-install via apt/dnf line di atas)
       DOCKER_BIN=0
       command -v docker >/dev/null 2>&1 && DOCKER_BIN=1 || true
-      # Check 2: docker.service systemd exist DAN active/running? (pakai systemctl list-unit-files + is-active, TIDAK USAH fact services)
+      # Check 2: docker.service systemd exist DAN active/running? (pakai systemctl is-active, TIDAK USAH fact services)
       DOCKER_SVC_ACTIVE=0
       if command -v systemctl >/dev/null 2>&1; then
         systemctl is-active --quiet docker.service && DOCKER_SVC_ACTIVE=1 || true
@@ -63,13 +63,15 @@
       # Check 5: podman binary ada?
       PODMAN_BIN=0
       command -v podman >/dev/null 2>&1 && PODMAN_BIN=1 || true
-      # Output JSON (simple 5 line, set_fact parse nanti)
-      echo "DOCKER_BIN=$DOCKER_BIN"
-      echo "DOCKER_SVC_ACTIVE=$DOCKER_SVC_ACTIVE"
-      echo "DOCKER_GROUP=$DOCKER_GROUP"
-      echo "PODMAN_BIN=$PODMAN_BIN"
-      echo "PODMAN_GROUP=$PODMAN_GROUP"
+      # Output 5 line (set_fact parse via substring search is_search KEY=1)
+      printf 'DOCKER_BIN=%s\n' "$DOCKER_BIN"
+      printf 'DOCKER_SVC_ACTIVE=%s\n' "$DOCKER_SVC_ACTIVE"
+      printf 'DOCKER_GROUP=%s\n' "$DOCKER_GROUP"
+      printf 'PODMAN_BIN=%s\n' "$PODMAN_BIN"
+      printf 'PODMAN_GROUP=%s\n' "$PODMAN_GROUP"
       exit 0
+  args:
+    executable: /bin/bash
   register: _runtime_checks_raw
   changed_when: false
   tags: ['common', 'docker']

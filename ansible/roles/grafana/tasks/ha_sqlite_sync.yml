@@ -33,7 +33,7 @@
     - name: Grafana (HA SQLite / MASTER) - Generate SSH key ed25519 (bare shell ssh-keygen, creates guard)
       ansible.builtin.shell:
         cmd: |
-          set -euo pipefail
+          set -e
           KEY_PATH="/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
           OWNER="{{ common_user | default('agra') }}"
           GROUP="{{ common_group | default('agra') }}"
@@ -48,6 +48,7 @@
           echo "CHANGED: ssh ed25519 keypair dibuat"
       args:
         creates: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
+        executable: /bin/bash
       register: _ssh_key_master
       changed_when: _ssh_key_master.rc is defined
 
@@ -80,7 +81,7 @@
     - name: Grafana (HA SQLite / STANDBY) - Add master public key ke authorized_keys standby (bare shell append + grep guard)
       ansible.builtin.shell:
         cmd: |
-          set -euo pipefail
+          set -e
           AUTH_KEYS_FILE="/home/{{ common_user | default('agra') }}/.ssh/authorized_keys"
           OWNER="{{ common_user | default('agra') }}"
           GROUP="{{ common_group | default('agra') }}"
@@ -100,6 +101,8 @@
           echo "$FULL_LINE" >> "$AUTH_KEYS_FILE"
           echo "CHANGED: master public key ditambahkan ke authorized_keys standby"
           exit 2
+      args:
+        executable: /bin/bash
       register: _auth_key_result
       changed_when: _auth_key_result.rc is defined and _auth_key_result.rc == 2
       failed_when: _auth_key_result.rc is defined and _auth_key_result.rc not in [0, 2]

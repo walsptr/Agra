@@ -62,28 +62,30 @@
 - name: Common - Detect firewall tool (via POSIX commands, TIDAK USAH fact ansible_facts.services)
   ansible.builtin.shell:
     cmd: |
-      set -euo pipefail
+      set -e
       # User explicit override via common_firewall_tool var
       if [ "{{ common_firewall_tool }}" != "auto" ]; then
-        echo "{{ common_firewall_tool }}"
+        printf '%s' "{{ common_firewall_tool }}"
         exit 0
       fi
       # Priority 1: UFW (Debian/Ubuntu default)
       if command -v ufw >/dev/null 2>&1; then
         if ufw status 2>/dev/null | grep -qE "^Status: active$" ; then
-          echo "ufw"
+          printf '%s' "ufw"
           exit 0
         fi
       fi
       # Priority 2: firewalld (RHEL/CentOS/Fedora default)
       if command -v firewall-cmd >/dev/null 2>&1; then
         if firewall-cmd --state 2>/dev/null | grep -qE "^running$" ; then
-          echo "firewalld"
+          printf '%s' "firewalld"
           exit 0
         fi
       fi
       # Tidak ada firewall yang terdeteksi / aktif -> skip
-      echo "none"
+      printf '%s' "none"
+  args:
+    executable: /bin/bash
   register: _firewall_detect_raw
   changed_when: false
   failed_when: _firewall_detect_raw.rc != 0
@@ -110,7 +112,7 @@
 - name: Common - Open firewall ports (ufw) — Idempotent check rule exists before add
   ansible.builtin.shell:
     cmd: |
-      set -euo pipefail
+      set -e
       PORT="{{ item | string }}"
       # Idempotency: Cek apakah rule untuk port ini SUDAH ADA.
       # Check dengan: (1) grep ufw status numbered by port AND protocol tcp, (2) grep by rule comment agra.
@@ -126,6 +128,8 @@
       ufw allow proto tcp from any to any port "${PORT}" comment "agra monitoring port ${PORT}" >/dev/null 2>&1
       echo "CHANGED: added ufw allow ${PORT}/tcp agra monitoring"
       exit 2  # 2 = CHANGED
+  args:
+    executable: /bin/bash
   loop: "{{ _common_ports_tcp | unique }}"
   register: _ufw_add_result
   changed_when:
@@ -142,7 +146,7 @@
 - name: Common - Open firewall ports (firewalld) — Idempotent check rule exists
   ansible.builtin.shell:
     cmd: |
-      set -euo pipefail
+      set -e
       PORT="{{ item | string }}"
       FW_PORT="${PORT}/tcp"
       # Idempotency: Cek apakah sudah ada di default zone (active runtime + permanent)
@@ -165,6 +169,8 @@
       fi
       echo "CHANGED: firewalld added port ${FW_PORT}"
       exit 2
+  args:
+    executable: /bin/bash
   loop: "{{ _common_ports_tcp | unique }}"
   register: _firewalld_add_result
   changed_when:
