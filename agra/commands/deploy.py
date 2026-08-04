@@ -16,7 +16,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("--skip-tags", action="append", default=[], help="Skip tagged tasks.")
     p.add_argument("-l", "--limit", help="Limit run to subset inventory hosts (ansible --limit).")
     p.add_argument("-e", "--extra-vars", action="append", default=[], help="Extra vars ansible: KEY=VALUE or JSON string. Repeatable.")
-    p.add_argument("--precheck/--no-precheck", default=True, help="Jalankan precheck SEBELUM deploy (default: on).")
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM deploy (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_deploy)
     return p
@@ -36,14 +43,20 @@ def run_deploy(args: argparse.Namespace) -> int:
     for t in args.skip_tags or []:
         skip_flat.extend([x.strip() for x in t.split(",") if x.strip()])
 
+    # Dapatkan nilai boolean precheck. Gunakan getattr dengan default True untuk defensive programming
+    # (hindari AttributeError jika parser config berubah di masa depan).
+    precheck_enabled = getattr(args, "precheck", True)
     rc_check = 0
-    if args.precheck:
+    if precheck_enabled:
+        # --- Jalankan precheck terlebih dahulu via command check wrapper ---
+        # HATI-HATI: args.inventory diserahkan langsung ke run_check(). run_check()
+        # sudah memvalidasi wajib -i / AGRA_INVENTORY env.
         from agra.commands.check import run_check
         rc_check = run_check(args)
         if rc_check != 0:
             from agra.utils.colors import error, warn
             error(f"Precheck FAILED (rc={rc_check}). Deploy DIBATALKAN untuk mencegah bad state.")
-            warn("Untuk bypass precheck: `agra deploy --no-precheck` (TIDAK DISARANKAN).")
+            warn("Untuk bypass precheck: `agra deploy --no-precheck` (TIDAK DISARANKAN production).")
             return rc_check
 
     return run_playbook(

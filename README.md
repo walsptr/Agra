@@ -13,8 +13,7 @@ Mendukung **hybrid deployment mode**: seluruh service bisa di-deploy sebagai Doc
 ```bash
 git clone https://github.com/walsptr/Agra.git && cd Agra
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt     # PyYAML >= 6.0
-pip install -e .                   # Install entry point → command `agra` langsung tersedia di PATH
+./install.sh
 ```
 
 ## Quickstart 5 Langkah
