@@ -49,7 +49,6 @@
     owner: "{{ common_user | default('agra') }}"
     group: "{{ common_group | default('agra') }}"
     mode: '0644'
-    validate: "{{ prometheus_native_tools_path if ansible_facts['os_family'] != '' else '' }} check config-files %s 2>&1 || true"
   notify: ['restart prometheus']
   tags: ['prometheus', 'config']
 

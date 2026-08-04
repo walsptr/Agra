@@ -56,6 +56,12 @@
   when: _prom_installed_ver.stdout != prometheus_native_version
   tags: ['prometheus', 'native', 'binary']
 
+- name: Prometheus (Native) - Validate prometheus.yml via promtool binary
+  ansible.builtin.command:
+    cmd: "{{ prometheus_native_tools_path }} check config-files {{ prometheus_config_dir }}/prometheus.yml"
+  changed_when: false
+  tags: ['prometheus', 'native', 'validate']
+
 - name: Prometheus (Native) - Render systemd unit via first_found
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/prometheus/prometheus.service.j2', 'prometheus.service.j2'], 'paths': [role_path + '/templates']}) }}"
