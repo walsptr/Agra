@@ -21,8 +21,6 @@ Quickstart:
   1. agra check                                 # Validasi precondition
   2. agra genpwd                                # Generate random secrets
   3. agra deploy -i inventory/multinode         # Deploy dengan inventory multi-node
-
-Documentation: contexts/PRD.md, ARCHITECTURE.md, DESIGN.md, RULES.md, SCHEMA.md
 """,
     )
     parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")

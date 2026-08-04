@@ -32,7 +32,7 @@
     - name: 'GenPwd — Backup existing sebelum overwrite'
       ansible.builtin.copy:
         src: "{{ passwords_file }}"
-        dest: "{{ passwords_file }}.bak-{{ ansible_date_time.epoch | default(ansible_env['EPOCHSECONDS'] | default('0')) }}"
+        dest: "{{ passwords_file }}.bak-{{ lookup('pipe', 'date +%s') | default('0') }}"
         remote_src: true
       when:
         - _pwd_stat.stat is defined
@@ -40,63 +40,69 @@
         - _pwd_stat.stat.size | default(0) > 10
       ignore_errors: true
 
-    - name: 'GenPwd — Generate 6 random passwords via community.general.random_string lookup'
-      ansible.builtin.set_fact:
-        _pwd_grafana_admin: >-
-          {{ lookup('community.general.random_string', length=14, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-        _pwd_grafana_db: >-
-          {{ lookup('community.general.random_string', length=14, override_special='-_', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-        _pwd_keepalived: >-
-          {{ lookup('community.general.random_string', length=14, override_special='', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-        _pwd_grafana_secret_key: >-
-          {{ lookup('community.general.random_string', length=14, override_special='-_.', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-        _pwd_backup_s3_access: >-
-          {{ lookup('community.general.random_string', length=14, override_special='', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-        _pwd_backup_s3_secret: >-
-          {{ lookup('community.general.random_string', length=14, override_special='-_/', base64=false, min_lower=4, min_upper=4, min_numeric=4) }}
-      ignore_errors: true
-      register: _lookup_pwd
-
-    - name: 'GenPwd — FALLBACK generate via python3 secrets module jika lookup gagal'
+    - name: 'GenPwd — Generate 6 random passwords via python3 secrets module (ZERO DEPENDENCY)'
       block:
-        - name: 'GenPwd (Fallback) — Generate script py path'
+        - name: 'GenPwd — Generate generator script py path'
           ansible.builtin.tempfile:
             state: file
             suffix: .py
             prefix: agra-genpwd-
           register: _gen_py
 
-        - name: 'GenPwd (Fallback) — Tulis generator script'
+        - name: 'GenPwd — Tulis generator script (ensure complexity min_lower min_upper min_numeric)'
           ansible.builtin.copy:
             dest: "{{ _gen_py.path }}"
             mode: '0700'
             content: |
               import secrets, string, json, sys
-              base = string.ascii_letters + string.digits
-              def gen(n, extra=''):
-                  chars = base + extra
-                  return ''.join(secrets.choice(chars) for _ in range(n))
+
+              LENGTH = 14
+              MIN_LOWER = 4
+              MIN_UPPER = 4
+              MIN_NUMERIC = 4
+              SPECIAL_BASE = "-_"  # URL safe
+              SPECIAL_EXTRA = "-_./"  # for s3 secret key
+
+              lower = string.ascii_lowercase
+              upper = string.ascii_uppercase
+              digits = string.digits
+              letters = string.ascii_letters
+
+              def gen_pwd(length=LENGTH, extra_chars=SPECIAL_BASE):
+                  all_chars = letters + digits + extra_chars
+                  password_chars = [
+                      secrets.choice(lower) for _ in range(MIN_LOWER)
+                  ] + [
+                      secrets.choice(upper) for _ in range(MIN_UPPER)
+                  ] + [
+                      secrets.choice(digits) for _ in range(MIN_NUMERIC)
+                  ]
+                  remaining = length - len(password_chars)
+                  password_chars += [secrets.choice(all_chars) for _ in range(remaining)]
+                  secrets.SystemRandom().shuffle(password_chars)
+                  return "".join(password_chars)
+
               out = {
-                'grafana_admin_password': gen(14),
-                'grafana_database_password': gen(14),
-                'grafana_secret_key': gen(14),
-                'keepalived_auth_pass': gen(14),
-                'backup_s3_access_key': gen(14),
-                'backup_s3_secret_key': gen(14),
+                'grafana_admin_password': gen_pwd(14),
+                'grafana_database_password': gen_pwd(14),
+                'grafana_secret_key': gen_pwd(14, extra_chars="-_."),
+                'keepalived_auth_pass': gen_pwd(14, extra_chars=""),
+                'backup_s3_access_key': gen_pwd(14, extra_chars=""),
+                'backup_s3_secret_key': gen_pwd(14, extra_chars=SPECIAL_EXTRA),
               }
               sys.stdout.write(json.dumps(out, indent=2))
 
-        - name: 'GenPwd (Fallback) — Execute generator script'
+        - name: 'GenPwd — Execute generator script'
           ansible.builtin.command:
             cmd: "python3 {{ _gen_py.path }}"
           register: _gen_py_out
           changed_when: false
 
-        - name: 'GenPwd (Fallback) — Parse output'
+        - name: 'GenPwd — Parse JSON output'
           ansible.builtin.set_fact:
             _gen_pwd_map: "{{ _gen_py_out.stdout | from_json }}"
 
-        - name: 'GenPwd (Fallback) — Set fact dari output py'
+        - name: 'GenPwd — Set 6 fact passwords'
           ansible.builtin.set_fact:
             _pwd_grafana_admin: "{{ _gen_pwd_map['grafana_admin_password'] }}"
             _pwd_grafana_db: "{{ _gen_pwd_map['grafana_database_password'] }}"
@@ -105,12 +111,10 @@
             _pwd_backup_s3_access: "{{ _gen_pwd_map['backup_s3_access_key'] }}"
             _pwd_backup_s3_secret: "{{ _gen_pwd_map['backup_s3_secret_key'] }}"
 
-        - name: 'GenPwd (Fallback) — Cleanup temp py'
+        - name: 'GenPwd — Cleanup temp py script'
           ansible.builtin.file:
             path: "{{ _gen_py.path }}"
             state: absent
-      when:
-        - _lookup_pwd is failed or (_pwd_grafana_admin | default('') | length == 0)
 
     - name: 'GenPwd — Tulis passwords.yml (TANPA VAULT, plaintext 14 chars)'
       ansible.builtin.copy:
