@@ -86,25 +86,72 @@
   changed_when: false
   tags: ['common', 'firewall']
 
-- name: Common - Open firewall ports (ufw)
-  community.general.ufw:
-    rule: allow
-    port: "{{ item }}"
-    proto: tcp
-    comment: "agra monitoring port {{ item }}"
+- name: Common - Open firewall ports (ufw) — Idempotent check rule exists before add
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      PORT="{{ item | string }}"
+      # Idempotency: Cek apakah rule untuk port ini SUDAH ADA.
+      # Check dengan: (1) grep ufw status numbered by port AND protocol tcp, (2) grep by rule comment agra.
+      if ufw status numbered 2>/dev/null | grep -qE "^\[.*\]\s+${PORT}/tcp\s+ALLOW\s+IN" ; then
+        echo "EXISTS: port ${PORT}/tcp sudah ada di ufw (berdasarkan ufw status numbered allow)"
+        exit 0
+      fi
+      if ufw status 2>/dev/null | grep -qE "^${PORT}/tcp\s+ALLOW\s+Anywhere" ; then
+        echo "EXISTS: port ${PORT}/tcp (allow anywhere)"
+        exit 0
+      fi
+      # Rule TIDAK ADA: jalankan ufw allow
+      ufw allow proto tcp from any to any port "${PORT}" comment "agra monitoring port ${PORT}" >/dev/null 2>&1
+      echo "CHANGED: added ufw allow ${PORT}/tcp agra monitoring"
+      exit 2  # 2 = CHANGED
   loop: "{{ _common_ports_tcp | unique }}"
+  register: _ufw_add_result
+  changed_when:
+    - _ufw_add_result.rc is defined
+    - _ufw_add_result.rc == 2  # hanya exit 2 = benar-benar nambah rule
+  failed_when:
+    - _ufw_add_result.rc is defined
+    - _ufw_add_result.rc not in [0, 2]  # rc 0=exists, 2=added -> keduanya sukses
   when:
     - _common_firewall_detected == 'ufw'
     - common_firewall_tool != 'none'
   tags: ['common', 'firewall']
 
-- name: Common - Open firewall ports (firewalld)
-  ansible.posix.firewalld:
-    port: "{{ item }}/tcp"
-    permanent: true
-    immediate: true
-    state: enabled
+- name: Common - Open firewall ports (firewalld) — Idempotent check rule exists
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      PORT="{{ item | string }}"
+      FW_PORT="${PORT}/tcp"
+      # Idempotency: Cek apakah sudah ada di default zone (active runtime + permanent)
+      RUNTIME_EXIST=0
+      PERMANENT_EXIST=0
+      if command -v firewall-cmd >/dev/null 2>&1; then
+        firewall-cmd --zone=public --query-port="${FW_PORT}" >/dev/null 2>&1 && RUNTIME_EXIST=1
+        firewall-cmd --permanent --zone=public --query-port="${FW_PORT}" >/dev/null 2>&1 && PERMANENT_EXIST=1
+      fi
+      if [ "${RUNTIME_EXIST}" -eq 1 ] && [ "${PERMANENT_EXIST}" -eq 1 ]; then
+        echo "EXISTS: firewalld port ${FW_PORT} sudah ada di RUNTIME & PERMANENT"
+        exit 0
+      fi
+      # Belum lengkap -> tambahkan (permanent DULU agar persist reboot, lalu runtime dengan --add-port + reload)
+      if [ "${PERMANENT_EXIST}" -ne 1 ]; then
+        firewall-cmd --permanent --zone=public --add-port="${FW_PORT}" >/dev/null 2>&1
+      fi
+      if [ "${RUNTIME_EXIST}" -ne 1 ]; then
+        firewall-cmd --zone=public --add-port="${FW_PORT}" >/dev/null 2>&1
+      fi
+      echo "CHANGED: firewalld added port ${FW_PORT}"
+      exit 2
   loop: "{{ _common_ports_tcp | unique }}"
+  register: _firewalld_add_result
+  changed_when:
+    - _firewalld_add_result.rc is defined
+    - _firewalld_add_result.rc == 2
+  failed_when:
+    - _firewalld_add_result.rc is defined
+    - _firewalld_add_result.rc not in [0, 2]
   when:
     - _common_firewall_detected == 'firewalld'
     - common_firewall_tool != 'none'

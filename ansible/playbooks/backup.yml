@@ -121,16 +121,41 @@
       when:
         - backup_include_prometheus_tsdb | default(false) | bool
 
-    - name: 'Backup — Pack stage dir ke tarball'
-      community.general.archive:
-        path: "{{ backup_stage_dir }}"
-        dest: "{{ backup_tarball_path }}"
-        format: gz
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
-        mode: '0640'
-        force_archive: true
+    - name: 'Backup — Pack stage dir ke tarball (bare shell tar czf, idempotent creates guard)'
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          DST="{{ backup_tarball_path }}"
+          SRC="{{ backup_stage_dir }}"
+          OWNER="{{ common_user | default('agra') }}"
+          GROUP="{{ common_group | default('agra') }}"
+          if [ -f "$DST" ] && [ "$(stat -c %s "$DST" 2>/dev/null || echo 0)" -gt 0 ]; then
+            echo "EXISTS: tarball already generated: $DST"
+            exit 0
+          fi
+          PARENT_DIR=$(dirname "$SRC")
+          BASENAME=$(basename "$SRC")
+          tar czf "$DST" -C "$PARENT_DIR" "$BASENAME"
+          chown "${OWNER}:${GROUP}" "$DST"
+          chmod 0640 "$DST"
+          echo "CHANGED: tarball generated at: $DST"
+          exit 2
+      args:
+        creates: "{{ backup_tarball_path }}"
       register: _tarball
+      changed_when: _tarball.rc is defined and _tarball.rc == 2
+      failed_when: _tarball.rc is defined and _tarball.rc not in [0, 2]
+
+    - name: 'Backup — Capture tarball size untuk manifest (stat)'
+      ansible.builtin.stat:
+        path: "{{ backup_tarball_path }}"
+      register: _tarball_stat
+      changed_when: false
+
+    - name: 'Backup — Inject size ke _tarball fact (backward compat manifest)'
+      ansible.builtin.set_fact:
+        _tarball: "{{ _tarball | combine({'size': _tarball_stat.stat.size | default(0)}) }}"
+      changed_when: false
 
     - name: 'Backup — Generate manifest YAML'
       ansible.builtin.copy:

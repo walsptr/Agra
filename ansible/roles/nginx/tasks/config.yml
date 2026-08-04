@@ -28,54 +28,44 @@
             + (['IP:' + monitoring_vip] if (monitoring_vip is defined and monitoring_vip | length > 0 else [])
           }}
 
-    - name: Nginx (SSL) - Generate 2048-bit RSA private key (creates guard)
-      community.crypto.openssl_privatekey:
-        path: "{{ tls_key_path }}"
-        type: RSA
-        size: 2048
-        owner: root
-        group: root
-        mode: '0600'
-        force: false
-      register: _ssl_key
-      ignore_errors: true
-
-    - name: Nginx (SSL) - FALLBACK shell openssl key jika module tidak tersedia (creates guard)
-      ansible.builtin.command:
-        cmd: "openssl genrsa -out {{ tls_key_path }} 2048"
+    - name: Nginx (SSL) - Generate 2048-bit RSA private key (bare shell openssl genrsa, creates guard)
+      ansible.builtin.shell:
+        cmd: |
+          openssl genrsa -out "{{ tls_key_path }}" 2048 2>/dev/null
+          chmod 0600 "{{ tls_key_path }}"
+          echo "CHANGED: RSA 2048 private key generated"
+      args:
         creates: "{{ tls_key_path }}"
-      when: _ssl_key is failed
-      no_log: false
+      register: _ssl_key
+      changed_when: _ssl_key.rc is defined
 
-    - name: Nginx (SSL) - Generate self-signed certificate (creates guard)
-      community.crypto.x509_certificate:
-        path: "{{ tls_cert_path }}"
-        privatekey_path: "{{ tls_key_path }}"
-        provider: selfsigned
-        selfsigned_not_after: "+{{ tls_self_signed_days_valid }}d"
-        owner: root
-        group: root
-        mode: '0644'
-        subject:
-          CN: "{{ tls_self_signed_cn }}"
-          C: "{{ tls_self_signed_country }}"
-          ST: "{{ tls_self_signed_state }}"
-          L: "{{ tls_self_signed_locality }}"
-          O: "{{ tls_self_signed_organization }}"
-          OU: "{{ tls_self_signed_organizational_unit }}"
-        subject_alt_name: "{{ _nginx_san_list }}"
-      register: _ssl_cert
-      ignore_errors: true
-
-    - name: Nginx (SSL) - FALLBACK shell openssl req jika module tidak tersedia (creates guard)
-      ansible.builtin.command:
-        cmd: >-
-          openssl req -new -x509 -key {{ tls_key_path }}
-          -out {{ tls_cert_path }}
-          -days {{ tls_self_signed_days_valid }}
-          -subj "/C={{ tls_self_signed_country }}/ST={{ tls_self_signed_state }}/L={{ tls_self_signed_locality }}/O={{ tls_self_signed_organization }}/OU={{ tls_self_signed_organizational_unit }}/CN={{ tls_self_signed_cn }}"
+    - name: Nginx (SSL) - Generate self-signed certificate (bare shell openssl req x509, creates guard)
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          KEY_PATH="{{ tls_key_path }}"
+          CRT_PATH="{{ tls_cert_path }}"
+          DAYS="{{ tls_self_signed_days_valid }}"
+          CN="{{ tls_self_signed_cn }}"
+          C="{{ tls_self_signed_country }}"
+          ST="{{ tls_self_signed_state }}"
+          L="{{ tls_self_signed_locality }}"
+          O="{{ tls_self_signed_organization }}"
+          OU="{{ tls_self_signed_organizational_unit }}"
+          SAN="{{ _nginx_san_list | join(',') }}"
+          SUBJ="/C=${C}/ST=${ST}/L=${L}/O=${O}/OU=${OU}/CN=${CN}"
+          openssl req -new -x509 -sha256 -nodes \
+            -days "${DAYS}" \
+            -key "${KEY_PATH}" \
+            -out "${CRT_PATH}" \
+            -subj "${SUBJ}" \
+            -addext "subjectAltName=${SAN}" 2>/dev/null
+          chmod 0644 "${CRT_PATH}"
+          echo "CHANGED: self-signed x509 cert generated, CN=${CN}, days=${DAYS}"
+      args:
         creates: "{{ tls_cert_path }}"
-      when: _ssl_cert is failed or _ssl_key is failed
+      register: _ssl_cert
+      changed_when: _ssl_cert.rc is defined
   when:
     - enable_https | default(true) | bool
     - tls_self_signed_generate | default(true) | bool

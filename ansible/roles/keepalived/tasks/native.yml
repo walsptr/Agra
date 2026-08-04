@@ -29,12 +29,30 @@
   ignore_errors: true
   tags: ['keepalived', 'native', 'service']
 
-- name: Keepalived (Native) - Sysctl: allow binding VIP non-local untuk backup node
-  ansible.posix.sysctl:
-    name: net.ipv4.ip_nonlocal_bind
-    value: '1'
-    state: present
-    sysctl_file: /etc/sysctl.d/99-agra-keepalived.conf
-    reload: true
+- name: Keepalived (Native) - Sysctl net.ipv4.ip_nonlocal_bind=1 (bare shell sysctl -w + sysctl.d file)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      KEY="net.ipv4.ip_nonlocal_bind"
+      VAL="1"
+      CONF_FILE="/etc/sysctl.d/99-agra-keepalived.conf"
+      RUNTIME_VAL=$(sysctl -n "$KEY" 2>/dev/null || echo "0")
+      FILE_EXACT=0
+      if [ -f "$CONF_FILE" ]; then
+        grep -qxF "${KEY}=${VAL}" "$CONF_FILE" && FILE_EXACT=1 || true
+      fi
+      if [ "${RUNTIME_VAL}" = "${VAL}" ] && [ "${FILE_EXACT}" -eq 1 ]; then
+        echo "EXISTS: runtime sysctl ${KEY}=${VAL} & file conf match"
+        exit 0
+      fi
+      mkdir -p /etc/sysctl.d
+      echo "${KEY}=${VAL}" > "$CONF_FILE"
+      sysctl -w "${KEY}=${VAL}" >/dev/null 2>&1
+      sysctl -p "$CONF_FILE" >/dev/null 2>&1
+      echo "CHANGED: sysctl ${KEY}=${VAL} applied"
+      exit 2
+  register: _sysctl_result
+  changed_when: _sysctl_result.rc is defined and _sysctl_result.rc == 2
+  failed_when: _sysctl_result.rc is defined and _sysctl_result.rc not in [0, 2]
   ignore_errors: true
   tags: ['keepalived', 'native', 'sysctl']

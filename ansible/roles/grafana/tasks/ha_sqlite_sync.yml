@@ -30,27 +30,26 @@
         group: "{{ common_group | default('agra') }}"
         mode: '0700'
 
-    - name: Grafana (HA SQLite / MASTER) - Generate SSH key ed25519 (creates guard, idempotent)
-      community.crypto.openssh_keypair:
-        path: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
-        type: ed25519
-        size: 256
-        state: present
-        force: false
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
-        mode: '0600'
-        comment: "agra-grafana-sync@{{ inventory_hostname }}"
-      register: _ssh_key_master
-      ignore_errors: true
-
-    - name: Grafana (HA SQLite / MASTER) - Generate SSH fallback ssh-keygen jika module tidak ada (creates guard)
-      ansible.builtin.command:
-        cmd: "ssh-keygen -t ed25519 -a 100 -f /home/{{ common_user | default('agra') }}/.ssh/id_ed25519 -N '' -C 'agra-grafana-sync@{{ inventory_hostname }}'"
+    - name: Grafana (HA SQLite / MASTER) - Generate SSH key ed25519 (bare shell ssh-keygen, creates guard)
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          KEY_PATH="/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
+          OWNER="{{ common_user | default('agra') }}"
+          GROUP="{{ common_group | default('agra') }}"
+          ssh-keygen -t ed25519 \
+            -a 100 \
+            -C "agra-grafana-sync@{{ inventory_hostname }}" \
+            -f "${KEY_PATH}" \
+            -N "" >/dev/null 2>&1
+          chown "${OWNER}:${GROUP}" "${KEY_PATH}"
+          chmod 0600 "${KEY_PATH}"
+          chmod 0644 "${KEY_PATH}.pub"
+          echo "CHANGED: ssh ed25519 keypair dibuat"
+      args:
         creates: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
-      become: true
-      become_user: "{{ common_user | default('agra') }}"
-      when: _ssh_key_master is failed or _ssh_key_master is skipped
+      register: _ssh_key_master
+      changed_when: _ssh_key_master.rc is defined
 
     - name: Grafana (HA SQLite / MASTER) - Fetch public key content
       ansible.builtin.slurp:
@@ -78,14 +77,32 @@
         - { path: "/home/{{ common_user | default('agra') }}/.ssh/authorized_keys", state: touch, mode: '0600' }
       tags: ['grafana', 'ha', 'sync', 'standby', 'ssh']
 
-    - name: Grafana (HA SQLite / STANDBY) - Add master public key ke authorized_keys standby
-      ansible.posix.authorized_key:
-        user: "{{ common_user | default('agra') }}"
-        state: present
-        key: "{{ hostvars[_grafana_ha_master_host]['_master_pubkey_slurp']['content'] | b64decode | trim }}"
-        key_options: 'command="rsync --server --sender -logDtprze.iLsfxC . {{ grafana_data_dir }}/",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding'
-        exclusive: false
-        manage_dir: false
+    - name: Grafana (HA SQLite / STANDBY) - Add master public key ke authorized_keys standby (bare shell append + grep guard)
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          AUTH_KEYS_FILE="/home/{{ common_user | default('agra') }}/.ssh/authorized_keys"
+          OWNER="{{ common_user | default('agra') }}"
+          GROUP="{{ common_group | default('agra') }}"
+          mkdir -p "/home/${OWNER}/.ssh"
+          chmod 0700 "/home/${OWNER}/.ssh"
+          chown "${OWNER}:${GROUP}" "/home/${OWNER}/.ssh"
+          touch "$AUTH_KEYS_FILE"
+          chmod 0600 "$AUTH_KEYS_FILE"
+          chown "${OWNER}:${GROUP}" "$AUTH_KEYS_FILE"
+          RAW_KEY="{{ hostvars[_grafana_ha_master_host]['_master_pubkey_slurp']['content'] | b64decode | trim }}"
+          KEY_OPTIONS='command="rsync --server --sender -logDtprze.iLsfxC . {{ grafana_data_dir }}/",no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding'
+          FULL_LINE="${KEY_OPTIONS} ${RAW_KEY}"
+          if grep -Fq -- "$RAW_KEY" "$AUTH_KEYS_FILE"; then
+            echo "EXISTS: master public key sudah ada di authorized_keys"
+            exit 0
+          fi
+          echo "$FULL_LINE" >> "$AUTH_KEYS_FILE"
+          echo "CHANGED: master public key ditambahkan ke authorized_keys standby"
+          exit 2
+      register: _auth_key_result
+      changed_when: _auth_key_result.rc is defined and _auth_key_result.rc == 2
+      failed_when: _auth_key_result.rc is defined and _auth_key_result.rc not in [0, 2]
       ignore_errors: true
       tags: ['grafana', 'ha', 'sync', 'standby', 'ssh']
 
