@@ -122,6 +122,8 @@
         - { path: "{{ grafana_config_dir | default('/etc/grafana') }}", desc: "grafana config (/etc/grafana: grafana.ini + provisioning)" }
         - { path: "{{ prometheus_config_dir | default('/etc/prometheus') }}", desc: "prometheus config (/etc/prometheus: prometheus.yml + file_sd + rules)" }
         - { path: "{{ node_exporter_config_dir | default('/etc/node_exporter') }}", desc: "node_exporter config (/etc/node_exporter: node_exporter.default)" }
+        - { path: "{{ nginx_config_dir | default('/etc/nginx') }}", desc: "nginx config (/etc/nginx: sites-available conf.d ssl self-signed certs agra)" }
+        - { path: "{{ keepalived_config_dir | default('/etc/keepalived') }}", desc: "keepalived config (/etc/keepalived: keepalived.conf + vrrp_script healthcheck)" }
         - { path: "{{ common_etc_dir | default('/etc/agra') }}", desc: "agra common config dir (/etc/agra)" }
       when:
         - destroy_purge_config | bool
@@ -133,7 +135,7 @@
       ansible.builtin.debug:
         msg:
           - "✅ AGRA DESTROY COMPLETE"
-          - "Purge data  (database/tsdb): {{ destroy_purge_data | default(false) }}"
-          - "Purge config (/etc/<service>): {{ destroy_purge_config | default(false) }}"
-          - "Keepalived VIP sudah tidak dipasang; sistem operasi tidak disentuh; paket OS tidak di-uninstall"
-          - "CATATAN: /etc/nginx & /etc/keepalived SECARA DEFAULT TIDAK di-purge purge_config (bisa conflict dengan OS config lain). Hapus manual jika perlu."
+          - "Purge data    (database/tsdb/textfile): {{ destroy_purge_data | default(false) }}"
+          - "Purge config  (/etc/<service> lengkap): {{ destroy_purge_config | default(false) }}"
+          - "  Config purged list (jika purge_config=true): grafana, prometheus, node_exporter, nginx (/etc/nginx), keepalived (/etc/keepalived), common agra (/etc/agra)"
+          - "Keepalived VIP sudah tidak dipasang; paket OS (nginx/keepalived/prometheus apt/dnf) TIDAK di-uninstall — hanya config dirs + data dirs yang dihapus."

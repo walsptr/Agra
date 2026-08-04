@@ -7,7 +7,7 @@ LAYER 1 (CLI, SEBELUM ansible pernah diinvoke):
     JIKA SALAH → ABORT.
   - PURGE FLAGS (3 opsi pilhan user — default SEMUA FALSE, retain untuk redeploy):
       * --purge-data   : hapus HANYA data persist (grafana.db, prometheus TSDB, node_exporter textfile_dir)
-      * --purge-config : hapus HANYA config workdirs (/etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/agra)
+      * --purge-config : hapus HANYA config workdirs (/etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/nginx, /etc/keepalived, /etc/agra)
       * --purge-all    : ALIAS set BOTH (--purge-data + --purge-config) = hapus SEMUA state service (data+config)
 
 LAYER 2 (playbook destroy.yml): assert destroy_confirm=true sebagai defense-in-depth (walaupun CLI sudah check).
@@ -47,7 +47,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         "--purge-config",
         action="store_true",
         dest="destroy_purge_config",
-        help="PURGE TIPE 2: HAPUS HANYA config workdirs service: /etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/agra. Data persist (database/tsdb) DITAHAN.",
+        help="PURGE TIPE 2: HAPUS HANYA config workdirs SELURUH service: /etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/nginx (certs+conf.d+sites agra), /etc/keepalived, /etc/agra. Data persist (database/tsdb) DITAHAN.",
     )
     p.add_argument(
         "--purge-all",
@@ -93,7 +93,7 @@ def run_destroy(args: argparse.Namespace) -> int:
         else:
             print(f"{YELLOW}  + purge_data TIDAK AKTIF → data_dir service DITAHAN (aman redeploy nanti tanpa kehilangan data).{RESET}")
         if purge_config_eff:
-            print(f"{RED}  + purge_config AKTIF → SELURUH config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/agra) AKAN DIHAPUS PERMANEN.{RESET}")
+            print(f"{RED}  + purge_config AKTIF → SELURUH config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/nginx /etc/keepalived /etc/agra) AKAN DIHAPUS PERMANEN.{RESET}")
         else:
             print(f"{YELLOW}  + purge_config TIDAK AKTIF → config workdirs /etc/<service> DITAHAN (aman redeploy nanti tanpa reconfig).{RESET}")
         print(f"\n{RED}Ansible TIDAK dipanggil sama sekali di abort ini.{RESET}")
@@ -119,12 +119,12 @@ def run_destroy(args: argparse.Namespace) -> int:
 
     section("RUN: destroy playbook (Safety LAYER 2 di-playbook assert destroy_confirm=true)")
     if purge_data_eff and purge_config_eff:
-        warn(f"{RED}--purge-all AKTIF (DATA + CONFIG): SEMUA state (grafana.db / prom tsdb / /etc/grafana / /etc/prometheus / /etc/node_exporter / /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
+        warn(f"{RED}--purge-all AKTIF (DATA + CONFIG): SEMUA state (grafana.db / prom tsdb / /etc/grafana / /etc/prometheus / /etc/node_exporter / /etc/nginx / /etc/keepalived / /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
     else:
         if purge_data_eff:
             warn(f"{RED}--purge-data AKTIF: data persist (grafana_data_dir & prometheus_data_dir) AKAN DIHAPUS PERMANEN{RESET}")
         if purge_config_eff:
-            warn(f"{RED}--purge-config AKTIF: config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
+            warn(f"{RED}--purge-config AKTIF: config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/nginx /etc/keepalived /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
 
     extra_vars = {
         "destroy_confirm": True,
