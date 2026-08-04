@@ -61,10 +61,10 @@
         -e GF_USERS_ALLOW_SIGN_UP="false" \
         -e GF_SERVER_HTTP_PORT="{{ grafana_port }}" \
         -e GF_SERVER_DOMAIN="{{ grafana_server_domain }}" \
-        -e GF_SERVER_ROOT_URL="{{ grafana_server_root_url }}" \
+        -e GF_SERVER_ROOT_URL="{{ grafana_server_root_url | trim }}" \
         -e GF_LOG_LEVEL="{{ grafana_log_level }}" \
         -e GF_SECURITY_SECRET_KEY="{{ grafana_secret_key }}" \
-        --health-cmd="wget -qO- http://{{ grafana_web_listen_address }}/api/health || exit 1" \
+        --health-cmd="wget -qO- http://{{ grafana_web_listen_address | trim }}/api/health || exit 1" \
         --health-interval=30s \
         --health-timeout=10s \
         --health-retries=3 \

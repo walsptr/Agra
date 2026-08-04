@@ -35,20 +35,12 @@ grafana_sqlite_sync_interval: "*/5 * * * *"
 grafana_sqlite_sync_ssh_user: "{{ common_user | default('agra') }}"
 
 grafana_server_domain: "{{ inventory_hostname }}"
-grafana_server_root_url: >-
-  {% if monitoring_vip is defined and monitoring_vip | length > 0 %}
-  https://{{ monitoring_vip }}/
-  {%- elif enable_nginx | default(true) | bool %}
-  https://{{ inventory_hostname }}/
-  {%- else %}
-  http://{{ inventory_hostname }}:{{ grafana_port }}/
-  {%- endif %}
+grafana_server_root_url: "{{ (monitoring_vip is defined and monitoring_vip | default('') | length > 0) | ternary('https://' ~ monitoring_vip ~ '/', (enable_nginx | default(true) | bool) | ternary('https://' ~ inventory_hostname ~ '/', 'http://' ~ inventory_hostname ~ ':' ~ grafana_port ~ '/')) | trim }}"
 grafana_server_protocol: http
 grafana_log_level: info
 grafana_secret_key: "CHANGE_ME_DEFAULT_SECRET_KEY"
 
-grafana_web_listen_address: >-
-  {% if enable_nginx | default(true) | bool %}127.0.0.1:{{ grafana_port }}{% else %}0.0.0.0:{{ grafana_port }}{% endif %}
+grafana_web_listen_address: "{{ (enable_nginx | default(true) | bool) | ternary('127.0.0.1:' ~ grafana_port, '0.0.0.0:' ~ grafana_port) | trim }}"
 
 grafana_prometheus_datasource_name: Prometheus
 grafana_prometheus_datasource_uid: prometheus-main

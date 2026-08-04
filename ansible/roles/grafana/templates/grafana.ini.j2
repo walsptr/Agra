@@ -12,7 +12,7 @@ provisioning = {{ grafana_provisioning_dir }}
 protocol = {{ grafana_server_protocol }}
 http_port = {{ grafana_port }}
 domain = {{ grafana_server_domain }}
-root_url = {{ grafana_server_root_url }}
+root_url = {{ grafana_server_root_url | trim }}
 static_root_path = public
 enable_gzip = true
 
