@@ -2,7 +2,8 @@
 
 LAYER 1 (CLI, SEBELUM ansible pernah diinvoke):
   - WAJIB ada flag --yes-i-really-mean-it. JIKA TIDAK ADA → ABORT ERROR (exit 1), ansible TIDAK PERNAH di-call.
-  - JIKA interactive (AGRA_NON_INTERACTIVE != 1, TIDAK --yes) → PROMPT user KETIK KALIMAT KONFIRMASI PANJANG:
+  - Flag --yes-i-really-mean-it OTOMATIS skip interactive typed sentence confirm (cukup 1x flag eksplisit sesuai RULES §8).
+  - JIKA TIDAK ADA flag --yes-i-really-mean-it, dan (AGRA_NON_INTERACTIVE != 1, TIDAK -y/--yes) → PROMPT user KETIK KALIMAT KONFIRMASI PANJANG:
       YES SAYA SADAR AKAN MENGHAPUS SELURUH SERVICE MONITORING DAN JIKA MENGGUNAKAN --purge-data MAKA SEMUA DATA GRAFANA DB DAN PROMETHEUS TSDB TIDAK BISA DIKEMBALIKAN.
     JIKA SALAH → ABORT.
   - --purge-data TIDAK default (default = retain data_dir, bisa redeploy nanti tanpa kehilangan data)
@@ -44,7 +45,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action="store_true",
         help="(WAJIB) Flag konfirmasi CLI LAYER 1. Tanpa ini command ABORT SEBELUM ansible dipanggil.",
     )
-    p.add_argument("-y", "--yes", dest="auto_yes", action="store_true", help="Skip interactive typed sentence confirm (CI: AGRA_NON_INTERACTIVE=1 juga setara).")
+    p.add_argument("-y", "--yes", dest="auto_yes", action="store_true", help="Skip interactive typed sentence confirm (CI: AGRA_NON_INTERACTIVE=1 atau --yes-i-really-mean-it juga setara dengan -y).")
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
     p.add_argument("-e", "--extra-vars", action="append", default=[])
@@ -74,7 +75,7 @@ def run_destroy(args: argparse.Namespace) -> int:
         print(f"\n{RED}Ansible TIDAK dipanggil sama sekali di abort ini.{RESET}")
         return 1
 
-    interactive = (os.environ.get("AGRA_NON_INTERACTIVE", "") != "1") and not getattr(args, "auto_yes", False)
+    interactive = (os.environ.get("AGRA_NON_INTERACTIVE", "") != "1") and not getattr(args, "auto_yes", False) and not getattr(args, "yes_i_really_mean_it", False)
     if interactive:
         section(f"{RED}{BOLD}DESTROY — KONFIRMASI AKHIR (typed sentence WAJIB){RESET}")
         purge = args.destroy_purge_data
