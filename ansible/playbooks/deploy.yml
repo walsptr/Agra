@@ -79,10 +79,13 @@
   gather_facts: false
   connection: local
   tags: ['deploy']
+  vars_files:
+    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
+    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
   vars:
     access_url: >-
       {% if (groups['monitoring'] | length > 1) and (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0) %}https://{{ hostvars[groups['monitoring'][0]]['monitoring_vip'] }}/grafana/
-      {%- elif enable_https | default(true) | bool %}https://{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}/grafana/
+      {%- elif _enable_https %}https://{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}/grafana/
       {%- else %}http://{{ hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}/grafana/
       {%- endif %}
   tasks:
@@ -92,7 +95,7 @@
           - "✅ AGRA DEPLOY SELESAI"
           - "Grafana URL: {{ access_url | trim }}"
           - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat etc/agra/passwords.yml field grafana_admin_password (default fallback: admin jika belum run genpwd)"
-          - "Prometheus: {% if expose_prometheus_via_nginx | default(false) | bool %}{{ access_url | trim | regex_replace('/grafana/', '/prometheus/') }}{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
+          - "Prometheus: {% if _expose_prometheus_via_nginx %}{{ access_url | trim | regex_replace('/grafana/', '/prometheus/') }}{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
       vars:
-        enable_https: "{{ enable_https | default(true) | bool }}"
-        expose_prometheus_via_nginx: "{{ expose_prometheus_via_nginx | default(false) | bool }}"
+        _enable_https: "{{ lookup('vars', 'enable_https', default=true) | bool }}"
+        _expose_prometheus_via_nginx: "{{ lookup('vars', 'expose_prometheus_via_nginx', default=false) | bool }}"

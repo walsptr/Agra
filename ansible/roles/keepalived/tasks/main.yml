@@ -18,9 +18,9 @@
 - name: Keepalived - Assert monitoring_vip_interface exists di host
   ansible.builtin.assert:
     that:
-      - monitoring_vip_interface in ansible_interfaces
+      - monitoring_vip_interface in ansible_facts['interfaces']
     fail_msg: >-
-      monitoring_vip_interface='{{ monitoring_vip_interface }}' TIDAK ADA di host ini. Interface yang ada: {{ ansible_interfaces | map('string') | list | join(', ') }}.
+      monitoring_vip_interface='{{ monitoring_vip_interface }}' TIDAK ADA di host ini. Interface yang ada: {{ ansible_facts['interfaces'] | map('string') | list | join(', ') }}.
       Keepalived memerlukan interface jaringan valid untuk bind VIP. Perbaiki di globals.yml
       atau inventory dengan interface yang benar (mis. eth0, ens3, enp0s3).
   tags: ['keepalived', 'validate']
