@@ -23,6 +23,25 @@
     recurse: false
   tags: ['prometheus', 'config', 'dirs']
 
+- name: Prometheus (Config) - Build CLI extra args string
+  ansible.builtin.set_fact:
+    _prometheus_extra_args: >-
+      --config.file={{ prometheus_config_dir }}/prometheus.yml
+      --storage.tsdb.path={{ prometheus_data_dir }}
+      --storage.tsdb.retention.time={{ prometheus_retention_time }}
+      {% if prometheus_retention_size | length > 0 %}
+      --storage.tsdb.retention.size={{ prometheus_retention_size }}
+      {% endif %}
+      --web.listen-address={{ prometheus_web_listen_address }}
+      {% if prometheus_web_external_url | length > 0 %}
+      --web.external-url={{ prometheus_web_external_url }}
+      {% endif %}
+      --web.enable-admin-api
+      --web.enable-lifecycle
+      --log.level={{ prometheus_log_level }}
+  changed_when: false
+  tags: ['prometheus', 'config']
+
 - name: Prometheus (Config) - Render main prometheus.yml via FIRST_FOUND override
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/prometheus/prometheus.yml.j2', 'prometheus.yml.j2'], 'paths': [role_path + '/templates']}) }}"
@@ -61,22 +80,3 @@
     mode: '0644'
   notify: ['reload prometheus']
   tags: ['prometheus', 'config', 'file_sd']
-
-- name: Prometheus (Config) - Build CLI extra args string
-  ansible.builtin.set_fact:
-    _prometheus_extra_args: >-
-      --config.file={{ prometheus_config_dir }}/prometheus.yml
-      --storage.tsdb.path={{ prometheus_data_dir }}
-      --storage.tsdb.retention.time={{ prometheus_retention_time }}
-      {% if prometheus_retention_size | length > 0 %}
-      --storage.tsdb.retention.size={{ prometheus_retention_size }}
-      {% endif %}
-      --web.listen-address={{ prometheus_web_listen_address }}
-      {% if prometheus_web_external_url | length > 0 %}
-      --web.external-url={{ prometheus_web_external_url }}
-      {% endif %}
-      --web.enable-admin-api
-      --web.enable-lifecycle
-      --log.level={{ prometheus_log_level }}
-  changed_when: false
-  tags: ['prometheus', 'config']
