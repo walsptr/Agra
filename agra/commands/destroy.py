@@ -48,6 +48,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
     p.add_argument("-e", "--extra-vars", action="append", default=[])
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM destroy (default: FALSE / nonaktif. Destroy punya safety 2 layer sendiri). "
+             "Untuk aktifkan: --precheck (TIDAK DISARANKAN — destroy butuh state apa adanya)."
+    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_destroy)
     return p
@@ -100,6 +108,11 @@ def run_destroy(args: argparse.Namespace) -> int:
     for t in args.skip_tags or []:
         skip_flat.extend([x.strip() for x in t.split(",") if x.strip()])
 
+    user_evar = args.extra_vars or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
+
     return run_playbook(
         "destroy",
         inventory=args.inventory,
@@ -107,7 +120,7 @@ def run_destroy(args: argparse.Namespace) -> int:
         skip_tags=skip_flat or None,
         limit=args.limit,
         extra_vars=extra_vars,
-        extra_vars_raw=args.extra_vars or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=args.verbose,
         description="Destroy Monitoring Stack (Safety LAYER 1 PASS → LAYER 2 playbook)",
         abort_on_nonzero=False,

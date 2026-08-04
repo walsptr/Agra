@@ -77,8 +77,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
     p.add_argument("-e", "--extra-vars", action="append", default=[])
-    p.add_argument("--precheck/--no-precheck", default=False, dest="precheck",
-                   help="Precheck sebelum restore (default OFF: restore butuh kecepatan, precheck bisa conflict dengan state buruk).")
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM restore (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_restore)
     return p
@@ -140,6 +146,15 @@ def run_restore(args: argparse.Namespace) -> int:
         except Exception as e:
             warn(f"Manifest tidak valid (lanjut tetap): {e}")
 
+    precheck_enabled = getattr(args, "precheck", True)
+    if precheck_enabled:
+        from agra.commands.check import run_check
+        rc = run_check(args)
+        if rc != 0:
+            error(f"Precheck FAILED (rc={rc}). Restore DIBATALKAN untuk mencegah bad state.")
+            warn("Untuk bypass precheck: `agra restore --no-precheck` (TIDAK DISARANKAN production).")
+            return rc
+
     interactive = (os.environ.get("AGRA_NON_INTERACTIVE", "") != "1") and not getattr(args, "auto_yes", False)
     if interactive:
         section(f"{RED}{BOLD}RESTORE — KONFIRMASI TYPED SENTENCE{RESET}")
@@ -172,11 +187,10 @@ def run_restore(args: argparse.Namespace) -> int:
     for t in getattr(args, "skip_tags", None) or []:
         skip_flat.extend([x.strip() for x in t.split(",") if x.strip()])
 
-    if getattr(args, "precheck", False):
-        from agra.commands.check import run_check
-        rc = run_check(args)
-        if rc != 0:
-            warn("Precheck FAILED tapi restore berlanjut (karena user set precheck ON, tapi restore boleh gagal precheck jika state buruk).")
+    user_evar = args.extra_vars or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
 
     return run_playbook(
         "restore",
@@ -185,7 +199,7 @@ def run_restore(args: argparse.Namespace) -> int:
         skip_tags=skip_flat or None,
         limit=getattr(args, "limit", None),
         extra_vars=evars,
-        extra_vars_raw=args.extra_vars or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=getattr(args, "verbose", 0),
         description="Restore Grafana + Prometheus dari Backup (backup-before-restore otomatis)",
         abort_on_nonzero=False,

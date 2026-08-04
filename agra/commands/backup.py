@@ -134,12 +134,19 @@ def cmd_create(args: argparse.Namespace) -> int:
     for t in getattr(args, "tags", None) or []:
         tags_flat.extend([x.strip() for x in t.split(",") if x.strip()])
 
-    if getattr(args, "precheck", True):
+    precheck_enabled = getattr(args, "precheck", True)
+    if precheck_enabled:
         from agra.commands.check import run_check
         rc = run_check(args)
         if rc != 0:
-            error("Precheck FAILED — backup create dibatalkan. --no-precheck untuk bypass.")
+            error(f"Precheck FAILED (rc={rc}). Backup Create DIBATALKAN untuk mencegah bad state.")
+            warn("Untuk bypass precheck: `agra backup create --no-precheck` (TIDAK DISARANKAN production).")
             return rc
+
+    user_evar = getattr(args, "extra_vars", None) or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
 
     return run_playbook(
         "backup",
@@ -147,7 +154,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         tags=tags_flat or None,
         limit=getattr(args, "limit", None),
         extra_vars=evars if evars else None,
-        extra_vars_raw=getattr(args, "extra_vars", None) or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=getattr(args, "verbose", 0),
         description="Backup Grafana config + Prometheus Snapshot API TSDB",
         abort_on_nonzero=False,
@@ -165,7 +172,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("-d", "--backup-dir", dest="backup_dir", help=f"Backup root dir (default: {BACKUP_ROOT_DIR})")
     p.add_argument("-t", "--tags", action="append", default=[], dest="tags")
     p.add_argument("-e", "--extra-vars", action="append", default=[], dest="extra_vars")
-    p.add_argument("--precheck/--no-precheck", default=True, dest="precheck")
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM backup create (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p.add_argument("-v", "--verbose", action="count", default=0, dest="verbose")
 
     sub = p.add_subparsers(dest="backup_command", required=False, metavar="{create | list}")
@@ -180,7 +194,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p_create.add_argument("-l", "--limit")
     p_create.add_argument("-t", "--tags", action="append", default=[])
     p_create.add_argument("-e", "--extra-vars", action="append", default=[])
-    p_create.add_argument("--precheck/--no-precheck", default=True, dest="precheck")
+    p_create.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM backup create (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p_create.add_argument("-v", "--verbose", action="count", default=0, dest="verbose")
     p_create.set_defaults(func=cmd_create)
 

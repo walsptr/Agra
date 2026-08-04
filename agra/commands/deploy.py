@@ -59,13 +59,18 @@ def run_deploy(args: argparse.Namespace) -> int:
             warn("Untuk bypass precheck: `agra deploy --no-precheck` (TIDAK DISARANKAN production).")
             return rc_check
 
+    user_evar = args.extra_vars or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
+
     return run_playbook(
         "deploy",
         inventory=args.inventory,
         tags=tags_flat or None,
         skip_tags=skip_flat or None,
         limit=args.limit,
-        extra_vars_raw=args.extra_vars or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=args.verbose,
         description="Deploy Monitoring Stack (agra deploy)",
         abort_on_nonzero=False,

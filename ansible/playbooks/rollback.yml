@@ -1,7 +1,4 @@
 ---
-- import_playbook: precheck.yml
-  tags: ['always', 'precheck']
-
 - name: 'AGRA ROLLBACK — Info awal'
   hosts: all
   gather_facts: true

@@ -1,7 +1,4 @@
 ---
-- import_playbook: precheck.yml
-  tags: ['always', 'precheck']
-
 - name: 'AGRA UPGRADE — Phase 1 (STANDBY NODES first, idx 1++)'
   hosts: "{{ groups['monitoring'][1:] | default([]) }}"
   gather_facts: true

@@ -1,7 +1,4 @@
 ---
-- import_playbook: precheck.yml
-  tags: ['always', 'precheck']
-
 - name: 'AGRA — Backup (Grafana tarball + Prometheus TSDB Snapshot API + Manifest YAML + S3 opt)'
   hosts: monitoring
   gather_facts: true

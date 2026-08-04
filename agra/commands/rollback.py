@@ -29,7 +29,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("--node-exporter-native-version")
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
-    p.add_argument("--precheck/--no-precheck", default=True)
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM rollback (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p.add_argument("--yes", action="store_true", help="Skip rollback confirmation prompt (untuk CI, set juga AGRA_NON_INTERACTIVE=1).")
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_rollback)
@@ -62,6 +69,15 @@ def run_rollback(args: argparse.Namespace) -> int:
 
     extra_vars = _shortcut_flags_to_evars(args)
 
+    precheck_enabled = getattr(args, "precheck", True)
+    if precheck_enabled:
+        from agra.commands.check import run_check
+        rc = run_check(args)
+        if rc != 0:
+            error(f"Precheck FAILED (rc={rc}). Rollback DIBATALKAN untuk mencegah bad state.")
+            warn("Untuk bypass precheck: `agra rollback --no-precheck` (TIDAK DISARANKAN production).")
+            return rc
+
     if not extra_vars and not args.extra_vars:
         warn("⚠️ TIDAK ada versi pin spesifik diberikan via --prometheus-tag / --grafana-tag / -e ... → rollback = re-apply state idempotent TANPA perubahan versi. Lanjutkan?")
 
@@ -78,12 +94,10 @@ def run_rollback(args: argparse.Namespace) -> int:
             return 1
         info("Konfirmasi OK. Lanjut rollback.")
 
-    if args.precheck:
-        from agra.commands.check import run_check
-        rc = run_check(args)
-        if rc != 0:
-            error("Precheck FAILED — rollback dibatalkan. --no-precheck untuk bypass.")
-            return rc
+    user_evar = args.extra_vars or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
 
     return run_playbook(
         "rollback",
@@ -92,7 +106,7 @@ def run_rollback(args: argparse.Namespace) -> int:
         skip_tags=skip_flat or None,
         limit=args.limit,
         extra_vars=extra_vars if extra_vars else None,
-        extra_vars_raw=args.extra_vars or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=args.verbose,
         description="Rollback Monitoring ke Versi Sebelumnya",
         abort_on_nonzero=False,

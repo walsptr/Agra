@@ -1,7 +1,4 @@
 ---
-- import_playbook: precheck.yml
-  tags: ['always', 'precheck']
-
 - name: 'AGRA DEPLOY STEP 1 — Apply common role ke ALL hosts'
   hosts: all
   gather_facts: true

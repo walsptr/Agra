@@ -45,7 +45,14 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     )
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
-    p.add_argument("--precheck/--no-precheck", default=True, help="Jalankan precheck sebelum upgrade (default on).")
+    p.add_argument(
+        "--precheck",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        dest="precheck",
+        help="Jalankan precheck SEBELUM upgrade (default: TRUE / precheck aktif). "
+             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
+    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_upgrade)
     return p
@@ -75,11 +82,13 @@ def run_upgrade(args: argparse.Namespace) -> int:
     for t in args.skip_tags or []:
         skip_flat.extend([x.strip() for x in t.split(",") if x.strip()])
 
-    if args.precheck:
+    precheck_enabled = getattr(args, "precheck", True)
+    if precheck_enabled:
         from agra.commands.check import run_check
         rc = run_check(args)
         if rc != 0:
-            error("Precheck FAILED — upgrade dibatalkan. Gunakan --no-precheck untuk bypass (TIDAK DISARANKAN).")
+            error(f"Precheck FAILED (rc={rc}). Upgrade DIBATALKAN untuk mencegah bad state.")
+            warn("Untuk bypass precheck: `agra upgrade --no-precheck` (TIDAK DISARANKAN production).")
             return rc
 
     extra_vars = _shortcut_flags_to_evars(args)
@@ -90,6 +99,11 @@ def run_upgrade(args: argparse.Namespace) -> int:
     if extra_vars:
         info("Versi shortcut flags di-set: " + ", ".join(f"{k}={v}" for k, v in extra_vars.items()))
 
+    user_evar = args.extra_vars or []
+    if isinstance(user_evar, str):
+        user_evar = [user_evar]
+    merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
+
     return run_playbook(
         "upgrade",
         inventory=args.inventory,
@@ -97,7 +111,7 @@ def run_upgrade(args: argparse.Namespace) -> int:
         skip_tags=skip_flat or None,
         limit=args.limit,
         extra_vars=extra_vars if extra_vars else None,
-        extra_vars_raw=args.extra_vars or None,
+        extra_vars_raw=merged_evar or None,
         verbosity=args.verbose,
         description="Rolling Upgrade Monitoring",
         abort_on_nonzero=False,
