@@ -35,38 +35,33 @@
     - name: 'Destroy — Docker mode: remove all agra containers'
       block:
         - name: 'Destroy (Docker) — Remove grafana container'
-          community.docker.docker_container:
-            name: "{{ grafana_container_name | default('agra-grafana') }}"
-            state: absent
-            force_kill: true
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ grafana_container_name | default('agra-grafana') }} || true
+          changed_when: true
           ignore_errors: true
 
         - name: 'Destroy (Docker) — Remove prometheus container'
-          community.docker.docker_container:
-            name: "{{ prometheus_container_name | default('agra-prometheus') }}"
-            state: absent
-            force_kill: true
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ prometheus_container_name | default('agra-prometheus') }} || true
+          changed_when: true
           ignore_errors: true
 
         - name: 'Destroy (Docker) — Remove node_exporter container'
-          community.docker.docker_container:
-            name: "{{ node_exporter_container_name | default('agra-node-exporter') }}"
-            state: absent
-            force_kill: true
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ node_exporter_container_name | default('agra-node-exporter') }} || true
+          changed_when: true
           ignore_errors: true
 
         - name: 'Destroy (Docker) — Remove nginx container'
-          community.docker.docker_container:
-            name: "{{ nginx_container_name | default('agra-nginx') }}"
-            state: absent
-            force_kill: true
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ nginx_container_name | default('agra-nginx') }} || true
+          changed_when: true
           ignore_errors: true
 
         - name: 'Destroy (Docker) — Remove keepalived container'
-          community.docker.docker_container:
-            name: "{{ keepalived_container_name | default('agra-keepalived') }}"
-            state: absent
-            force_kill: true
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ keepalived_container_name | default('agra-keepalived') }} || true
+          changed_when: true
           ignore_errors: true
       when:
         - agra_deployment_mode == 'docker'

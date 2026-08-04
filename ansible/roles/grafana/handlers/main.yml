@@ -8,13 +8,12 @@
     - restart grafana native
 
 - name: restart grafana docker
-  community.docker.docker_container:
-    name: "{{ grafana_container_name }}"
-    state: started
-    restart: true
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ grafana_container_name }} || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_grafana | default(true) | bool
+  changed_when: true
   ignore_errors: true
 
 - name: restart grafana native

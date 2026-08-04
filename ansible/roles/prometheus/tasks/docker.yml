@@ -1,40 +1,68 @@
 ---
-- name: Prometheus (Docker) - Pull image
-  community.docker.docker_image:
-    name: "{{ prometheus_image }}:{{ prometheus_tag }}"
-    source: pull
-    state: present
-  register: _prom_img
-  until: _prom_img is succeeded
-  retries: 5
-  delay: 3
+- name: Prometheus (Docker) - Check if image exists locally
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME image inspect {{ prometheus_image }}:{{ prometheus_tag }} >/dev/null 2>&1
+  register: _prom_img_exists
+  changed_when: false
+  failed_when: false
   tags: ['prometheus', 'docker', 'image']
 
-- name: Prometheus (Docker) - Remove old container if image changed
-  community.docker.docker_container:
-    name: "{{ prometheus_container_name }}"
-    state: absent
-  when: _prom_img is changed
+- name: Prometheus (Docker) - Pull image
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME pull {{ prometheus_image }}:{{ prometheus_tag }}
+  register: _prom_img_pull
+  until: _prom_img_pull is succeeded
+  retries: 5
+  delay: 3
+  when: _prom_img_exists.rc != 0
+  changed_when: "'Pull complete' in _prom_img_pull.stdout or 'Downloaded' in _prom_img_pull.stdout"
+  tags: ['prometheus', 'docker', 'image']
+
+- name: Prometheus (Docker) - Check container running state and image
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      CURRENT_IMG=$($RUNTIME inspect --format='{{ '{{' }}.Image{{ '}}' }}' {{ prometheus_container_name }} 2>/dev/null || echo "")
+      TARGET_IMG=$($RUNTIME image inspect --format='{{ '{{' }}.Id{{ '}}' }}' {{ prometheus_image }}:{{ prometheus_tag }} 2>/dev/null || echo "")
+      if [ "$CURRENT_IMG" != "" ] && [ "$CURRENT_IMG" = "$TARGET_IMG" ]; then echo "MATCH"; else echo "MISMATCH"; fi
+  register: _prom_container_match
+  changed_when: false
+  failed_when: false
+  tags: ['prometheus', 'docker', 'container']
+
+- name: Prometheus (Docker) - Remove container if image mismatch
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ prometheus_container_name }} || true
+  when: _prom_container_match.stdout == "MISMATCH"
+  changed_when: _prom_container_match.stdout == "MISMATCH"
+  tags: ['prometheus', 'docker', 'container']
+
+- name: Prometheus (Docker) - Check if container is running
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME ps --format '{{ '{{' }}.Names{{ '}}' }}' | grep -x {{ prometheus_container_name }}
+  register: _prom_container_running
+  changed_when: false
+  failed_when: false
   tags: ['prometheus', 'docker', 'container']
 
 - name: Prometheus (Docker) - Start container (mount config + data)
-  community.docker.docker_container:
-    name: "{{ prometheus_container_name }}"
-    image: "{{ prometheus_image }}:{{ prometheus_tag }}"
-    state: started
-    restart_policy: always
-    user: "{{ prometheus_skip_head }}:0"
-    network_mode: host
-    volumes:
-      - "{{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro"
-      - "{{ prometheus_data_dir }}:{{ prometheus_data_dir }}:rw"
-    command: "{{ _prometheus_extra_args }}"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://{{ prometheus_web_listen_address }}/-/healthy || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    comparisons:
-      '*': ignore
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME run -d \
+        --name={{ prometheus_container_name }} \
+        --restart=always \
+        --network=host \
+        --user={{ prometheus_skip_head }}:0 \
+        -v {{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro \
+        -v {{ prometheus_data_dir }}:{{ prometheus_data_dir }}:rw \
+        --health-cmd="wget -qO- http://{{ prometheus_web_listen_address }}/-/healthy || exit 1" \
+        --health-interval=30s \
+        --health-timeout=10s \
+        --health-retries=3 \
+        --health-start-period=30s \
+        {{ prometheus_image }}:{{ prometheus_tag }} \
+        {{ _prometheus_extra_args }}
+  when: _prom_container_running.rc != 0
+  changed_when: true
   tags: ['prometheus', 'docker', 'container']

@@ -7,43 +7,72 @@
       (role keepalived native install OS package, lebih stabil).
   tags: ['keepalived', 'docker']
 
-- name: Keepalived (Docker) - Pull image
-  community.docker.docker_image:
-    name: "{{ keepalived_image }}:{{ keepalived_tag }}"
-    source: pull
-    state: present
-  register: _ka_img
-  until: _ka_img is succeeded
-  retries: 5
-  delay: 3
+- name: Keepalived (Docker) - Check if image exists locally
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME image inspect {{ keepalived_image }}:{{ keepalived_tag }} >/dev/null 2>&1
+  register: _ka_img_exists
+  changed_when: false
+  failed_when: false
   tags: ['keepalived', 'docker', 'image']
 
-- name: Keepalived (Docker) - Remove old container if image changed
-  community.docker.docker_container:
-    name: "{{ keepalived_container_name }}"
-    state: absent
-  when: _ka_img is changed
+- name: Keepalived (Docker) - Pull image
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME pull {{ keepalived_image }}:{{ keepalived_tag }}
+  register: _ka_img_pull
+  until: _ka_img_pull is succeeded
+  retries: 5
+  delay: 3
+  when: _ka_img_exists.rc != 0
+  changed_when: "'Pull complete' in _ka_img_pull.stdout or 'Downloaded' in _ka_img_pull.stdout"
+  tags: ['keepalived', 'docker', 'image']
+
+- name: Keepalived (Docker) - Check container running state and image
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      CURRENT_IMG=$($RUNTIME inspect --format='{{ '{{' }}.Image{{ '}}' }}' {{ keepalived_container_name }} 2>/dev/null || echo "")
+      TARGET_IMG=$($RUNTIME image inspect --format='{{ '{{' }}.Id{{ '}}' }}' {{ keepalived_image }}:{{ keepalived_tag }} 2>/dev/null || echo "")
+      if [ "$CURRENT_IMG" != "" ] && [ "$CURRENT_IMG" = "$TARGET_IMG" ]; then echo "MATCH"; else echo "MISMATCH"; fi
+  register: _ka_container_match
+  changed_when: false
+  failed_when: false
+  tags: ['keepalived', 'docker', 'container']
+
+- name: Keepalived (Docker) - Remove container if image mismatch
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ keepalived_container_name }} || true
+  when: _ka_container_match.stdout == "MISMATCH"
+  changed_when: _ka_container_match.stdout == "MISMATCH"
+  tags: ['keepalived', 'docker', 'container']
+
+- name: Keepalived (Docker) - Check if container is running
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME ps --format '{{ '{{' }}.Names{{ '}}' }}' | grep -x {{ keepalived_container_name }}
+  register: _ka_container_running
+  changed_when: false
+  failed_when: false
   tags: ['keepalived', 'docker', 'container']
 
 - name: Keepalived (Docker) - Start container (host network + cap NET_ADMIN)
-  community.docker.docker_container:
-    name: "{{ keepalived_container_name }}"
-    image: "{{ keepalived_image }}:{{ keepalived_tag }}"
-    state: started
-    restart_policy: always
-    network_mode: host
-    capabilities:
-      - NET_ADMIN
-      - NET_BROADCAST
-      - NET_RAW
-    volumes:
-      - "{{ keepalived_config_dir }}/keepalived.conf:/usr/local/etc/keepalived/keepalived.conf:ro"
-      - /usr/local/bin/agra_monitoring_healthcheck.sh:/usr/local/bin/agra_monitoring_healthcheck.sh:ro
-      - /usr/local/bin/agra_keepalived_notify.sh:/usr/local/bin/agra_keepalived_notify.sh:ro
-      - "{{ keepalived_log_file }}:{{ keepalived_log_file }}"
-    env:
-      KEEPALIVED_AUTOCONF: "false"
-      KEEPALIVED_CONF: "/usr/local/etc/keepalived/keepalived.conf"
-    comparisons:
-      '*': ignore
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME run -d \
+        --name={{ keepalived_container_name }} \
+        --restart=always \
+        --network=host \
+        --cap-add=NET_ADMIN \
+        --cap-add=NET_BROADCAST \
+        --cap-add=NET_RAW \
+        --cap-add=SYS_NICE \
+        --privileged=true \
+        -v {{ keepalived_config_dir }}/keepalived.conf:/usr/local/etc/keepalived/keepalived.conf:ro \
+        -v /usr/local/bin/agra_monitoring_healthcheck.sh:/usr/local/bin/agra_monitoring_healthcheck.sh:ro \
+        -v /usr/local/bin/agra_keepalived_notify.sh:/usr/local/bin/agra_keepalived_notify.sh:ro \
+        -v {{ keepalived_log_file }}:{{ keepalived_log_file }} \
+        -e KEEPALIVED_AUTOCONF="false" \
+        -e KEEPALIVED_CONF="/usr/local/etc/keepalived/keepalived.conf" \
+        {{ keepalived_image }}:{{ keepalived_tag }}
+  when: _ka_container_running.rc != 0
+  changed_when: true
   tags: ['keepalived', 'docker', 'container']

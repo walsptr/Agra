@@ -1,42 +1,70 @@
 ---
-- name: Nginx (Docker) - Pull image
-  community.docker.docker_image:
-    name: "{{ nginx_image }}:{{ nginx_tag }}"
-    source: pull
-    state: present
-  register: _ngx_img
-  until: _ngx_img is succeeded
-  retries: 5
-  delay: 3
+- name: Nginx (Docker) - Check if image exists locally
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME image inspect {{ nginx_image }}:{{ nginx_tag }} >/dev/null 2>&1
+  register: _ngx_img_exists
+  changed_when: false
+  failed_when: false
   tags: ['nginx', 'docker', 'image']
 
-- name: Nginx (Docker) - Remove old container if image changed
-  community.docker.docker_container:
-    name: "{{ nginx_container_name }}"
-    state: absent
-  when: _ngx_img is changed
+- name: Nginx (Docker) - Pull image
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME pull {{ nginx_image }}:{{ nginx_tag }}
+  register: _ngx_img_pull
+  until: _ngx_img_pull is succeeded
+  retries: 5
+  delay: 3
+  when: _ngx_img_exists.rc != 0
+  changed_when: "'Pull complete' in _ngx_img_pull.stdout or 'Downloaded' in _ngx_img_pull.stdout"
+  tags: ['nginx', 'docker', 'image']
+
+- name: Nginx (Docker) - Check container running state and image
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      CURRENT_IMG=$($RUNTIME inspect --format='{{ '{{' }}.Image{{ '}}' }}' {{ nginx_container_name }} 2>/dev/null || echo "")
+      TARGET_IMG=$($RUNTIME image inspect --format='{{ '{{' }}.Id{{ '}}' }}' {{ nginx_image }}:{{ nginx_tag }} 2>/dev/null || echo "")
+      if [ "$CURRENT_IMG" != "" ] && [ "$CURRENT_IMG" = "$TARGET_IMG" ]; then echo "MATCH"; else echo "MISMATCH"; fi
+  register: _ngx_container_match
+  changed_when: false
+  failed_when: false
+  tags: ['nginx', 'docker', 'container']
+
+- name: Nginx (Docker) - Remove container if image mismatch
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ nginx_container_name }} || true
+  when: _ngx_container_match.stdout == "MISMATCH"
+  changed_when: _ngx_container_match.stdout == "MISMATCH"
+  tags: ['nginx', 'docker', 'container']
+
+- name: Nginx (Docker) - Check if container is running
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME ps --format '{{ '{{' }}.Names{{ '}}' }}' | grep -x {{ nginx_container_name }}
+  register: _ngx_container_running
+  changed_when: false
+  failed_when: false
   tags: ['nginx', 'docker', 'container']
 
 - name: Nginx (Docker) - Start nginx container (host network untuk akses real 80/443)
-  community.docker.docker_container:
-    name: "{{ nginx_container_name }}"
-    image: "{{ nginx_image }}:{{ nginx_tag }}"
-    state: started
-    restart_policy: always
-    network_mode: host
-    volumes:
-      - "{{ nginx_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro"
-      - "{{ nginx_config_dir }}/sites-available:/etc/nginx/sites-available:ro"
-      - "{{ nginx_config_dir }}/sites-enabled:/etc/nginx/sites-enabled:ro"
-      - "{{ nginx_config_dir }}/conf.d:/etc/nginx/conf.d:ro"
-      - "{{ nginx_config_dir }}/ssl:/etc/nginx/ssl:ro"
-      - "{{ nginx_log_dir }}:/var/log/nginx:rw"
-      - "{{ nginx_cache_dir }}:/var/cache/nginx:rw"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:{{ nginx_http_port }}/ -O /dev/null || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    comparisons:
-      '*': ignore
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME run -d \
+        --name={{ nginx_container_name }} \
+        --restart=always \
+        --network=host \
+        -v {{ nginx_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro \
+        -v {{ nginx_config_dir }}/sites-available:/etc/nginx/sites-available:ro \
+        -v {{ nginx_config_dir }}/sites-enabled:/etc/nginx/sites-enabled:ro \
+        -v {{ nginx_config_dir }}/conf.d:/etc/nginx/conf.d:ro \
+        -v {{ nginx_config_dir }}/ssl:/etc/nginx/ssl:ro \
+        -v {{ nginx_log_dir }}:/var/log/nginx:rw \
+        -v {{ nginx_cache_dir }}:/var/cache/nginx:rw \
+        --health-cmd="wget -qO- http://127.0.0.1:{{ nginx_http_port }}/ -O /dev/null || exit 1" \
+        --health-interval=30s \
+        --health-timeout=5s \
+        --health-retries=3 \
+        {{ nginx_image }}:{{ nginx_tag }}
+  when: _ngx_container_running.rc != 0
+  changed_when: true
   tags: ['nginx', 'docker', 'container']

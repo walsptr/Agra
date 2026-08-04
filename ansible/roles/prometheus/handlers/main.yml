@@ -16,13 +16,12 @@
     - reload prometheus native
 
 - name: restart prometheus docker
-  community.docker.docker_container:
-    name: "{{ prometheus_container_name }}"
-    state: started
-    restart: true
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ prometheus_container_name }} || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_prometheus | default(true) | bool
+  changed_when: true
   ignore_errors: true
 
 - name: restart prometheus native

@@ -8,13 +8,12 @@
     - restart node_exporter native
 
 - name: restart node_exporter docker
-  community.docker.docker_container:
-    name: "{{ node_exporter_container_name }}"
-    state: started
-    restart: true
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ node_exporter_container_name }} || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_node_exporter | default(true) | bool
+  changed_when: true
   ignore_errors: true
 
 - name: restart node_exporter native

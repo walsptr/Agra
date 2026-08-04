@@ -62,12 +62,19 @@
       when: "'podman' in ansible_facts.groups"
   tags: ['common', 'docker']
 
-- name: Common (Docker) - Ensure agra docker network exists
-  community.docker.docker_network:
-    name: "{{ common_docker_network_name }}"
-    driver: "{{ common_docker_network_driver }}"
-    state: present
-  register: _common_docker_net_result
+- name: Common (Docker) - Check if agra docker network exists
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME network inspect {{ common_docker_network_name }} >/dev/null 2>&1
+  register: _common_docker_net_exists
+  changed_when: false
+  failed_when: false
   ignore_errors: true
-  when: not ((_common_docker_net_result is defined and _common_docker_net_result.failed) | default(false))
+  tags: ['common', 'docker', 'network']
+
+- name: Common (Docker) - Ensure agra docker network exists
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME network create --driver={{ common_docker_network_driver }} {{ common_docker_network_name }}
+  when: _common_docker_net_exists.rc != 0
+  changed_when: true
+  ignore_errors: true
   tags: ['common', 'docker', 'network']

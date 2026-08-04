@@ -1,13 +1,26 @@
 ---
 - name: nginx syntax check
-  ansible.builtin.command:
-    cmd: >-
-      {% if agra_deployment_mode == 'native' %}nginx -t{% else %}echo "docker nginx skip syntax check"{% endif %}
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      if [ "{{ agra_deployment_mode }}" = "native" ]; then
+        nginx -t
+      else
+        $RUNTIME exec {{ nginx_container_name }} nginx -t 2>/dev/null || echo "docker nginx skip syntax check (container not running)"
+      fi
   register: _syntax_check
   changed_when: false
   failed_when: _syntax_check.rc is defined and _syntax_check.rc > 0 and 'skip' not in _syntax_check.stdout
   ignore_errors: false
   listen: "nginx syntax check"
+
+- name: restart nginx
+  ansible.builtin.debug:
+    msg: "Restart nginx triggered"
+  changed_when: true
+  notify:
+    - restart nginx native
+    - restart nginx docker
 
 - name: reload nginx
   ansible.builtin.debug:
@@ -16,6 +29,24 @@
   notify:
     - reload nginx native
     - reload nginx docker
+
+- name: restart nginx native
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+  when:
+    - agra_deployment_mode == 'native'
+    - enable_nginx | default(true) | bool
+  ignore_errors: true
+
+- name: restart nginx docker
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ nginx_container_name }} || true
+  when:
+    - agra_deployment_mode == 'docker'
+    - enable_nginx | default(true) | bool
+  changed_when: true
+  ignore_errors: true
 
 - name: reload nginx native
   ansible.builtin.service:
@@ -27,10 +58,10 @@
   ignore_errors: true
 
 - name: reload nginx docker
-  community.docker.docker_container_exec:
-    container: "{{ nginx_container_name }}"
-    command: "nginx -s reload"
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME exec {{ nginx_container_name }} nginx -s reload || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_nginx | default(true) | bool
+  changed_when: true
   ignore_errors: true

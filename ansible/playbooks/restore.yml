@@ -104,10 +104,10 @@
     - name: 'Restore Grafana — Step 1 Stop grafana service'
       block:
         - name: 'Restore Grafana (Docker) — Stop container'
-          community.docker.docker_container:
-            name: "{{ grafana_container_name | default('agra-grafana') }}"
-            state: stopped
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME stop {{ grafana_container_name | default('agra-grafana') }} || true
           when: agra_deployment_mode == 'docker'
+          changed_when: true
           ignore_errors: true
         - name: 'Restore Grafana (Native) — Stop service'
           ansible.builtin.service:
@@ -184,10 +184,10 @@
     - name: 'Restore — Step 5 Start ulang Grafana'
       block:
         - name: 'Restore Grafana (Docker) — Start'
-          community.docker.docker_container:
-            name: "{{ grafana_container_name | default('agra-grafana') }}"
-            state: started
+          ansible.builtin.shell:
+            cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME start {{ grafana_container_name | default('agra-grafana') }} || true
           when: agra_deployment_mode == 'docker'
+          changed_when: true
           ignore_errors: true
 
         - name: 'Restore Grafana (Native) — Start'

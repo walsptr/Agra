@@ -35,20 +35,19 @@
   ignore_errors: true
 
 - name: reload keepalived docker
-  community.docker.docker_container_exec:
-    container: "{{ keepalived_container_name }}"
-    command: "kill -HUP 1"
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME exec {{ keepalived_container_name }} kill -HUP 1 || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_keepalived | default(false) | bool
+  changed_when: true
   ignore_errors: true
 
 - name: restart keepalived docker
-  community.docker.docker_container:
-    name: "{{ keepalived_container_name }}"
-    state: started
-    restart: true
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ keepalived_container_name }} || true
   when:
     - agra_deployment_mode == 'docker'
     - enable_keepalived | default(false) | bool
+  changed_when: true
   ignore_errors: true

@@ -1,48 +1,79 @@
 ---
-- name: Node Exporter (Docker) - Ensure image pulled
-  community.docker.docker_image:
-    name: "{{ node_exporter_image }}:{{ node_exporter_tag }}"
-    source: pull
-    state: present
-  register: _node_exporter_img
-  until: _node_exporter_img is succeeded
-  retries: 5
-  delay: 3
+- name: Node Exporter (Docker) - Check if image exists locally
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME image inspect {{ node_exporter_image }}:{{ node_exporter_tag }} >/dev/null 2>&1
+  register: _node_exporter_img_exists
+  changed_when: false
+  failed_when: false
   tags: ['node_exporter', 'docker', 'image']
 
-- name: Node Exporter (Docker) - Remove previous container if image updated
-  community.docker.docker_container:
-    name: "{{ node_exporter_container_name }}"
-    state: absent
-  when: _node_exporter_img is changed
+- name: Node Exporter (Docker) - Pull image
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME pull {{ node_exporter_image }}:{{ node_exporter_tag }}
+  register: _node_exporter_img_pull
+  until: _node_exporter_img_pull is succeeded
+  retries: 5
+  delay: 3
+  when: _node_exporter_img_exists.rc != 0
+  changed_when: "'Pull complete' in _node_exporter_img_pull.stdout or 'Downloaded' in _node_exporter_img_pull.stdout"
+  tags: ['node_exporter', 'docker', 'image']
+
+- name: Node Exporter (Docker) - Check container running state and image
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      CURRENT_IMG=$($RUNTIME inspect --format='{{ '{{' }}.Image{{ '}}' }}' {{ node_exporter_container_name }} 2>/dev/null || echo "")
+      TARGET_IMG=$($RUNTIME image inspect --format='{{ '{{' }}.Id{{ '}}' }}' {{ node_exporter_image }}:{{ node_exporter_tag }} 2>/dev/null || echo "")
+      if [ "$CURRENT_IMG" != "" ] && [ "$CURRENT_IMG" = "$TARGET_IMG" ]; then echo "MATCH"; else echo "MISMATCH"; fi
+  register: _node_exporter_container_match
+  changed_when: false
+  failed_when: false
+  tags: ['node_exporter', 'docker', 'container']
+
+- name: Node Exporter (Docker) - Remove container if image mismatch
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ node_exporter_container_name }} || true
+  when: _node_exporter_container_match.stdout == "MISMATCH"
+  changed_when: _node_exporter_container_match.stdout == "MISMATCH"
+  tags: ['node_exporter', 'docker', 'container']
+
+- name: Node Exporter (Docker) - Check if container is running
+  ansible.builtin.shell:
+    cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME ps --format '{{ '{{' }}.Names{{ '}}' }}' | grep -x {{ node_exporter_container_name }}
+  register: _node_exporter_container_running
+  changed_when: false
+  failed_when: false
   tags: ['node_exporter', 'docker', 'container']
 
 - name: Node Exporter (Docker) - Start container
-  community.docker.docker_container:
-    name: "{{ node_exporter_container_name }}"
-    image: "{{ node_exporter_image }}:{{ node_exporter_tag }}"
-    state: started
-    restart_policy: always
-    network_mode: host
-    user: root
-    pid_mode: host
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-      - "{{ node_exporter_config_dir }}:/etc/node_exporter:ro"
-      - "{% if node_exporter_textfile_dir | length > 0 %}{{ node_exporter_textfile_dir }}:{{ node_exporter_textfile_dir }}:ro{% endif %}"
-    command: >-
-      --path.procfs=/host/proc
-      --path.sysfs=/host/sys
-      --path.rootfs=/rootfs
-      {{ _node_exporter_extra_args }}
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:{{ node_exporter_port }}/metrics || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    comparisons:
-      '*': ignore
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      TEXTFILE_VOL=""
+      if [ -n "{{ node_exporter_textfile_dir }}" ]; then
+        TEXTFILE_VOL="-v {{ node_exporter_textfile_dir }}:{{ node_exporter_textfile_dir }}:ro"
+      fi
+      $RUNTIME run -d \
+        --name={{ node_exporter_container_name }} \
+        --restart=always \
+        --pid=host \
+        --network=host \
+        --user=root \
+        -v /proc:/host/proc:ro \
+        -v /sys:/host/sys:ro \
+        -v /:/rootfs:ro \
+        -v {{ node_exporter_config_dir }}:/etc/node_exporter:ro \
+        $TEXTFILE_VOL \
+        --health-cmd="wget -qO- http://localhost:{{ node_exporter_port }}/metrics || exit 1" \
+        --health-interval=30s \
+        --health-timeout=5s \
+        --health-retries=3 \
+        --health-start-period=10s \
+        {{ node_exporter_image }}:{{ node_exporter_tag }} \
+        --path.procfs=/host/proc \
+        --path.sysfs=/host/sys \
+        --path.rootfs=/rootfs \
+        {{ _node_exporter_extra_args }}
+  when: _node_exporter_container_running.rc != 0
+  changed_when: true
   tags: ['node_exporter', 'docker', 'container']
