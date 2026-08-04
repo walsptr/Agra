@@ -46,8 +46,14 @@
   tags: ['prometheus', 'docker', 'container']
 
 - name: Prometheus (Docker) - Validate prometheus.yml via docker run promtool
-  ansible.builtin.command:
-    cmd: "docker run --rm -v {{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro {{ prometheus_image }}:{{ prometheus_tag }} promtool check config-files {{ prometheus_config_dir }}/prometheus.yml"
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME run --rm \
+        -v {{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro \
+        --entrypoint=/bin/promtool \
+        {{ prometheus_image }}:{{ prometheus_tag }} \
+        check config-files {{ prometheus_config_dir }}/prometheus.yml
   changed_when: false
   tags: ['prometheus', 'docker', 'validate']
 
