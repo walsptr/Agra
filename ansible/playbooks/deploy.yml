@@ -3,7 +3,7 @@
   hosts: all
   gather_facts: true
   become: true
-  tags: ['deploy', 'common']
+  tags: ['deploy', 'common', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
@@ -14,7 +14,7 @@
   hosts: node_exporter
   gather_facts: true
   become: true
-  tags: ['deploy', 'node_exporter']
+  tags: ['deploy', 'node_exporter', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
@@ -25,7 +25,7 @@
   hosts: prometheus
   gather_facts: true
   become: true
-  tags: ['deploy', 'prometheus']
+  tags: ['deploy', 'prometheus', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
@@ -36,7 +36,7 @@
   hosts: grafana
   gather_facts: true
   become: true
-  tags: ['deploy', 'grafana']
+  tags: ['deploy', 'grafana', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
@@ -47,7 +47,7 @@
   hosts: monitoring
   gather_facts: true
   become: true
-  tags: ['deploy', 'nginx']
+  tags: ['deploy', 'nginx', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
@@ -62,7 +62,7 @@
   hosts: monitoring
   gather_facts: true
   become: true
-  tags: ['deploy', 'keepalived', 'ha']
+  tags: ['deploy', 'keepalived', 'ha', 'config']
   vars_files:
     - "{{ playbook_dir }}/../../etc/agra/globals.yml"
     - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
