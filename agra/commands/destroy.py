@@ -3,10 +3,12 @@
 LAYER 1 (CLI, SEBELUM ansible pernah diinvoke):
   - WAJIB ada flag --yes-i-really-mean-it. JIKA TIDAK ADA → ABORT ERROR (exit 1), ansible TIDAK PERNAH di-call.
   - Flag --yes-i-really-mean-it OTOMATIS skip interactive typed sentence confirm (cukup 1x flag eksplisit sesuai RULES §8).
-  - JIKA TIDAK ADA flag --yes-i-really-mean-it, dan (AGRA_NON_INTERACTIVE != 1, TIDAK -y/--yes) → PROMPT user KETIK KALIMAT KONFIRMASI PANJANG:
-      YES SAYA SADAR AKAN MENGHAPUS SELURUH SERVICE MONITORING DAN JIKA MENGGUNAKAN --purge-data MAKA SEMUA DATA GRAFANA DB DAN PROMETHEUS TSDB TIDAK BISA DIKEMBALIKAN.
+  - JIKA TIDAK ADA flag --yes-i-really-mean-it, dan (AGRA_NON_INTERACTIVE != 1, TIDAK -y/--yes) → PROMPT user KETIK KALIMAT KONFIRMASI PANJANG.
     JIKA SALAH → ABORT.
-  - --purge-data TIDAK default (default = retain data_dir, bisa redeploy nanti tanpa kehilangan data)
+  - PURGE FLAGS (3 opsi pilhan user — default SEMUA FALSE, retain untuk redeploy):
+      * --purge-data   : hapus HANYA data persist (grafana.db, prometheus TSDB, node_exporter textfile_dir)
+      * --purge-config : hapus HANYA config workdirs (/etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/agra)
+      * --purge-all    : ALIAS set BOTH (--purge-data + --purge-config) = hapus SEMUA state service (data+config)
 
 LAYER 2 (playbook destroy.yml): assert destroy_confirm=true sebagai defense-in-depth (walaupun CLI sudah check).
 """
@@ -20,16 +22,18 @@ from agra.utils.run_playbook import run_playbook
 
 CONFIRM_SENTENCE = (
     "YES SAYA SADAR AKAN MENGHAPUS SELURUH SERVICE MONITORING "
-    "DAN JIKA MENGGUNAKAN --purge-data MAKA SEMUA DATA GRAFANA DB "
-    "DAN PROMETHEUS TSDB TIDAK BISA DIKEMBALIKAN."
+    "DAN JIKA MENGGUNAKAN --purge-data/--purge-config/--purge-all MAKA "
+    "SEMUA DATA GRAFANA DB, PROMETHEUS TSDB, DAN CONFIG WORKDIRS "
+    "(/etc/grafana /etc/prometheus /etc/node_exporter /etc/agra) "
+    "TIDAK BISA DIKEMBALIKAN."
 )
 
 
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
     p = subparsers.add_parser(
         "destroy", aliases=["remove", "teardown", "uninstall"],
-        help="Destroy / uninstall monitoring stack services dari node (DEFAULT: retain data, TIDAK purge).",
-        description=f"Remove agra service containers/systemd units. SAFETY 2-LAYER (RULES §8): (1) CLI ABORT tanpa flag --yes-i-really-mean-it. (2) Playbook assert destroy_confirm=true. --purge-data: hapus grafana.db + prometheus tsdb (default OFF, data disimpan untuk redeploy).",
+        help="Destroy / uninstall monitoring stack services dari node (DEFAULT: retain data+config, TIDAK purge apapun).",
+        description=f"Remove agra service containers/systemd units. SAFETY 2-LAYER (RULES §8): (1) CLI ABORT tanpa flag --yes-i-really-mean-it. (2) Playbook assert destroy_confirm=true. PURGE FLAGS (3 opsi — default OFF semua, state ditahan untuk redeploy): --purge-data (HANYA data persist), --purge-config (HANYA config workdirs /etc/<service>), --purge-all (alias DATA+CONFIG sekaligus).",
     )
     p.add_argument("-i", "--inventory")
     p.add_argument("-l", "--limit")
@@ -37,7 +41,19 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         "--purge-data",
         action="store_true",
         dest="destroy_purge_data",
-        help="HAPUS JUGA data_dir (grafana.db & prometheus tsdb). DEFAULT FALSE: data disimpan agar redeploy tanpa kehilangan.",
+        help="PURGE TIPE 1: HAPUS HANYA data persist (grafana.db, prometheus tsdb, node_exporter textfile_dir). Config /etc/<service> DITAHAN.",
+    )
+    p.add_argument(
+        "--purge-config",
+        action="store_true",
+        dest="destroy_purge_config",
+        help="PURGE TIPE 2: HAPUS HANYA config workdirs service: /etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/agra. Data persist (database/tsdb) DITAHAN.",
+    )
+    p.add_argument(
+        "--purge-all",
+        action="store_true",
+        dest="purge_all",
+        help="PURGE TIPE 3 (ALIAS): SET BOTH --purge-data + --purge-config. HAPUS SEMUA state (data persist + config workdirs). TIDAK BISA recovery apapun setelah ini.",
     )
     p.add_argument(
         "--yes-i-really-mean-it",
@@ -63,23 +79,31 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
 
 
 def run_destroy(args: argparse.Namespace) -> int:
+    purge_data_eff = bool(getattr(args, "destroy_purge_data", False) or getattr(args, "purge_all", False))
+    purge_config_eff = bool(getattr(args, "destroy_purge_config", False) or getattr(args, "purge_all", False))
+
     if not getattr(args, "yes_i_really_mean_it", False):
         error("DESTROY DIBLOKIR (RULES §8 SAFETY LAYER 1: TIDAK ADA FLAG --yes-i-really-mean-it).")
         print(f"\n{RED}{BOLD}Operasi destroy BERSIFAT DESTRUKTIF.{RESET}")
         print(f"Untuk melanjutkan, TAMBAHKAN FLAG: {YELLOW}{BOLD}--yes-i-really-mean-it{RESET}")
         print(f"Contoh: {MAGENTA}agra destroy --yes-i-really-mean-it{RESET}")
-        if args.destroy_purge_data:
-            print(f"{RED}  + --purge-data AKTIF → SELURUH data grafana.db & prometheus TSDB AKAN DIHAPUS PERMANEN.{RESET}")
+        print(f"Contoh FULL PURGE (data+config): {MAGENTA}agra destroy --yes-i-really-mean-it --purge-all{RESET}")
+        if purge_data_eff:
+            print(f"{RED}  + purge_data AKTIF → SELURUH data persist (grafana.db, prometheus TSDB) AKAN DIHAPUS PERMANEN.{RESET}")
         else:
-            print(f"{YELLOW}  + --purge-data TIDAK AKTIF → data_dir service AKAN DITAHAN (aman redeploy nanti).{RESET}")
+            print(f"{YELLOW}  + purge_data TIDAK AKTIF → data_dir service DITAHAN (aman redeploy nanti tanpa kehilangan data).{RESET}")
+        if purge_config_eff:
+            print(f"{RED}  + purge_config AKTIF → SELURUH config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/agra) AKAN DIHAPUS PERMANEN.{RESET}")
+        else:
+            print(f"{YELLOW}  + purge_config TIDAK AKTIF → config workdirs /etc/<service> DITAHAN (aman redeploy nanti tanpa reconfig).{RESET}")
         print(f"\n{RED}Ansible TIDAK dipanggil sama sekali di abort ini.{RESET}")
         return 1
 
     interactive = (os.environ.get("AGRA_NON_INTERACTIVE", "") != "1") and not getattr(args, "auto_yes", False) and not getattr(args, "yes_i_really_mean_it", False)
     if interactive:
         section(f"{RED}{BOLD}DESTROY — KONFIRMASI AKHIR (typed sentence WAJIB){RESET}")
-        purge = args.destroy_purge_data
-        warn(f"{'AKAN MENGHAPUS DATA (--purge-data ON)' if purge else 'Data AKAN DITAHAN (--purge-data OFF)'}")
+        warn(f"purge_data = {'ON (hapus data persist)' if purge_data_eff else 'OFF (data ditahan)'}")
+        warn(f"purge_config = {'ON (hapus config workdirs /etc/<service>)' if purge_config_eff else 'OFF (config ditahan)'}")
         warn(f"Groups['monitoring'] akan di-destroy: semua service common/node_exporter/prometheus/grafana/nginx/keepalived")
         print(f"\n{YELLOW}{BOLD}Ketik KALIMAT BERIKUT INI PERSIS (case-sensitive), lalu tekan ENTER:{RESET}\n")
         print(f"    {MAGENTA}{BOLD}{CONFIRM_SENTENCE}{RESET}\n")
@@ -94,12 +118,18 @@ def run_destroy(args: argparse.Namespace) -> int:
         info("Konfirmasi KALIMAT cocok. Safety LAYER 1 passed.")
 
     section("RUN: destroy playbook (Safety LAYER 2 di-playbook assert destroy_confirm=true)")
-    if args.destroy_purge_data:
-        warn(f"{RED}--purge-data AKTIF: grafana_data_dir & prometheus_data_dir AKAN DIHAPUS PERMANEN{RESET}")
+    if purge_data_eff and purge_config_eff:
+        warn(f"{RED}--purge-all AKTIF (DATA + CONFIG): SEMUA state (grafana.db / prom tsdb / /etc/grafana / /etc/prometheus / /etc/node_exporter / /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
+    else:
+        if purge_data_eff:
+            warn(f"{RED}--purge-data AKTIF: data persist (grafana_data_dir & prometheus_data_dir) AKAN DIHAPUS PERMANEN{RESET}")
+        if purge_config_eff:
+            warn(f"{RED}--purge-config AKTIF: config workdirs (/etc/grafana /etc/prometheus /etc/node_exporter /etc/agra) AKAN DIHAPUS PERMANEN{RESET}")
 
     extra_vars = {
         "destroy_confirm": True,
-        "destroy_purge_data": bool(args.destroy_purge_data),
+        "destroy_purge_data": purge_data_eff,
+        "destroy_purge_config": purge_config_eff,
     }
 
     tags_flat = []

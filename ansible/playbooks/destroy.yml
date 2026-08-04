@@ -1,5 +1,5 @@
 ---
-- name: 'AGRA — Destroy Monitoring Services (DEFAULT TIDAK PURGE DATA; opt-in purge via destroy_purge_data=true)'
+- name: 'AGRA — Destroy Monitoring Services (DEFAULT TIDAK PURGE APAPUN; opt-in purge via destroy_purge_data=true / destroy_purge_config=true)'
   hosts: monitoring
   gather_facts: true
   become: true
@@ -11,6 +11,7 @@
   vars:
     destroy_confirm: "{{ destroy_confirm | default(false) }}"
     destroy_purge_data: "{{ destroy_purge_data | default(false) }}"
+    destroy_purge_config: "{{ destroy_purge_config | default(false) }}"
 
   pre_tasks:
     - name: 'Destroy (SAFETY LAYER 2) — ASSERT destroy_confirm=true'
@@ -23,12 +24,15 @@
           Untuk benar-benar menjalankan: gunakan CLI `agra destroy --yes-i-really-mean-it`
           (flag ini akan set destroy_confirm=true ke playbook ini).
 
-    - name: 'Destroy — Info run; destroy_purge_data status'
+    - name: 'Destroy — Info run; destroy_purge_data + destroy_purge_config status'
       ansible.builtin.debug:
         msg:
-          - "⚠️ MENJALANKAN DESTROY: destroy_purge_data={{ destroy_purge_data }}"
-          - "  purge=true: data_dir service (grafana.db, prometheus tsdb) AKAN DIHAPUS (TIDAK bisa recovery)"
-          - "  purge=false (DEFAULT): data_dir DITAHAN (aman redeploy nanti tanpa kehilangan data)"
+          - "⚠️ MENJALANKAN DESTROY: destroy_purge_data={{ destroy_purge_data }}, destroy_purge_config={{ destroy_purge_config }}"
+          - "  purge_data=true     : data_dir service (grafana.db, prometheus tsdb, node_exporter textfile_dir) AKAN DIHAPUS (TIDAK bisa recovery)"
+          - "  purge_data=false    : data_dir DITAHAN (aman redeploy nanti tanpa kehilangan data)"
+          - "  purge_config=true   : config workdirs (/etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/agra) AKAN DIHAPUS (TIDAK bisa recovery)"
+          - "  purge_config=false  : config /etc/<service> DITAHAN (aman redeploy nanti tanpa reconfig)"
+          - "  KEDUA PURGE FALSE   : HANYA hapus container/systemd unit. FULL state ditahan (mode upgrade re-install tanpa kehilangan apapun)."
       run_once: true
 
   tasks:
@@ -98,7 +102,7 @@
       when:
         - agra_deployment_mode == 'native'
 
-    - name: 'Destroy (PURGE) — Delete service data directories JIKA destroy_purge_data=true'
+    - name: 'Destroy (PURGE TIPE 1 DATA) — Delete service data directories JIKA destroy_purge_data=true'
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
@@ -110,9 +114,26 @@
         - destroy_purge_data | bool
         - item | length > 0
 
+    - name: 'Destroy (PURGE TIPE 2 CONFIG) — Delete service config workdirs JIKA destroy_purge_config=true'
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop:
+        - { path: "{{ grafana_config_dir | default('/etc/grafana') }}", desc: "grafana config (/etc/grafana: grafana.ini + provisioning)" }
+        - { path: "{{ prometheus_config_dir | default('/etc/prometheus') }}", desc: "prometheus config (/etc/prometheus: prometheus.yml + file_sd + rules)" }
+        - { path: "{{ node_exporter_config_dir | default('/etc/node_exporter') }}", desc: "node_exporter config (/etc/node_exporter: node_exporter.default)" }
+        - { path: "{{ common_etc_dir | default('/etc/agra') }}", desc: "agra common config dir (/etc/agra)" }
+      when:
+        - destroy_purge_config | bool
+      register: purge_config_result
+      loop_control:
+        label: "{{ item.desc }} → path={{ item.path }}"
+
     - name: 'Destroy — Info after run'
       ansible.builtin.debug:
         msg:
           - "✅ AGRA DESTROY COMPLETE"
-          - "Data purged: {{ destroy_purge_data | default(false) }}"
+          - "Purge data  (database/tsdb): {{ destroy_purge_data | default(false) }}"
+          - "Purge config (/etc/<service>): {{ destroy_purge_config | default(false) }}"
           - "Keepalived VIP sudah tidak dipasang; sistem operasi tidak disentuh; paket OS tidak di-uninstall"
+          - "CATATAN: /etc/nginx & /etc/keepalived SECARA DEFAULT TIDAK di-purge purge_config (bisa conflict dengan OS config lain). Hapus manual jika perlu."
