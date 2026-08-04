@@ -3,9 +3,9 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0755'
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_dir_mode }}"
     recurse: false
   loop:
     - "{{ grafana_config_dir }}"
@@ -20,9 +20,9 @@
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/grafana.ini.j2', 'grafana.ini.j2'], 'paths': [role_path + '/templates']}) }}"
     dest: "{{ grafana_config_dir }}/grafana.ini"
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0640'
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_mode }}"
   notify: ['restart grafana']
   tags: ['grafana', 'config']
 
@@ -30,9 +30,9 @@
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/datasources/prometheus.yml.j2', 'provisioning/datasources/prometheus.yml.j2'], 'paths': [role_path + '/templates']}) }}"
     dest: "{{ grafana_provisioning_dir }}/datasources/prometheus.yml"
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0644'
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
   notify: ['restart grafana']
   tags: ['grafana', 'config', 'provisioning']
 
@@ -40,9 +40,9 @@
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/dashboards/all.yml.j2', 'provisioning/dashboards/all.yml.j2'], 'paths': [role_path + '/templates']}) }}"
     dest: "{{ grafana_provisioning_dir }}/dashboards/all.yml"
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0644'
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
   notify: ['restart grafana']
   tags: ['grafana', 'config', 'provisioning']
 
@@ -50,12 +50,18 @@
   ansible.builtin.copy:
     src: "{{ item }}"
     dest: "{{ grafana_provisioning_dir }}/dashboards/"
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0644'
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
     remote_src: true
   with_fileglob:
     - "{{ grafana_dashboards_override_dir }}/*.json"
   notify: ['restart grafana']
   ignore_errors: true
   tags: ['grafana', 'config', 'dashboards']
+
+- name: Grafana (Config) - Recursive chown data_dir + config_dir ke grafana_uid:grafana_gid (safety existing deploy)
+  ansible.builtin.command:
+    cmd: chown -R {{ grafana_uid }}:{{ grafana_gid }} {{ grafana_config_dir }} {{ grafana_data_dir }}
+  changed_when: false
+  tags: ['grafana', 'config', 'ownership']

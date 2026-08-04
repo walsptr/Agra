@@ -53,7 +53,7 @@
         --name={{ grafana_container_name }} \
         --restart=always \
         --network=host \
-        --user=472:0 \
+        --user={{ grafana_docker_user }} \
         -v {{ grafana_config_dir }}:/etc/grafana:ro \
         -v {{ grafana_data_dir }}:/var/lib/grafana:rw \
         -e GF_SECURITY_ADMIN_USER="{{ grafana_admin_user }}" \

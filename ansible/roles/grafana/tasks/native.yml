@@ -123,6 +123,12 @@
     daemon_reload: true
   tags: ['grafana', 'native', 'systemd']
 
+- name: Grafana (Native) - Ensure config + data dirs ownership grafana_uid:grafana_gid (472:0)
+  ansible.builtin.command:
+    cmd: chown -R {{ grafana_uid }}:{{ grafana_gid }} {{ grafana_config_dir }} {{ grafana_data_dir }}
+  changed_when: false
+  tags: ['grafana', 'native', 'ownership']
+
 - name: Grafana (Native) - Enable and start agra-grafana
   ansible.builtin.service:
     name: agra-grafana

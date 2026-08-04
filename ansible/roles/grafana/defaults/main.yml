@@ -13,6 +13,13 @@ grafana_dashboards_override_dir: "/etc/agra/config/grafana/dashboards"
 grafana_admin_user: admin
 grafana_admin_password: "admin"
 
+grafana_uid: 472
+grafana_gid: 0
+grafana_docker_user: "{{ grafana_uid }}:{{ grafana_gid }}"
+grafana_dir_mode: "2770"
+grafana_file_mode: "0640"
+grafana_file_public_mode: "0644"
+
 grafana_database: sqlite
 grafana_database_ssl_mode: disable
 grafana_database_host: ""
