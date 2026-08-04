@@ -5,7 +5,7 @@
 enable_keepalived: "{{ groups['monitoring'] | default([]) | length > 1 }}"
 
 monitoring_vip: ""
-monitoring_vip_interface: "{{ ansible_default_ipv4['interface'] | default('eth0') }}"
+monitoring_vip_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
 
 keepalived_router_id: 51
 keepalived_vrrp_instance: VI_MONITORING_01

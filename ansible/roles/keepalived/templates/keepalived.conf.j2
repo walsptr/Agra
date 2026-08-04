@@ -37,7 +37,7 @@ vrrp_instance {{ keepalived_vrrp_instance }} {
         auth_pass {{ keepalived_auth_pass }}
     }
 
-    unicast_src_ip {{ ansible_default_ipv4['address'] | default('0.0.0.0') }}
+    unicast_src_ip {{ ansible_facts['default_ipv4']['address'] | default('0.0.0.0') }}
     unicast_peer {
 {% if groups['monitoring'] is defined %}
 {% for peer in groups['monitoring'] if peer != inventory_hostname %}

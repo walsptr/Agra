@@ -19,7 +19,7 @@ common_os_packages:
 common_firewall_tool: auto
 common_firewall_ports_tcp: []
 
-common_docker_package_name: "{{ 'docker.io' if ansible_os_family == 'Debian' else 'docker-ce' }}"
+common_docker_package_name: "{{ 'docker.io' if ansible_facts['os_family'] == 'Debian' else 'docker-ce' }}"
 common_docker_python_sdk_package: docker
 common_podman_python_sdk_package: podman-py
 common_docker_network_name: agra_network
