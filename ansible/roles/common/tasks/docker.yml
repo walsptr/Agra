@@ -37,6 +37,52 @@
   ignore_errors: true
   tags: ['common', 'docker', 'service']
 
+- name: Common (Docker/Podman) - Check runtime availability: docker installed? group exists?
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      # Check 1: docker CLI binary exist? (artinya docker sudah di-install via apt/dnf line di atas)
+      DOCKER_BIN=0
+      command -v docker >/dev/null 2>&1 && DOCKER_BIN=1 || true
+      # Check 2: docker.service systemd exist DAN active/running? (pakai systemctl list-unit-files + is-active, TIDAK USAH fact services)
+      DOCKER_SVC_ACTIVE=0
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl is-active --quiet docker.service && DOCKER_SVC_ACTIVE=1 || true
+        # Jika docker binary ada tapi service belum start, start dulu disini (fallback line 32 kadang skip)
+        if [ $DOCKER_BIN -eq 1 ] && [ $DOCKER_SVC_ACTIVE -eq 0 ]; then
+          systemctl unmask --quiet docker.service docker.socket 2>/dev/null || true
+          systemctl enable --now --quiet docker.service 2>/dev/null && DOCKER_SVC_ACTIVE=1 || true
+        fi
+      fi
+      # Check 3: group 'docker' ADA di /etc/group? (POSIX getent group)
+      DOCKER_GROUP=0
+      getent group docker >/dev/null 2>&1 && DOCKER_GROUP=1 || true
+      # Check 4: group 'podman' ADA? (jarang, tapi untuk compat)
+      PODMAN_GROUP=0
+      getent group podman >/dev/null 2>&1 && PODMAN_GROUP=1 || true
+      # Check 5: podman binary ada?
+      PODMAN_BIN=0
+      command -v podman >/dev/null 2>&1 && PODMAN_BIN=1 || true
+      # Output JSON (simple 5 line, set_fact parse nanti)
+      echo "DOCKER_BIN=$DOCKER_BIN"
+      echo "DOCKER_SVC_ACTIVE=$DOCKER_SVC_ACTIVE"
+      echo "DOCKER_GROUP=$DOCKER_GROUP"
+      echo "PODMAN_BIN=$PODMAN_BIN"
+      echo "PODMAN_GROUP=$PODMAN_GROUP"
+      exit 0
+  register: _runtime_checks_raw
+  changed_when: false
+  tags: ['common', 'docker']
+
+- name: Common (Docker/Podman) - Parse checks ke facts (set_fact — substring search, paling aman)
+  ansible.builtin.set_fact:
+    _docker_bin_exists:     "{{ _runtime_checks_raw.stdout | default('') is search('DOCKER_BIN=1') }}"
+    _docker_svc_active:     "{{ _runtime_checks_raw.stdout | default('') is search('DOCKER_SVC_ACTIVE=1') }}"
+    _group_docker_exists:   "{{ _runtime_checks_raw.stdout | default('') is search('DOCKER_GROUP=1') }}"
+    _podman_bin_exists:     "{{ _runtime_checks_raw.stdout | default('') is search('PODMAN_BIN=1') }}"
+    _group_podman_exists:   "{{ _runtime_checks_raw.stdout | default('') is search('PODMAN_GROUP=1') }}"
+  tags: ['common', 'docker']
+
 - name: Common (Docker) - Try podman if docker not available
   block:
     - name: Common (Docker/Podman) - Install podman packages (fallback)
@@ -45,21 +91,23 @@
           - podman
           - "{{ common_podman_python_sdk_package }}"
         state: present
-      when: common_docker_service_name not in ansible_facts.services
+      when:
+        - not _docker_bin_exists | bool          # docker binary TIDAK ADA di OS
+        - not _podman_bin_exists | bool          # podman binary juga TIDAK ADA
 
     - name: Common (Docker/Podman) - Add user to docker group
       ansible.builtin.user:
         name: "{{ common_user }}"
         groups: docker
         append: true
-      when: "'docker' in ansible_facts.groups"
+      when: _group_docker_exists | bool          # HANYA jika group 'docker' SUDAH ADA di OS
 
     - name: Common (Docker/Podman) - Add user to podman group
       ansible.builtin.user:
         name: "{{ common_user }}"
         groups: podman
         append: true
-      when: "'podman' in ansible_facts.groups"
+      when: _group_podman_exists | bool          # HANYA jika group 'podman' SUDAH ADA
   tags: ['common', 'docker']
 
 - name: Common (Docker) - Check if agra docker network exists

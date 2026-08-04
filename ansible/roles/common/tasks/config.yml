@@ -59,18 +59,39 @@
     state: present
   tags: ['common', 'packages']
 
-- name: Common - Detect firewall tool
+- name: Common - Detect firewall tool (via POSIX commands, TIDAK USAH fact ansible_facts.services)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      # User explicit override via common_firewall_tool var
+      if [ "{{ common_firewall_tool }}" != "auto" ]; then
+        echo "{{ common_firewall_tool }}"
+        exit 0
+      fi
+      # Priority 1: UFW (Debian/Ubuntu default)
+      if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -qE "^Status: active$" ; then
+          echo "ufw"
+          exit 0
+        fi
+      fi
+      # Priority 2: firewalld (RHEL/CentOS/Fedora default)
+      if command -v firewall-cmd >/dev/null 2>&1; then
+        if firewall-cmd --state 2>/dev/null | grep -qE "^running$" ; then
+          echo "firewalld"
+          exit 0
+        fi
+      fi
+      # Tidak ada firewall yang terdeteksi / aktif -> skip
+      echo "none"
+  register: _firewall_detect_raw
+  changed_when: false
+  failed_when: _firewall_detect_raw.rc != 0
+  tags: ['common', 'firewall']
+
+- name: Common - Parse firewall detection ke fact _common_firewall_detected
   ansible.builtin.set_fact:
-    _common_firewall_detected: >-
-      {% if common_firewall_tool != 'auto' -%}
-      {{ common_firewall_tool }}
-      {%- elif ansible_facts.services['ufw.service'] is defined and ansible_facts.services['ufw.service'].state == 'running' -%}
-      ufw
-      {%- elif ansible_facts.services['firewalld.service'] is defined and ansible_facts.services['firewalld.service'].state == 'running' -%}
-      firewalld
-      {%- else -%}
-      none
-      {%- endif %}
+    _common_firewall_detected: "{{ _firewall_detect_raw.stdout | trim | lower }}"
   changed_when: false
   tags: ['common', 'firewall']
 
