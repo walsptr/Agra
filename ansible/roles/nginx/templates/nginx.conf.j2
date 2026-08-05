@@ -45,8 +45,6 @@ http {
     ssl_session_cache {{ tls_session_cache }};
     ssl_session_timeout {{ tls_session_timeout }};
     ssl_session_tickets {{ tls_session_tickets }};
-    ssl_stapling on;
-    ssl_stapling_verify on;
     resolver_timeout 5s;
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -69,8 +67,10 @@ http {
     {% set _fallback_dh = nginx_config_dir ~ '/ssl/dhparam.pem' %}
     {% set _cert_clean = ((tls_cert_path | default('')).split() | join('') or _fallback_cert).split() | join('') %}
     {% set _key_clean = ((tls_key_path | default('')).split() | join('') or _fallback_key).split() | join('') %}
-    {% set _ca_raw = ((tls_ca_path | default('')).split() | join('') or _fallback_ca) %}{% set _ca_clean = (_ca_raw.split() | join('')) if (tls_ca_path | default('') and (tls_ca_path | default('')).split() | join('')) else '' %}
+    {% set _user_ca_raw = ((tls_ca_path | default('')).split() | join('')) if (tls_ca_path | default('') and (tls_ca_path | default('')).split() | join('')) else '' %}
+    {% set _ca_clean = _user_ca_raw %}
     {% set _dh_clean = ((tls_dhparam_path | default('')).split() | join('') or _fallback_dh).split() | join('') %}
+    {% set _is_self_signed_default = (_cert_clean == _fallback_cert) and (_user_ca_raw | length == 0) %}
     {% if _cert_clean | length > 0 %}
     ssl_certificate "{{ _cert_clean }}";
     {% endif %}
@@ -82,6 +82,31 @@ http {
     {% endif %}
     {% if _dh_clean | length > 0 %}
     ssl_dhparam "{{ _dh_clean }}";
+    {% endif %}
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SSL STAPLING CONDITIONAL (FIX nginx warn "issuer certificate not found"):
+    # OCSP Stapling HANYA BERMANFAAT dan VALID untuk SERTIFIKAT CA-SIGNED PUBLIC
+    # yang memiliki Intermediate/Root CA Chain (ssl_trusted_certificate terisi).
+    # Default self-signed cert (issuer = dirinya sendiri) TIDAK PUNYA OCSP URL
+    # sehingga ssl_stapling on → nginx WARN "issuer certificate not found".
+    #
+    # LOGIKA PRECEDENCE (EXPLICIT user OVERRIDE selalu menang!):
+    #   1. JIKA user set enable_ssl_stapling=true  di globals.yml → PAKSA ON
+    #   2. JIKA user set enable_ssl_stapling=false di globals.yml → PAKSA OFF
+    #   3. JIKA user TIDAK SET variabel (undefined) → AUTO DETECT:
+    #        ON  JIKA (CA chain tersedia DAN cert BUKAN self-signed default)
+    #        OFF JIKA (self-signed ATAU tls_ca_path kosong)
+    # ══════════════════════════════════════════════════════════════════════════
+    {% set _stapling_user_set = (enable_ssl_stapling is defined and enable_ssl_stapling is not none and (enable_ssl_stapling | string | length > 0)) %}
+    {% if _stapling_user_set %}
+    {% set _stapling = (enable_ssl_stapling | bool) %}
+    {% else %}
+    {% set _stapling = (_ca_clean | length > 0 and not _is_self_signed_default) %}
+    {% endif %}
+    {% if _stapling %}
+    ssl_stapling on;
+    ssl_stapling_verify on;
     {% endif %}
 
     map $http_upgrade $connection_upgrade {
