@@ -13,3 +13,8 @@ node_exporter_container_name: agra-node-exporter
 node_exporter_native_binary_path: /usr/local/bin/node_exporter
 node_exporter_native_binary_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_native_version }}/node_exporter-{{ node_exporter_native_version }}.linux-amd64.tar.gz"
 node_exporter_web_listen_address: "0.0.0.0:{{ node_exporter_port }}"
+node_exporter_uid: 65534
+node_exporter_gid: 0
+node_exporter_docker_user: "{{ node_exporter_uid }}:{{ node_exporter_gid }}"
+node_exporter_dir_mode: "2770"
+node_exporter_file_mode: "0640"

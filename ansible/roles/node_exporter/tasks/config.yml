@@ -3,18 +3,18 @@
   ansible.builtin.file:
     path: "{{ node_exporter_config_dir }}"
     state: directory
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0755'
+    owner: "{{ node_exporter_uid }}"
+    group: "{{ node_exporter_gid }}"
+    mode: "{{ node_exporter_dir_mode }}"
   tags: ['node_exporter', 'config', 'dirs']
 
 - name: Node Exporter (Config) - Ensure textfile collector directory exists
   ansible.builtin.file:
     path: "{{ node_exporter_textfile_dir }}"
     state: directory
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0755'
+    owner: "{{ node_exporter_uid }}"
+    group: "{{ node_exporter_gid }}"
+    mode: "{{ node_exporter_dir_mode }}"
   when:
     - node_exporter_textfile_dir is defined
     - node_exporter_textfile_dir | length > 0

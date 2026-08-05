@@ -36,9 +36,9 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ common_user }}"
-    group: "{{ common_group }}"
-    mode: '0755'
+    owner: root
+    group: root
+    mode: '2775'
   loop:
     - "{{ common_home_dir }}"
     - "{{ common_etc_dir }}"

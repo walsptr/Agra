@@ -3,8 +3,8 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ common_user | default('root') }}"
-    group: "{{ common_group | default('root') }}"
+    owner: root
+    group: root
     mode: "{{ '0750' if 'ssl' in item else '0755' }}"
   loop:
     - "{{ nginx_config_dir }}"

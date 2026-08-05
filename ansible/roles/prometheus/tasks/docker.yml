@@ -65,7 +65,7 @@
         --name={{ prometheus_container_name }} \
         --restart=always \
         --network=host \
-        --user={{ prometheus_skip_head }}:0 \
+        --user={{ prometheus_docker_user }} \
         -v {{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro \
         -v {{ prometheus_data_dir }}:{{ prometheus_data_dir }}:rw \
         --health-cmd="wget -qO- http://{{ prometheus_web_listen_address }}/-/healthy || exit 1" \

@@ -20,4 +20,9 @@ prometheus_native_binary_url: "https://github.com/prometheus/prometheus/releases
 prometheus_native_tools_path: /usr/local/bin/promtool
 prometheus_web_external_url: ""
 prometheus_web_listen_address: "{{ ((enable_nginx | default(true) | bool) and not (expose_prometheus_via_nginx | default(false) | bool)) | ternary('127.0.0.1:' ~ prometheus_port, '0.0.0.0:' ~ prometheus_port) | trim }}"
-prometheus_skip_head: "65534"
+prometheus_uid: 65534
+prometheus_gid: 0
+prometheus_docker_user: "{{ prometheus_uid }}:{{ prometheus_gid }}"
+prometheus_dir_mode: "2770"
+prometheus_file_mode: "0640"
+prometheus_file_public_mode: "0644"

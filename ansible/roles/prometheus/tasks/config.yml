@@ -3,9 +3,9 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0755'
+    owner: "{{ prometheus_uid }}"
+    group: "{{ prometheus_gid }}"
+    mode: "{{ prometheus_dir_mode }}"
   loop:
     - "{{ prometheus_config_dir }}"
     - "{{ prometheus_file_sd_dir }}"
@@ -13,13 +13,13 @@
     - "{{ prometheus_data_dir }}"
   tags: ['prometheus', 'config', 'dirs']
 
-- name: Prometheus (Config) - Ensure data dir has correct ownership (nobody for TSDB)
+- name: Prometheus (Config) - Ensure data dir has correct ownership (nobody=65534 for TSDB)
   ansible.builtin.file:
     path: "{{ prometheus_data_dir }}"
     state: directory
-    owner: "{{ prometheus_skip_head | default('65534') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0755'
+    owner: "{{ prometheus_uid }}"
+    group: "{{ prometheus_gid }}"
+    mode: "{{ prometheus_dir_mode }}"
     recurse: false
   tags: ['prometheus', 'config', 'dirs']
 
@@ -46,9 +46,9 @@
   ansible.builtin.template:
     src: "{{ lookup('first_found', {'files': ['/etc/agra/config/prometheus/prometheus.yml.j2', 'prometheus.yml.j2'], 'paths': [role_path + '/templates']}) }}"
     dest: "{{ prometheus_config_dir }}/prometheus.yml"
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0644'
+    owner: "{{ prometheus_uid }}"
+    group: "{{ prometheus_gid }}"
+    mode: "{{ prometheus_file_mode }}"
   notify: ['restart prometheus']
   tags: ['prometheus', 'config']
 
@@ -74,8 +74,8 @@
         labels:
           job: prometheus
       {% endif %}
-    owner: "{{ common_user | default('agra') }}"
-    group: "{{ common_group | default('agra') }}"
-    mode: '0644'
+    owner: "{{ prometheus_uid }}"
+    group: "{{ prometheus_gid }}"
+    mode: "{{ prometheus_file_mode }}"
   notify: ['reload prometheus']
   tags: ['prometheus', 'config', 'file_sd']
