@@ -16,7 +16,7 @@
       - "item.0.stat.exists"
       - "item.0.stat.pw_name == 'root'"
       - "item.0.stat.gr_name == 'root'"
-      - "((item.0.stat.mode | default(0)) & 0o7777) == 0o2775"
+      - "item.0.stat.mode == '2775'"
     fail_msg: |
       ┌──────────────────────────────────────────────────────────────────────────────┐
       │  ERROR: Parent directory {{ item.1 }} OWNERSHIP/MODE SALAH!                  │
@@ -27,14 +27,14 @@
       │  EXPECTED: owner=root, group=root, mode=2775 setgid group-writable           │
       │  ACTUAL:   owner={{ item.0.stat.pw_name | default('N/A') }},                 │
       │            group={{ item.0.stat.gr_name | default('N/A') }},                 │
-      │            mode={%- set _m=(item.0.stat.mode|default(0)) & 0o7775 -%}{{ '%04o' | format(_m) }}│
+      │            mode={{ item.0.stat.mode | default('N/A') }}                      │
       │                                                                              │
-      │  SOLUSI 1 (CEPAT — jalankan di SEMUA node monitoring):                       │
+      │  SOLUSI 1 (CEPAT - jalankan di SEMUA node monitoring):                       │
       │    sudo chown root:root {{ common_home_dir | default('/var/lib/agra') }} {{ common_etc_dir | default('/etc/agra') }}
       │    sudo chmod 2775 {{ common_home_dir | default('/var/lib/agra') }} {{ common_etc_dir | default('/etc/agra') }}
       │    sudo docker rm -f agra-grafana 2>/dev/null || true                        │
       │                                                                              │
-      │  SOLUSI 2 (CLEAN — jalankan common role dulu):                               │
+      │  SOLUSI 2 (CLEAN - jalankan common role dulu):                               │
       │    agra deploy -i inventory/multinode --tags common                          │
       │    agra deploy -i inventory/multinode --tags grafana                         │
       └──────────────────────────────────────────────────────────────────────────────┘
