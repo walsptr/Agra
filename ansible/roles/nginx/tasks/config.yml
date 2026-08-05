@@ -98,13 +98,7 @@
   block:
     - name: Nginx (SSL) - Set subject_alt_name list
       ansible.builtin.set_fact:
-        _nginx_san_list: >-
-          {{
-            ['DNS:' + tls_self_signed_cn,
-              'DNS:localhost',
-              'IP:127.0.0.1']
-            + (['IP:' + monitoring_vip] if (monitoring_vip is defined and monitoring_vip | length > 0 else [])
-          }}
+        _nginx_san_list: "{{ (['DNS:' + tls_self_signed_cn, 'DNS:localhost', 'IP:127.0.0.1'] + (['IP:' + monitoring_vip] if (((monitoring_vip | default('')) | trim) | length > 0) else [])) }}"
 
     - name: Nginx (SSL) - Generate 2048-bit RSA private key (bare shell openssl genrsa, creates guard)
       ansible.builtin.shell:
