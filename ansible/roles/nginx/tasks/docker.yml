@@ -49,6 +49,7 @@
   ansible.builtin.shell:
     cmd: |
       RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME rm -f {{ nginx_container_name }} 2>/dev/null || true
       $RUNTIME run -d \
         --name={{ nginx_container_name }} \
         --restart=always \
@@ -64,7 +65,8 @@
         --health-interval=30s \
         --health-timeout=5s \
         --health-retries=3 \
+        --health-start-period=30s \
         {{ nginx_image }}:{{ nginx_tag }}
-  when: _ngx_container_running.rc != 0
+  when: _ngx_container_running.rc != 0 or _ngx_container_match.stdout == "MISMATCH"
   changed_when: true
   tags: ['nginx', 'docker', 'container']

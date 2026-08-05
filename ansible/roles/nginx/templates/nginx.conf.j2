@@ -1,4 +1,9 @@
-user www-data;
+{% set _deploy = (agra_deployment_mode | default('native')) %}
+{% if _deploy == 'docker' %}
+user {{ nginx_container_user }};
+{% else %}
+user {{ nginx_native_user }};
+{% endif %}
 worker_processes {{ nginx_worker_processes }};
 pid {{ nginx_pid_path }};
 

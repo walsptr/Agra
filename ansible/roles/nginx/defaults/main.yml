@@ -18,6 +18,19 @@ nginx_cache_dir: /var/cache/nginx
 nginx_run_dir: /var/run
 nginx_pid_path: /var/run/nginx.pid
 
+# ⚠️ NGINX USER: BEDA NATIVE VS DOCKER OFFICIAL IMAGE!
+# Native package Ubuntu/Debian = www-data (www-data user group).
+# Official docker image nginx (alpine/debian) = user=nginx UID=101 GID=101.
+# JANGAN GUNA www-data di docker mode! nginx.conf inside container getpwnam() ENOENT emerg.
+nginx_native_user: www-data
+nginx_native_group: www-data
+nginx_container_user: nginx
+nginx_container_group: nginx
+nginx_uid: 101
+nginx_gid: 101
+nginx_dir_mode: "2775"
+nginx_file_mode: "0644"
+
 nginx_worker_processes: auto
 nginx_worker_connections: 1024
 nginx_keepalive_timeout: 65

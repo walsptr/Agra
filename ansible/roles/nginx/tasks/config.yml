@@ -1,5 +1,5 @@
 ---
-- name: Nginx (Config) - Ensure dirs exist
+- name: Nginx (Config) - Ensure CONFIG/READONLY dirs exist (root-owned, site+ssl config)
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -12,9 +12,32 @@
     - "{{ nginx_sites_enabled_dir }}"
     - "{{ nginx_confd_dir }}"
     - "{{ nginx_config_dir }}/ssl"
+  tags: ['nginx', 'config', 'dirs', 'configdirs']
+
+- name: Nginx (Config) - Ensure RUNTIME WRITABLE dirs exist (log cache, nginx worker UID inside container butuh nulis disini)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nginx_uid }}"
+    group: "{{ nginx_gid }}"
+    mode: "{{ nginx_dir_mode }}"
+  loop:
     - "{{ nginx_log_dir }}"
     - "{{ nginx_cache_dir }}"
-  tags: ['nginx', 'config', 'dirs']
+  tags: ['nginx', 'config', 'dirs', 'writabledirs', 'runtime']
+
+- name: Nginx (Config) - FORCESYNC parent common dirs ownership root:root 2775 (SHA e6360b0 grafana pattern, meskipun --tags nginx skip common)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '2775'
+  loop:
+    - "{{ common_etc_dir | default('/etc/agra') }}"
+    - "{{ common_home_dir | default('/var/lib/agra') }}"
+  ignore_errors: true
+  tags: ['nginx', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
 
 - name: Nginx (SSL) - Build self-signed cert+key
   block:
