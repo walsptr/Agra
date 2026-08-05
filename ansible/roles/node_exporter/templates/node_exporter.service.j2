@@ -6,8 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User={{ common_user | default('agra') }}
-Group={{ common_group | default('agra') }}
+User=root
+Group=root
 EnvironmentFile=-{{ node_exporter_config_dir }}/node_exporter.default
 ExecStart={{ node_exporter_native_binary_path }} {{ _node_exporter_extra_args }}
 Restart=on-failure

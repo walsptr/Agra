@@ -1,9 +1,6 @@
 ---
-common_user: agra
-common_group: agra
 common_home_dir: /var/lib/agra
 common_etc_dir: /etc/agra
-common_ssh_key_type: ed25519
 
 common_os_packages:
   - python3-pip

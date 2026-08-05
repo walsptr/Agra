@@ -8,7 +8,7 @@ set -u
 set -o pipefail
 
 MASTER_HOST="{{ _grafana_ha_master_ip }}"
-MASTER_USER="{{ grafana_sqlite_sync_ssh_user | default('agra') }}"
+MASTER_USER="{{ grafana_sqlite_sync_ssh_user | default('root') }}"
 GRAFANA_DATA_DIR="{{ grafana_data_dir }}"
 DB_FILE="grafana.db"
 DB_NEW="grafana.db.new"

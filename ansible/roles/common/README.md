@@ -6,11 +6,8 @@ Preparasi host umum untuk agra monitoring stack, dijalankan SEBELUM semua role s
 
 | VARIABEL | DEFAULT | DESKRIPSI |
 |---|---|---|
-| `common_user` | `agra` | User sistem pemilik seluruh service monitoring |
-| `common_group` | `agra` | Grup sistem untuk user agra |
-| `common_home_dir` | `/var/lib/agra` | Home directory + base path persist data seluruh service |
+| `common_home_dir` | `/var/lib/agra` | Base persist data directory |
 | `common_etc_dir` | `/etc/agra` | Direktori config agra di managed host |
-| `common_ssh_key_type` | `ed25519` | Tipe SSH key untuk user agra (digunakan HA sync rsync) |
 | `common_os_packages` | list (rsync, openssl, dll) | Daftar OS packages umum di-install semua host |
 | `common_firewall_tool` | `auto` | Tool firewall: `auto` \| `ufw` \| `firewalld` \| `none` |
 | `common_docker_network_name` | `agra_network` | Nama Docker bridge network shared antar container service |

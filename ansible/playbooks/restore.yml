@@ -121,8 +121,8 @@
         src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/grafana/grafana.ini"
         dest: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
         remote_src: true
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: root
+        group: root
         mode: '0644'
         backup: true
       ignore_errors: true
@@ -133,8 +133,8 @@
         src: "{{ _restore_tmpdir.path }}/{{ restore_backup_name | default('') }}/grafana/grafana.db"
         dest: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
         remote_src: true
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: root
+        group: root
         mode: '0640'
         backup: true
       ignore_errors: true
@@ -148,8 +148,8 @@
         dest: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}"
         remote_src: true
         directory_mode: '0755'
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: root
+        group: root
       ignore_errors: true
       when: restore_backup_name | length > 0
 
@@ -167,7 +167,7 @@
             remote_src: true
             directory_mode: '0755'
             owner: "{{ prometheus_skip_head | default('65534') }}"
-            group: "{{ common_group | default('agra') }}"
+            group: root
           ignore_errors: true
 
         - name: 'Restore Prometheus — Info manual untuk import snapshot (opsi promtool create-blocks-from)'

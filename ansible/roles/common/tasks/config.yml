@@ -14,24 +14,6 @@
   changed_when: false
   tags: ['common', 'packages']
 
-- name: Common - Create group
-  ansible.builtin.group:
-    name: "{{ common_group }}"
-    system: true
-    state: present
-  tags: ['common', 'user']
-
-- name: Common - Create user
-  ansible.builtin.user:
-    name: "{{ common_user }}"
-    group: "{{ common_group }}"
-    system: true
-    shell: /usr/sbin/nologin
-    home: "{{ common_home_dir }}"
-    create_home: false
-    state: present
-  tags: ['common', 'user']
-
 - name: Common - Ensure base persist directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -48,8 +30,8 @@
   ansible.builtin.file:
     path: "{{ common_home_dir }}/.ssh"
     state: directory
-    owner: "{{ common_user }}"
-    group: "{{ common_group }}"
+    owner: root
+    group: root
     mode: '0700'
   tags: ['common', 'ssh']
 

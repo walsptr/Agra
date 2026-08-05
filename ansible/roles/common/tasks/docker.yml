@@ -97,19 +97,6 @@
         - not _docker_bin_exists | bool          # docker binary TIDAK ADA di OS
         - not _podman_bin_exists | bool          # podman binary juga TIDAK ADA
 
-    - name: Common (Docker/Podman) - Add user to docker group
-      ansible.builtin.user:
-        name: "{{ common_user }}"
-        groups: docker
-        append: true
-      when: _group_docker_exists | bool          # HANYA jika group 'docker' SUDAH ADA di OS
-
-    - name: Common (Docker/Podman) - Add user to podman group
-      ansible.builtin.user:
-        name: "{{ common_user }}"
-        groups: podman
-        append: true
-      when: _group_podman_exists | bool          # HANYA jika group 'podman' SUDAH ADA
   tags: ['common', 'docker']
 
 - name: Common (Docker) - Check if agra docker network exists

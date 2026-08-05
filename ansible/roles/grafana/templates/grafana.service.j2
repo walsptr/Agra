@@ -6,8 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User={{ common_user | default('agra') }}
-Group={{ common_group | default('agra') }}
+User=472
+Group=0
 WorkingDirectory={{ grafana_data_dir }}
 ExecStart=/usr/sbin/grafana-server \
   --config={{ grafana_config_dir }}/grafana.ini \

@@ -230,7 +230,6 @@ Operasi ini destruktif — **wajib 2-layer safety guard**:
 | `--yes-i-really-mean-it` | bool | — | **WAJIB ADA**. Safety layer 1. |
 | `--purge-data` | bool | false | Hapus SEMUA data persist: grafana.db, prometheus TSDB, config. |
 | `--purge-config` | bool | false | Hapus config di `/etc/<service>/` (default tetap simpan) |
-| `--purge-user` | bool | false | Hapus user+grup `agra` OS |
 | `-t, --tags <TAGS>` | string | ALL | Destroy spesifik service saja (mis. `-t grafana`) |
 | `-l, --limit <HOST>` | string | ALL | Batasi ke host tertentu |
 | `-i, --inventory <PATH>` | string | auto | Path inventory |
@@ -248,7 +247,7 @@ agra destroy --yes-i-really-mean-it -i inventory/all-in-one
 
 # Destroy SEMUA termasuk data (BENAR-BENAR HAPUS SEMUA)
 agra destroy --yes-i-really-mean-it \
-  --purge-data --purge-config --purge-user \
+  --purge-data --purge-config \
   -i inventory/multinode
 ```
 

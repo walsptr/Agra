@@ -20,11 +20,8 @@ Variabel global untuk mode deployment dan preparasi host umum (role `common`).
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
 | `agra_deployment_mode` | string | `docker` | Mode deployment global: `docker` (container) atau `native` (package/binary systemd) |
-| `common_user` | string | `agra` | User sistem pemilik seluruh service monitoring |
-| `common_group` | string | `agra` | Grup sistem user agra |
-| `common_home_dir` | string | `/var/lib/agra` | Home directory user agra + base path persist data seluruh service |
+| `common_home_dir` | string | `/var/lib/agra` | Base path persist data seluruh service |
 | `common_etc_dir` | string | `/etc/agra` | Direktori config agra di managed host |
-| `common_ssh_key_type` | string | `ed25519` | Tipe SSH key untuk user agra (digunakan untuk HA sync rsync antar node) |
 | `common_os_packages` | list | see defaults | Daftar OS packages umum (rsync, openssl, curl, cron, acl, dll) di-install semua host |
 | `common_firewall_tool` | string | `auto` | Tool firewall: `auto` \| `ufw` \| `firewalld` \| `none` |
 | `common_firewall_ports_tcp` | list | `[]` | Port TCP tambahan yang ingin dibuka (selain dinamis dari feature flags) |
@@ -67,7 +64,7 @@ Semua variabel untuk deployment Grafana (visualisasi dashboard), termasuk 3 opsi
 | `grafana_sqlite_path` | string | `{{ grafana_data_dir }}/grafana.db` | Path absolute file sqlite database |
 | `grafana_sqlite_sync_method` | string | `rsync` | Metode sinkronisasi sqlite antar node untuk HA |
 | `grafana_sqlite_sync_interval` | string | `*/5 * * * *` | Cron expression interval sync (default tiap 5 menit) |
-| `grafana_sqlite_sync_ssh_user` | string | `{{ common_user }}` | SSH user untuk koneksi rsync antar node monitoring |
+| `grafana_sqlite_sync_ssh_user` | string | `root` | SSH user untuk koneksi rsync antar node monitoring |
 | `grafana_server_domain` | string | `{{ inventory_hostname }}` | Domain/hostname server Grafana (untuk callback URL dll) |
 | `grafana_server_root_url` | string (computed) | conditional | Root URL full. Otomatis pakai `monitoring_vip` jika HA, else host+port via nginx |
 | `grafana_server_protocol` | string | `http` | Protocol internal backend Grafana (http/https). HTTPS di-terminate oleh Nginx. |

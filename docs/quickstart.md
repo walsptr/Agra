@@ -210,7 +210,7 @@ agra deploy -i inventory/multinode-prod -t grafana,prometheus,nginx
 
 Alur internal playbook deploy:
 1. Play `precheck.yml` → validasi ulang (bisa skip dengan `--no-precheck`, TIDAK DISARANKAN)
-2. Role `common` ke SEMUA host → install OS packages, user `agra`, docker (jika mode docker), firewall dasar, shared network
+2. Role `common` ke SEMUA host → install OS packages, deployer install via root become, docker (jika mode docker), firewall dasar, shared network; grafana HA sync via SSH root public-key auth
 3. Role `node_exporter` ke `groups['node_exporter']` → deploy exporter
 4. Role `keepalived` ke `groups['monitoring']` (hanya jika len > 1) → setup VIP
 5. Role `prometheus` ke `groups['prometheus']` → deploy TSDB + config scrape target

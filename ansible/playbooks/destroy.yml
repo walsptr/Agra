@@ -131,6 +131,36 @@
       loop_control:
         label: "{{ item.desc }} → path={{ item.path }}"
 
+    - name: 'Destroy (Backward compat) — Pre-check: getent user agra (safety conditional)'
+      ansible.builtin.command:
+        cmd: getent passwd agra
+      register: _check_agra_user
+      changed_when: false
+      failed_when: false
+
+    - name: 'Destroy (Backward compat) — Pre-check: getent group agra (safety conditional)'
+      ansible.builtin.command:
+        cmd: getent group agra
+      register: _check_agra_group
+      changed_when: false
+      failed_when: false
+
+    - name: 'Destroy (Backward compat OQ-2) — Task A: Hapus user account agra (remove=no agar /var/lib/agra TIDAK kehapus)'
+      ansible.builtin.user:
+        name: agra
+        state: absent
+        remove: false
+        force: true
+      when:
+        - _check_agra_user.rc == 0
+
+    - name: 'Destroy (Backward compat OQ-2) — Task B: Hapus group agra'
+      ansible.builtin.group:
+        name: agra
+        state: absent
+      when:
+        - _check_agra_group.rc == 0
+
     - name: 'Destroy — Info after run'
       ansible.builtin.debug:
         msg:

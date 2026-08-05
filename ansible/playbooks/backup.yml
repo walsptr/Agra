@@ -33,8 +33,8 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: root
+        group: root
         mode: '0750'
       loop:
         - "{{ backup_root_dir }}"
@@ -46,8 +46,8 @@
           ansible.builtin.file:
             path: "{{ backup_stage_dir }}/grafana"
             state: directory
-            owner: "{{ common_user | default('agra') }}"
-            group: "{{ common_group | default('agra') }}"
+            owner: root
+            group: root
             mode: '0750'
 
         - name: 'Backup Grafana — Copy grafana.ini ke stage'
@@ -88,8 +88,8 @@
           ansible.builtin.file:
             path: "{{ backup_stage_dir }}/prometheus"
             state: directory
-            owner: "{{ common_user | default('agra') }}"
-            group: "{{ common_group | default('agra') }}"
+            owner: root
+            group: root
             mode: '0750'
 
         - name: 'Backup Prometheus — Trigger snapshot via Admin API POST tsdb snapshot'
@@ -127,8 +127,8 @@
           set -e
           DST="{{ backup_tarball_path }}"
           SRC="{{ backup_stage_dir }}"
-          OWNER="{{ common_user | default('agra') }}"
-          GROUP="{{ common_group | default('agra') }}"
+          OWNER="root"
+          GROUP="root"
           if [ -f "$DST" ] && [ "$(stat -c %s "$DST" 2>/dev/null || echo 0)" -gt 0 ]; then
             echo "EXISTS: tarball already generated: $DST"
             exit 0
@@ -161,8 +161,8 @@
     - name: 'Backup — Generate manifest YAML'
       ansible.builtin.copy:
         dest: "{{ backup_manifest_path }}"
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: root
+        group: root
         mode: '0640'
         content: |
           # agra backup manifest — digenerate oleh backup.yml

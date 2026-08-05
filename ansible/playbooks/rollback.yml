@@ -41,7 +41,7 @@
         - groups['monitoring'] | length > 1
 
 - name: 'AGRA ROLLBACK — Phase 2 Master node last'
-  hosts: "{{ [groups['monitoring'][0]] }}"
+  hosts: "{{ [(groups['monitoring'] | default([]))[0]] | default([]) if (groups['monitoring'] is defined and groups['monitoring'] | length > 0) else [] }}"
   gather_facts: true
   become: true
   serial: 1

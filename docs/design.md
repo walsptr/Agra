@@ -68,8 +68,8 @@ Ini menjamin: bug di mode docker tidak bocor ke native, dan sebaliknya.
   template:
     src: "{{ lookup('first_found', search_paths) }}"
     dest: "{{ <service>_config_dir }}/<service>.yml"
-    owner: "{{ common_user }}"
-    group: "{{ common_group }}"
+    owner: "472"
+    group: "472"
     mode: "0640"
   notify: "restart {{ service }}"
   vars:
@@ -221,7 +221,7 @@ Pola **Double Buffer + Integrity Check + Atomic Rename** WAJIB diikuti:
     src: "{{ lookup('first_found', grafana_sync_script_search) }}"
     dest: /usr/local/bin/agra_grafana_sqlite_sync.sh
     mode: "0700"
-    owner: "{{ common_user }}"
+    owner: "root"
   when:
     - enable_ha_grafana | bool
     - grafana_database == 'sqlite'

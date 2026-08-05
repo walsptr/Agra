@@ -19,24 +19,24 @@
   tags: ['grafana', 'ha', 'sync']
 
 # MASTER NODE:
-# 1. Generate SSH key untuk user agra (jika belum ada) di ~agra/.ssh/id_ed25519
+# 1. Generate SSH key untuk user root (jika belum ada) di /root/.ssh/id_ed25519
 # 2. Output public key content → standby nodes akan authorized_keys
 - block:
-    - name: Grafana (HA SQLite / MASTER) - Ensure agra user .ssh dir 0700
+    - name: Grafana (HA SQLite / MASTER) - Ensure root .ssh dir 0700
       ansible.builtin.file:
-        path: "/home/{{ common_user | default('agra') }}/.ssh"
+        path: "/root/.ssh"
         state: directory
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: "root"
+        group: "root"
         mode: '0700'
 
     - name: Grafana (HA SQLite / MASTER) - Generate SSH key ed25519 (bare shell ssh-keygen, creates guard)
       ansible.builtin.shell:
         cmd: |
           set -e
-          KEY_PATH="/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
-          OWNER="{{ common_user | default('agra') }}"
-          GROUP="{{ common_group | default('agra') }}"
+          KEY_PATH="/root/.ssh/id_ed25519"
+          OWNER="root"
+          GROUP="root"
           ssh-keygen -t ed25519 \
             -a 100 \
             -C "agra-grafana-sync@{{ inventory_hostname }}" \
@@ -47,14 +47,14 @@
           chmod 0644 "${KEY_PATH}.pub"
           echo "CHANGED: ssh ed25519 keypair dibuat"
       args:
-        creates: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519"
+        creates: "/root/.ssh/id_ed25519"
         executable: /bin/bash
       register: _ssh_key_master
       changed_when: _ssh_key_master.rc is defined
 
     - name: Grafana (HA SQLite / MASTER) - Fetch public key content
       ansible.builtin.slurp:
-        src: "/home/{{ common_user | default('agra') }}/.ssh/id_ed25519.pub"
+        src: "/root/.ssh/id_ed25519.pub"
       register: _master_pubkey_slurp
   when:
     - _grafana_ha_node_role == 'master'
@@ -62,32 +62,32 @@
 
 # STANDBY NODES:
 # 1. Deploy rsync double-buffer script /usr/local/bin/agra_grafana_rsync.sh
-# 2. Add MASTER pubkey ke ~agra/.ssh/authorized_keys standby (trust SSH dari master)
+# 2. Add MASTER pubkey ke /root/.ssh/authorized_keys standby (trust SSH dari master)
 # 3. Tambahkan known_hosts standby ke master (agar master pertama connect tidak prompt host key)
 # 4. Setup cron job di standby: setiap grafana_sqlite_sync_interval tarik grafana.db baru dari master via rsync + double-buffer
 - block:
-    - name: Grafana (HA SQLite / STANDBY) - Ensure agra user .ssh dir + authorized_keys exist
+    - name: Grafana (HA SQLite / STANDBY) - Ensure root .ssh dir + authorized_keys exist
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: "{{ item.state | default('directory') }}"
-        owner: "{{ common_user | default('agra') }}"
-        group: "{{ common_group | default('agra') }}"
+        owner: "root"
+        group: "root"
         mode: "{{ item.mode }}"
       loop:
-        - { path: "/home/{{ common_user | default('agra') }}/.ssh", mode: '0700' }
-        - { path: "/home/{{ common_user | default('agra') }}/.ssh/authorized_keys", state: touch, mode: '0600' }
+        - { path: "/root/.ssh", mode: '0700' }
+        - { path: "/root/.ssh/authorized_keys", state: touch, mode: '0600' }
       tags: ['grafana', 'ha', 'sync', 'standby', 'ssh']
 
     - name: Grafana (HA SQLite / STANDBY) - Add master public key ke authorized_keys standby (bare shell append + grep guard)
       ansible.builtin.shell:
         cmd: |
           set -e
-          AUTH_KEYS_FILE="/home/{{ common_user | default('agra') }}/.ssh/authorized_keys"
-          OWNER="{{ common_user | default('agra') }}"
-          GROUP="{{ common_group | default('agra') }}"
-          mkdir -p "/home/${OWNER}/.ssh"
-          chmod 0700 "/home/${OWNER}/.ssh"
-          chown "${OWNER}:${GROUP}" "/home/${OWNER}/.ssh"
+          AUTH_KEYS_FILE="/root/.ssh/authorized_keys"
+          OWNER="root"
+          GROUP="root"
+          mkdir -p "/root/.ssh"
+          chmod 0700 "/root/.ssh"
+          chown "${OWNER}:${GROUP}" "/root/.ssh"
           touch "$AUTH_KEYS_FILE"
           chmod 0600 "$AUTH_KEYS_FILE"
           chown "${OWNER}:${GROUP}" "$AUTH_KEYS_FILE"
@@ -122,7 +122,7 @@
       ansible.builtin.file:
         path: /var/log/agra-grafana-sync.log
         state: touch
-        owner: "{{ common_user | default('agra') }}"
+        owner: "root"
         group: adm
         mode: '0644'
         modification_time: preserve
@@ -140,7 +140,7 @@
               delaycompress
               missingok
               notifempty
-              create 0644 agra adm
+              create 0644 root adm
               copytruncate
           }
         owner: root
@@ -151,7 +151,7 @@
     - name: Grafana (HA SQLite / STANDBY) - Setup cron job rsync sync interval grafana_sqlite_sync_interval
       ansible.builtin.cron:
         name: "agra-grafana-sqlite-rsync-sync"
-        user: "{{ common_user | default('agra') }}"
+        user: "root"
         job: "/usr/local/bin/agra_grafana_rsync.sh >> /var/log/agra-grafana-sync.log 2>&1"
         minute: "{{ grafana_sqlite_sync_interval.split()[0] if '*' in grafana_sqlite_sync_interval else '*' }}"
         hour: "{{ grafana_sqlite_sync_interval.split()[1] if grafana_sqlite_sync_interval.split() | length > 1 else '*' }}"
@@ -165,12 +165,11 @@
     # MASTER SIDE: add standby host fingerprints ke known_hosts master (agar rsync dari master ke standby NO PROMPT)
     - name: Grafana (HA SQLite / MASTER) - Known-hosts master → scan standby
       ansible.builtin.known_hosts:
-        path: "/home/{{ common_user | default('agra') }}/.ssh/known_hosts"
+        path: "/root/.ssh/known_hosts"
         name: "{{ hostvars[item]['ansible_host'] | default(item) }}"
         key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519,rsa ' + (hostvars[item]['ansible_host'] | default(item)) + ' 2>/dev/null') }}"
         state: present
       become: true
-      become_user: "{{ common_user | default('agra') }}"
       loop: "{{ groups['monitoring'][1:] }}"
       when: inventory_hostname == _grafana_ha_master_host
       ignore_errors: true
