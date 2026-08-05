@@ -24,7 +24,7 @@ python3 -m venv .venv && source .venv/bin/activate
    ```
 
 2. **Edit Konfigurasi & Inventory**:
-   Edit `$EDITOR etc/agra/globals.yml` — setidaknya 3 variabel berikut:
+   Edit `$EDITOR /etc/agra/globals.yml` — setidaknya 3 variabel berikut:
    ```yaml
    agra_deployment_mode: docker     # docker | native
    enable_ha_grafana: false         # set true jika 2+ node monitoring
@@ -32,12 +32,18 @@ python3 -m venv .venv && source .venv/bin/activate
    ```
    Kemudian edit inventory: pilih `inventory/all-in-one` (single node) atau `inventory/multinode` (multi-node HA).
 
-3. **Preflight Check**:
+3. **Pre-generate SSL (Opsional tapi Disarankan)**:
+   ```bash
+   sudo mkdir -p /etc/agra/ssl && sudo chmod 0750 /etc/agra/ssl
+   agra certificates generate --include-dhparam
+   ```
+
+4. **Preflight Check**:
    ```bash
    agra check -i inventory/all-in-one
    ```
 
-4. **Deploy**:
+5. **Deploy**:
    ```bash
    agra deploy -i inventory/all-in-one
    ```
@@ -55,7 +61,9 @@ python3 -m venv .venv && source .venv/bin/activate
 | `agra destroy` | Uninstall seluruh service. Safety 2-layer: `--yes-i-really-mean-it` + playbook assert. Default tidak purge data. | `agra destroy --yes-i-really-mean-it --purge-data` |
 | `agra backup` | Backup on-demand (`create`) atau lihat daftar backup (`list`). Snapshot Prometheus via Admin API resmi. | `agra backup create --include-prometheus-tsdb` |
 | `agra restore` | Restore dari backup. Safety: `--yes-i-really-mean-it` wajib + backup-before-restore otomatis. | `agra restore -n agra-backup-20250801-153000 --yes-i-really-mean-it` |
-| `agra tls` | TLS cert lifecycle: `regenerate` (self-signed), `info`, `check` (parse openssl expiry warning). | `agra tls regenerate --days 365 --yes` |
+| `agra tls` | TLS cert lifecycle: `regenerate` (self-signed inline managed host post-deploy), `info`, `check` (parse openssl expiry warning). | `agra tls regenerate --days 365 --yes` |
+| `agra certificates generate` | Generate self-signed RSA2048+x509 (SAN lengkap) pre-deploy di control node → output `/etc/agra/ssl/agra.{crt,key}`. Idempotent tanpa `--force`. | `agra certificates generate --days 3650 --cn domain --include-dhparam` |
+| `agra certificates info` | Print metadata cert, SAN, expiry date. Warning RED + RC=2 bila sisa < 7 hari. | `agra certificates info -c /etc/agra/ssl/agra.crt` |
 
 ## Link Dokumentasi Lengkap
 

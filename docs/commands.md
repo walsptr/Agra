@@ -53,7 +53,7 @@ agra genpwd [OPTIONS]
 ```
 
 ### Deskripsi
-Generate random password aman (14 karakter URL-safe, cryptographically secure) ke `etc/agra/passwords.yml` dalam format plaintext dengan chmod 0600. **Idempotent secara default**: file passwords.yml yang sudah terisi TIDAK ditimpa kecuali dengan `--force`. Password yang di-generate meliputi 6 field: `grafana_admin_password`, `grafana_database_password`, `grafana_secret_key`, `keepalived_auth_pass`, `backup_s3_access_key`, `backup_s3_secret_key`.
+Generate random password aman (14 karakter URL-safe, cryptographically secure) ke `/etc/agra/passwords.yml` dalam format plaintext dengan chmod 0600. **Idempotent secara default**: file passwords.yml yang sudah terisi TIDAK ditimpa kecuali dengan `--force`. Password yang di-generate meliputi 6 field: `grafana_admin_password`, `grafana_database_password`, `grafana_secret_key`, `keepalived_auth_pass`, `backup_s3_access_key`, `backup_s3_secret_key`.
 
 ### Flags List
 | Flag | Tipe | Default | Deskripsi |
@@ -70,7 +70,7 @@ agra genpwd
 agra genpwd --force
 
 # Verifikasi isi file (hanya owner yang bisa baca)
-cat etc/agra/passwords.yml
+cat /etc/agra/passwords.yml
 ```
 
 ---
@@ -352,8 +352,8 @@ agra tls <regenerate|info|check> [OPTIONS]
 ```
 
 ### Deskripsi
-Manajemen siklus hidup sertifikat TLS/HTTPS Nginx. Tiga subcommand:
-- **`regenerate`**: Hapus self-signed cert lama, generate yang baru via role nginx (dengan `creates:` guard, jadi idempotent). **Hanya self-signed cert yang boleh disentuh** — custom cert CA-signed user di `tls_cert_path` TIDAK PERNAH dimodifikasi agra.
+Manajemen siklus hidup sertifikat TLS/HTTPS Nginx di **managed host** (inline post-deploy / emergency). Tiga subcommand:
+- **`regenerate`**: Hapus self-signed cert lama, generate yang baru via role nginx (dengan `creates:` guard, jadi idempotent). **Hanya self-signed cert yang boleh disentuh** — custom cert CA-signed user di `tls_cert_path` TIDAK PERNAH dimodifikasi agra. *TLS regenerate = inline managed host (post-deploy / emergency). Gunakan `agra certificates generate` untuk pre-deploy control node (direkomendasikan).*
 - **`info`**: Parse openssl cert → cetak Issuer, CN, SAN, Not Before, Not After, signature algorithm.
 - **`check`**: Validasi expiry → warning `<30 hari`, critical `<7 hari`. Cocok untuk CI cron.
 
@@ -382,4 +382,76 @@ agra tls check --format nagios
 
 # Regenerate self-signed cert berlaku 1 tahun
 agra tls regenerate --days 365 --yes -i inventory/all-in-one
+```
+
+---
+
+## `agra certificates`
+
+### Usage
+```bash
+agra certificates <generate|info> [OPTIONS]
+```
+
+### Deskripsi
+Manajemen sertifikat TLS di **control node** (pre-deploy, direkomendasikan). Dua subcommand:
+- **`generate`**: Generate self-signed RSA2048+x509 dengan SAN lengkap pre-deploy di control node → output `/etc/agra/ssl/agra.{crt,key}`. Idempotent tanpa `--force` (tidak overwrite file existing). Cocok untuk `enable_https=true` tanpa cert CA-signed.
+- **`info`**: Print metadata cert (Issuer, CN, SAN, Not Before, Not After, signature algorithm, sisa hari). Warning warna RED + RC=2 bila sisa masa berlaku < 7 hari.
+
+### Flags List (subcommand `generate`)
+| Flag | Tipe | Default | Deskripsi |
+|---|---|---|---|
+| `--days <INT>` | int | `3650` | Masa berlaku cert (default 10 tahun) |
+| `--cn <STR>` | string | computed (monitoring_vip atau hostname) | Common Name (CN) sertifikat |
+| `--san <LIST>` | list | computed | Subject Alternative Names tambahan (otomatis include monitoring_vip, inventory hostname, localhost, 127.0.0.1) |
+| `--force` | bool | false | Overwrite file cert/key existing di `/etc/agra/ssl/` |
+| `--include-dhparam` | bool | false | Generate juga Diffie-Hellman parameter 2048-bit → `/etc/agra/ssl/dhparam.pem` (waktu generate ~30-60 detik) |
+| `--out-dir <PATH>` | string | `/etc/agra/ssl` | Custom output directory cert |
+| `-v, --verbose` | level | 0 | Verbosity output openssl |
+
+### Flags List (subcommand `info`)
+| Flag | Tipe | Default | Deskripsi |
+|---|---|---|---|
+| `-c, --cert <PATH>` | string | `/etc/agra/ssl/agra.crt` | Path ke file sertifikat yang ingin dicek |
+| `--format <text\|json>` | string | `text` | Output format |
+| `--warn-days <INT>` | int | 30 | Threshold warning (kuning) untuk sisa hari |
+| `--critical-days <INT>` | int | 7 | Threshold critical (merah) → RC=2 |
+
+### Contoh
+```bash
+# Basic generate self-signed 10 tahun (default) + idempotent
+agra certificates generate
+
+# Generate dengan CN custom + DH param (untuk HTTPS forward secrecy DHE)
+sudo mkdir -p /etc/agra/ssl && sudo chmod 0750 /etc/agra/ssl
+agra certificates generate --days 3650 --cn mon.example.com --include-dhparam
+
+# Force re-generate (overwrite existing)
+agra certificates generate --cn mon2.example.com --force
+
+# Cek info cert default
+agra certificates info
+
+# Cek cert custom path + JSON output (untuk CI)
+agra certificates info -c /etc/letsencrypt/live/mon.example.com/fullchain.pem --format json
+
+# Cek expiry → RC=2 bila < 7 hari (cron monitoring)
+agra certificates info --critical-days 7
+echo "Exit code: $?"
+```
+
+### Output Contoh (`info`)
+```text
+Certificate Information
+───────────────────────────────────────
+  Issuer:       CN=agra-monitoring, O=agra-monitoring, OU=it, L=Jakarta, ST=Jakarta, C=ID
+  Subject:      CN=10.0.0.100
+  SANs:         DNS:localhost, DNS:10.0.0.100, IP:127.0.0.1, IP:10.0.0.100
+  Valid From:   2025-08-01 12:00:00 UTC
+  Valid Until:  2035-07-29 12:00:00 UTC
+  Days Left:    3645 days
+  Signature:    sha256WithRSAEncryption
+  RSA Bits:     2048
+───────────────────────────────────────
+[ OK ] Certificate valid for 3645 more days
 ```

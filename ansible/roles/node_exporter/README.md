@@ -26,7 +26,7 @@ app1.example.com
 db1.example.com
 ```
 
-Override `globals.yml` untuk enable collector systemd + disable arp:
+Override `/etc/agra/globals.yml` untuk enable collector systemd + disable arp:
 ```yaml
 node_exporter_collectors_enabled:
   - systemd

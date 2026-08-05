@@ -1,0 +1,111 @@
+---
+- name: 'AGRA — Generate self-signed RSA 2048 + x509 certificate di control node (wrapper playbook)'
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: ['certificates', 'ssl']
+
+  vars_files:
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
+
+  vars:
+    certificates_default_dir: "/etc/agra/ssl"
+    certificates_days: "{{ tls_self_signed_days_valid | default(3650) }}"
+    certificates_cn: "{{ grafana_domain | default(monitoring_vip | default(inventory_hostname)) }}"
+    certificates_san: >-
+      {{
+        ['DNS:' + certificates_cn, 'DNS:localhost', 'IP:127.0.0.1']
+        + ([('IP:' + monitoring_vip)] if (monitoring_vip | default('') | trim | length > 0) else [])
+      }}
+    certificates_cert: "{{ tls_cert_path | default(certificates_default_dir ~ '/agra.crt') }}"
+    certificates_key: "{{ tls_key_path | default(certificates_default_dir ~ '/agra.key') }}"
+    certificates_dh: "{{ tls_dhparam_path | default(certificates_default_dir ~ '/dhparam.pem') }}"
+    certificates_country: "{{ tls_self_signed_country | default('ID') }}"
+    certificates_state: "{{ tls_self_signed_state | default('Jakarta') }}"
+    certificates_locality: "{{ tls_self_signed_locality | default('Jakarta') }}"
+    certificates_org: "{{ tls_self_signed_org | default('agra-monitoring') }}"
+    certificates_ou: "{{ tls_self_signed_ou | default('it') }}"
+
+  tasks:
+    - name: 'Certificates — Ensure SSL directory exists with mode 0750'
+      ansible.builtin.file:
+        path: "{{ certificates_cert | dirname }}"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: root
+      become: true
+      when: certificates_cert | dirname == certificates_default_dir
+
+    - name: 'Certificates — Generate RSA 2048 private key (mode 0600)'
+      community.crypto.openssl_privatekey:
+        path: "{{ certificates_key }}"
+        type: RSA
+        size: 2048
+        mode: '0600'
+        owner: root
+        group: root
+        force: "{{ regenerate_cert | default(false) | bool }}"
+      become: true
+      register: _cert_key
+
+    - name: 'Certificates — Generate CSR for self-signed cert'
+      community.crypto.openssl_csr:
+        path: "{{ certificates_key }}.csr"
+        privatekey_path: "{{ certificates_key }}"
+        common_name: "{{ certificates_cn }}"
+        country_name: "{{ certificates_country }}"
+        state_or_province_name: "{{ certificates_state }}"
+        locality_name: "{{ certificates_locality }}"
+        organization_name: "{{ certificates_org }}"
+        organizational_unit_name: "{{ certificates_ou }}"
+        subject_alt_name: "{{ certificates_san }}"
+        mode: '0600'
+        force: "{{ regenerate_cert | default(false) | bool }}"
+      become: true
+
+    - name: 'Certificates — Generate self-signed x509 certificate (mode 0644)'
+      community.crypto.x509_certificate:
+        path: "{{ certificates_cert }}"
+        privatekey_path: "{{ certificates_key }}"
+        csr_path: "{{ certificates_key }}.csr"
+        provider: selfsigned
+        selfsigned_digest: sha256
+        selfsigned_not_after: "+{{ certificates_days }}d"
+        mode: '0644'
+        owner: root
+        group: root
+        force: "{{ regenerate_cert | default(false) | bool }}"
+      become: true
+      register: _cert_crt
+
+    - name: 'Certificates — Cleanup temporary CSR file'
+      ansible.builtin.file:
+        path: "{{ certificates_key }}.csr"
+        state: absent
+      become: true
+
+    - name: 'Certificates — Generate DH param 2048-bit (optional, include_dhparam=true)'
+      community.crypto.openssl_dhparam:
+        path: "{{ certificates_dh }}"
+        bits: 2048
+        mode: '0644'
+        owner: root
+        group: root
+      become: true
+      when: include_dhparam | default(false) | bool
+
+    - name: 'Certificates — Ringkasan hasil generate'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA CERTIFICATES PLAYBOOK SELESAI"
+          - "Cert path  : {{ certificates_cert }} (mode 0644)"
+          - "Key path   : {{ certificates_key }} (mode 0600 — JANGAN disebarkan!)"
+          - "DH param   : {{ certificates_dh }} (include_dhparam={{ include_dhparam | default(false) }})"
+          - "CN         : {{ certificates_cn }}"
+          - "SAN        : {{ certificates_san | flatten | join(', ') }}"
+          - "Valid days : {{ certificates_days }} hari (~{{ (certificates_days | int / 365) | round(1) }} tahun)"
+          - "Changed    : key={{ _cert_key.changed | default(false) }} | cert={{ _cert_crt.changed | default(false) }}"
+          - "ℹ️ Untuk deploy ke managed host nginx: ansible-playbook ansible/site.yml --tags nginx"

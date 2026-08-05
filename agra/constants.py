@@ -10,7 +10,8 @@ PLAYBOOK_DIR: Path = ANSIBLE_DIR / "playbooks"
 ROLES_DIR: Path = ANSIBLE_DIR / "roles"
 SITE_PLAYBOOK: Path = ANSIBLE_DIR / "site.yml"
 
-ETC_DIR: Path = PROJECT_ROOT / "etc" / "agra"
+ETC_DIR: Path = Path("/etc/agra")
+AGRA_SSL_DIR: Path = ETC_DIR / "ssl"
 GLOBALS_FILE: Path = ETC_DIR / "globals.yml"
 PASSWORDS_FILE: Path = ETC_DIR / "passwords.yml"
 CONFIG_DIR: Path = ETC_DIR / "config"

@@ -15,6 +15,7 @@ COMMAND_MODULES: List[str] = [
     "agra.commands.backup",
     "agra.commands.restore",
     "agra.commands.tls",
+    "agra.commands.certificates",
 ]
 
 

@@ -189,10 +189,10 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `tls_self_signed_locality` | string | `Jakarta` | Subject L (Locality) cert |
 | `tls_self_signed_organization` | string | `agra-monitoring` | Subject O (Organization) cert |
 | `tls_self_signed_organizational_unit` | string | `it` | Subject OU (Organizational Unit) cert |
-| `tls_cert_path` | string | `{{ nginx_config_dir }}/ssl/agra.crt` | Path certificate (default = auto self-signed) |
-| `tls_key_path` | string | `{{ nginx_config_dir }}/ssl/agra.key` | Path private key |
-| `tls_ca_path` | string | `{{ nginx_config_dir }}/ssl/agra-ca.crt` | Path CA chain (opsional) |
-| `tls_dhparam_path` | string | `{{ nginx_config_dir }}/ssl/dhparam.pem` | Path Diffie-Hellman params |
+| `tls_cert_path` | string | `/etc/agra/ssl/agra.crt` | Path certificate. Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA-signed cert custom (mis. /etc/letsencrypt/live/xxx/fullchain.pem). |
+| `tls_key_path` | string | `/etc/agra/ssl/agra.key` | Path private key. Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA-signed cert custom (mis. /etc/letsencrypt/live/xxx/privkey.pem). |
+| `tls_ca_path` | string | `/etc/agra/ssl/agra-ca.crt` | Path CA chain (opsional). Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA chain custom. |
+| `tls_dhparam_path` | string | `/etc/agra/ssl/dhparam.pem` | Path Diffie-Hellman params. Default source adalah pre-generated via command `agra certificates generate --include-dhparam` di control node. Bisa di-override ke path DH param custom. |
 | `tls_dhparam_bits` | int | `2048` | Panjang bit DH param (2048 = balance keamanan & waktu generate) |
 | `tls_protocols` | string | `TLSv1.2 TLSv1.3` | Protocols TLS yang diizinkan |
 | `tls_ciphers` | string | *cipher suite string* | Cipher suite ECDHE-only (forward secrecy) |

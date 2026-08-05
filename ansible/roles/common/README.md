@@ -14,7 +14,7 @@ Preparasi host umum untuk agra monitoring stack, dijalankan SEBELUM semua role s
 
 ## Contoh Penggunaan
 
-Override di `etc/agra/globals.yml`:
+Override di `/etc/agra/globals.yml`:
 ```yaml
 agra_deployment_mode: native
 common_firewall_tool: ufw

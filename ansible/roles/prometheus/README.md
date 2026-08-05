@@ -19,7 +19,7 @@ Deploy Prometheus monitoring server (TSDB + scraper engine) dengan hybrid deploy
 
 ## Contoh Penggunaan
 
-Override `etc/agra/globals.yml` untuk retention 30 hari + expose UI + custom versi:
+Override `/etc/agra/globals.yml` untuk retention 30 hari + expose UI + custom versi:
 ```yaml
 prometheus_retention_time: 30d
 prometheus_retention_size: "100GB"

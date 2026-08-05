@@ -7,7 +7,7 @@
   tags: ['genpwd']
 
   vars:
-    passwords_file: "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    passwords_file: "/etc/agra/passwords.yml"
     pwd_charset: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
     pwd_length: 14
     genpwd_force: "{{ genpwd_force | default(false) }}"
@@ -23,10 +23,10 @@
         that:
           - (_pwd_stat.stat.size | default(0) < 50) or genpwd_force | bool
         fail_msg: >-
-          ❌ etc/agra/passwords.yml SUDAH ADA dan terisi. TIDAK di-overwrite untuk mencegah kehilangan creds.
+          ❌ /etc/agra/passwords.yml SUDAH ADA dan terisi. TIDAK di-overwrite untuk mencegah kehilangan creds.
           Jika YAKIN ingin generate BARU (semua password lama di-reset) —
           jalankan `agra genpwd --force` (akan set extra_vars genpwd_force=true).
-          Backup manual dulu jika perlu — cp etc/agra/passwords.yml etc/agra/passwords.yml.bak
+          Backup manual dulu jika perlu — cp /etc/agra/passwords.yml /etc/agra/passwords.yml.bak
       when: _pwd_stat.stat is defined and _pwd_stat.stat.exists
 
     - name: 'GenPwd — Backup existing sebelum overwrite'
@@ -122,7 +122,7 @@
         mode: '0600'
         content: |
           # ============================================================
-          # etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
+          # /etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
           # Generated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
           #
           # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600. JANGAN PERNAH commit PLAINTEXT passwords.yml ke GIT (SUDAH di .gitignore). Jika butuh enkripsi, pakai tool external seperti git-crypt / blackbox / sops.

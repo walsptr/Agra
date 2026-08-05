@@ -9,9 +9,11 @@ try:
 except ImportError:
     yaml = None
 
+from agra.utils.colors import warn
+
 from agra.constants import (
     PROJECT_ROOT, GLOBALS_FILE, PASSWORDS_FILE, DEFAULT_INVENTORY,
-    ANSIBLE_DIR, CONFIG_DIR,
+    ANSIBLE_DIR, CONFIG_DIR, ETC_DIR,
 )
 
 
@@ -43,7 +45,26 @@ def resolve_inventory(override: str | None = None) -> Path:
 def load_globals_yaml() -> Dict[str, Any]:
     """Load globals.yml + passwords.yml secara shallow (untuk info CLI). Playbook Ansible yang pakai vars full."""
     merged: Dict[str, Any] = {}
-    for f in [GLOBALS_FILE, PASSWORDS_FILE]:
+
+    absolute_globals = GLOBALS_FILE
+    absolute_passwords = PASSWORDS_FILE
+
+    fallback_etc = PROJECT_ROOT / "etc" / "agra"
+    fallback_globals = fallback_etc / "globals.yml"
+    fallback_passwords = fallback_etc / "passwords.yml"
+
+    use_fallback = False
+    if not absolute_globals.exists() and not absolute_passwords.exists():
+        use_fallback = True
+
+    files_to_load = []
+    if use_fallback:
+        warn(f"/etc/agra/globals.yml + /etc/agra/passwords.yml TIDAK ditemukan — FALLBACK ke {fallback_etc} (path relative lama).")
+        files_to_load = [fallback_globals, fallback_passwords]
+    else:
+        files_to_load = [absolute_globals, absolute_passwords]
+
+    for f in files_to_load:
         if f.exists() and yaml is not None:
             try:
                 with f.open("r") as fh:

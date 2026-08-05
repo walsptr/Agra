@@ -33,7 +33,7 @@ monitoring
 app1.example.com
 ```
 
-Override `group_vars/monitoring.yml` ATAU `globals.yml` untuk setup VIP HA:
+Override `group_vars/monitoring.yml` ATAU `/etc/agra/globals.yml` untuk setup VIP HA:
 ```yaml
 monitoring_vip: "10.0.0.100"
 monitoring_vip_interface: "ens3"

@@ -5,8 +5,8 @@
   become: true
   tags: ['deploy', 'common', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: common
 
@@ -16,8 +16,8 @@
   become: true
   tags: ['deploy', 'node_exporter', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: node_exporter
 
@@ -27,8 +27,8 @@
   become: true
   tags: ['deploy', 'prometheus', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: prometheus
 
@@ -38,8 +38,8 @@
   become: true
   tags: ['deploy', 'grafana', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: grafana
 
@@ -49,8 +49,8 @@
   become: true
   tags: ['deploy', 'nginx', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   tasks:
     - name: 'Deploy — Apply role nginx jika enable_nginx=true'
       ansible.builtin.include_role:
@@ -64,8 +64,8 @@
   become: true
   tags: ['deploy', 'keepalived', 'ha', 'config']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   tasks:
     - name: 'Deploy — Apply role keepalived HANYA JIKA groups monitoring length > 1'
       ansible.builtin.include_role:
@@ -80,8 +80,8 @@
   connection: local
   tags: ['deploy']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   vars:
     access_url: >-
       {% if (groups['monitoring'] | length > 1) and (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0) %}https://{{ hostvars[groups['monitoring'][0]]['monitoring_vip'] }}/grafana/
@@ -94,7 +94,7 @@
         msg:
           - "✅ AGRA DEPLOY SELESAI"
           - "Grafana URL: {{ access_url | trim }}"
-          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat etc/agra/passwords.yml field grafana_admin_password (default fallback: admin jika belum run genpwd)"
+          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat /etc/agra/passwords.yml field grafana_admin_password (default fallback: admin jika belum run genpwd)"
           - "Prometheus: {% if _expose_prometheus_via_nginx %}{{ access_url | trim | regex_replace('/grafana/', '/prometheus/') }}{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
       vars:
         _enable_https: "{{ lookup('vars', 'enable_https', default=true) | bool }}"

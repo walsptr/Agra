@@ -61,9 +61,17 @@ keepalived_auth_pass: ""
 # 6. Nginx/TLS
 enable_nginx: true
 enable_https: true
-tls_cert_path: ""
-tls_key_path: ""
-tls_ca_path: ""
+# Default lokasi self-signed certificate, RSA private key, CA chain, dan Diffie-Hellman parameter di CONTROL NODE (path absolute /etc/agra/ssl).
+# Di-generate secara eksplisit SEBELUM deploy via: agra certificates generate [--include-dhparam]
+# Role nginx (config task block custom copy) akan OTOMATIS men-copy file dari /etc/agra/ssl ke managed host
+# (target path: nginx_config_dir/ssl) JIKA file ditemukan. Jika tidak ditemukan + enable_https true,
+# inline self-signed generate di managed host tetap dijalankan sebagai backward compat (creates guard).
+# Untuk custom CA-signed cert: override path dibawah ke lokasi cert anda (mis. /etc/letsencrypt/live/xxx),
+# ATAU taruh file agra.crt, agra.key, (opsional agra-ca.crt) di folder: /etc/agra/config/nginx/ssl/
+tls_cert_path: /etc/agra/ssl/agra.crt
+tls_key_path: /etc/agra/ssl/agra.key
+tls_ca_path: /etc/agra/ssl/agra-ca.crt
+tls_dhparam_path: /etc/agra/ssl/dhparam.pem
 tls_self_signed_days_valid: 3650
 tls_self_signed_cn: "{{ monitoring_vip | default('localhost') }}"
 

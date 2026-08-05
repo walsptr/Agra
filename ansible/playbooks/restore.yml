@@ -5,8 +5,8 @@
   become: false
   tags: ['restore']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
 
   vars:
     restore_confirm: "{{ restore_confirm | default(false) }}"
@@ -55,8 +55,8 @@
   serial: 1
   tags: ['restore']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
 
   vars:
     restore_confirm: "{{ restore_confirm | default(false) }}"

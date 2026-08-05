@@ -45,10 +45,10 @@ tls_self_signed_locality: Jakarta
 tls_self_signed_organization: agra-monitoring
 tls_self_signed_organizational_unit: it
 
-tls_cert_path: "{{ nginx_config_dir }}/ssl/agra.crt"
-tls_key_path: "{{ nginx_config_dir }}/ssl/agra.key"
-tls_ca_path: "{{ nginx_config_dir }}/ssl/agra-ca.crt"
-tls_dhparam_path: "{{ nginx_config_dir }}/ssl/dhparam.pem"
+tls_cert_path: /etc/agra/ssl/agra.crt
+tls_key_path: /etc/agra/ssl/agra.key
+tls_ca_path: /etc/agra/ssl/agra-ca.crt
+tls_dhparam_path: /etc/agra/ssl/dhparam.pem
 tls_dhparam_bits: 2048
 tls_protocols: "TLSv1.2 TLSv1.3"
 tls_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"

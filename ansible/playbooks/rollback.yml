@@ -5,8 +5,8 @@
   become: false
   tags: ['rollback']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   tasks:
     - name: 'Rollback — Info'
       ansible.builtin.debug:
@@ -23,8 +23,8 @@
   serial: 1
   tags: ['rollback']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: common
     - role: node_exporter
@@ -47,8 +47,8 @@
   serial: 1
   tags: ['rollback']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: common
     - role: node_exporter

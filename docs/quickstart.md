@@ -58,9 +58,9 @@ agra --help       # → keluar daftar 9 command
 
 ## 2. Init Config (globals.yml)
 
-**Step 2A: Review dan edit `etc/agra/globals.yml`** — file ini adalah single source of truth untuk semua feature flag, versi service, dan path:
+**Step 2A: Review dan edit `/etc/agra/globals.yml`** — file ini adalah single source of truth untuk semua feature flag, versi service, dan path:
 ```bash
-$EDITOR etc/agra/globals.yml
+$EDITOR /etc/agra/globals.yml
 ```
 
 3 variabel wajib perhatikan:
@@ -81,14 +81,14 @@ monitoring_vip: 10.0.0.100
 
 ## 3. GenPwd — Generate Password Random
 
-`agra genpwd` mengisi field kosong di `etc/agra/passwords.yml` dengan random string aman (14 chars, URL-safe). **Idempotent** — field yang sudah terisi TIDAK ditimpa kecuali pakai `--force`. File passwords.yml disimpan dalam plaintext dengan chmod 0600 (hanya owner bisa baca) dan SUDAH termasuk di dalam `.gitignore`.
+`agra genpwd` mengisi field kosong di `/etc/agra/passwords.yml` dengan random string aman (14 chars, URL-safe). **Idempotent** — field yang sudah terisi TIDAK ditimpa kecuali pakai `--force`. File passwords.yml disimpan dalam plaintext dengan chmod 0600 (hanya owner bisa baca) dan SUDAH termasuk di dalam `.gitignore`.
 
 ```bash
 # Generate password 14 karakter (plaintext, chmod 0600)
 agra genpwd
 
 # Verifikasi file isi field:
-cat etc/agra/passwords.yml
+cat /etc/agra/passwords.yml
 # Keluar 6 field:
 #   grafana_admin_password
 #   grafana_database_password
@@ -168,6 +168,26 @@ Test koneksi SSH ke semua host:
 ```bash
 ansible -i inventory/multinode-prod all -m ping -o
 # Semua host → SUCCESS
+```
+
+---
+
+## 4A. Pre-generate SSL Self-Signed (Opsional tapi Disarankan)
+
+Jika `enable_https: true` (default) dan kamu TIDAK pakai custom cert CA-signed, disarankan pre-generate SSL di **control node** SEBELUM deploy agar cert konsisten disimpan di `/etc/agra/ssl/` dan tidak generate acak per managed host:
+
+```bash
+# Buat folder SSL (butuh sudo karena /etc system-wide)
+sudo mkdir -p /etc/agra/ssl && sudo chmod 0750 /etc/agra/ssl
+
+# Generate cert RSA2048 + x509 self-signed + opsional DH param (untuk DHE forward secrecy)
+agra certificates generate --include-dhparam
+# Output: /etc/agra/ssl/agra.crt, /etc/agra/ssl/agra.key, (opsional) /etc/agra/ssl/dhparam.pem
+```
+
+Cek info cert yang baru digenerate:
+```bash
+agra certificates info
 ```
 
 ---
@@ -255,7 +275,7 @@ curl -k https://10.0.0.100/grafana/api/health
 2. Username: `admin`
 3. Password: lihat field `grafana_admin_password` di `passwords.yml`:
    ```bash
-   cat etc/agra/passwords.yml | grep grafana_admin_password
+   cat /etc/agra/passwords.yml | grep grafana_admin_password
    ```
 4. Default datasource **Prometheus (UID: prometheus-main)** sudah tersambung otomatis
 5. Cek **Explore → Metrics browser** → ketik `node_cpu_seconds_total` → Run query → harus ada data dari semua host `[node_exporter]`

@@ -20,7 +20,7 @@ Deploy Grafana (visualisasi dashboard monitoring) dengan hybrid deployment mode:
 
 ## Contoh Penggunaan
 
-Skenario 1: All-in-one single-node sqlite default. `globals.yml` tidak perlu diubah.
+Skenario 1: All-in-one single-node sqlite default. `/etc/agra/globals.yml` tidak perlu diubah.
 
 Skenario 2: HA multi-node dengan sqlite sync:
 ```yaml

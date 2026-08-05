@@ -33,14 +33,16 @@
       │     (contoh broken pattern YAML: `tls_cert_path:` no isi = empty string).    │
       │     → ssl_certificate dirender dengan value "" = nginx EMERGENCY invalid args│
       │                                                                              │
-      │ SOLUSI 1 - RECOMMENDED pakai auto self-signed default (tanpa setup manual):  │
-      │   DELETE atau COMMENT OUT SEMUA baris tls_cert_path: / tls_key_path: /      │
-      │   tls_dhparam_path: di file etc/agra/globals.yml.                            │
-      │   Fallback otomatis pakai path /etc/nginx/ssl/agra.crt + agra.key, dan       │
-      │   task self-signed generate OTOMATIS membuatkan file cert/key+dhparam.       │
+      │ SOLUSI 1 - RECOMMENDED pakai default pre-generated cert (control node):      │
+      │   Default utama path: /etc/agra/ssl/agra.crt + /etc/agra/ssl/agra.key        │
+      │   (di-generate SEBELUM deploy via `agra certificates generate`).             │
+      │   Biarkan default value di /etc/agra/globals.yml (tidak di-override).        │
+      │   Secondary fallback (backward compat): JIKA control node cert TIDAK ada /   │
+      │   tidak ter-copy → inline self-signed generate di managed host membuat file  │
+      │   di /etc/nginx/ssl/agra.crt + agra.key (dengan creates guard).              │
       │                                                                              │
       │ SOLUSI 2 - Override dengan custom cert SSL asli milikmu:                     │
-      │   Isi VALUE BENAR dan LENGKAP di etc/agra/globals.yml, TANPA leading         │
+      │   Isi VALUE BENAR dan LENGKAP di /etc/agra/globals.yml, TANPA leading        │
       │   whitespace / newline (tidak usah pakai >- folded scalar!):                 │
       │     tls_cert_path: /etc/nginx/ssl/yourdomain.crt                             │
       │     tls_key_path:  /etc/nginx/ssl/yourdomain.key                             │

@@ -7,8 +7,8 @@
   max_fail_percentage: 0
   tags: ['upgrade']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: common
     - role: node_exporter
@@ -32,8 +32,8 @@
   max_fail_percentage: 0
   tags: ['upgrade']
   vars_files:
-    - "{{ playbook_dir }}/../../etc/agra/globals.yml"
-    - "{{ playbook_dir }}/../../etc/agra/passwords.yml"
+    - "/etc/agra/globals.yml"
+    - "/etc/agra/passwords.yml"
   roles:
     - role: common
     - role: node_exporter

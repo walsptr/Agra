@@ -1,8 +1,8 @@
 # Variables Reference (157+)
 
 Referensi lengkap seluruh variabel konfigurasi agra, dikelompokkan per kategori sesuai komponen. Lokasi utama:
-- **Non-secret**: `etc/agra/globals.yml`
-- **Secret**: `etc/agra/passwords.yml` (stored plaintext — chmod 0600 + included via group_vars/all.yml, sudah di .gitignore)
+- **Non-secret**: `/etc/agra/globals.yml`
+- **Secret**: `/etc/agra/passwords.yml` (stored plaintext — chmod 0600 + included via group_vars/all.yml, sudah di .gitignore)
 
 Konvensi penamaan:
 - Flag boolean: **prefix `enable_`** (contoh: `enable_grafana`, `enable_https`)
@@ -202,10 +202,10 @@ Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optiona
 | `tls_self_signed_locality` | string | `Jakarta` | Subject L (Locality/Kota) |
 | `tls_self_signed_organization` | string | `agra-monitoring` | Subject O (Organization) |
 | `tls_self_signed_organizational_unit` | string | `it` | Subject OU (Organizational Unit) |
-| `tls_cert_path` | string | `{{ nginx_config_dir }}/ssl/agra.crt` | Path certificate (default = self-signed auto-generated). Override untuk CA-signed custom. |
-| `tls_key_path` | string | `{{ nginx_config_dir }}/ssl/agra.key` | Path private key |
-| `tls_ca_path` | string | `{{ nginx_config_dir }}/ssl/agra-ca.crt` | Path CA chain certificate (opsional) |
-| `tls_dhparam_path` | string | `{{ nginx_config_dir }}/ssl/dhparam.pem` | Path Diffie-Hellman parameters untuk forward secrecy DHE |
+| `tls_cert_path` | string | `/etc/agra/ssl/agra.crt` | Path certificate (default = pre-deploy control node via `agra certificates generate`). Override untuk CA-signed custom. |
+| `tls_key_path` | string | `/etc/agra/ssl/agra.key` | Path private key |
+| `tls_ca_path` | string | `/etc/agra/ssl/agra-ca.crt` | Path CA chain certificate (opsional) |
+| `tls_dhparam_path` | string | `/etc/agra/ssl/dhparam.pem` | Path Diffie-Hellman parameters untuk forward secrecy DHE (generate via `agra certificates generate --include-dhparam`) |
 | `tls_dhparam_bits` | int | `2048` | Panjang bit DH param (2048 = balance keamanan & waktu generate) |
 | `tls_protocols` | string | `TLSv1.2 TLSv1.3` | Protokol TLS yang diizinkan (TLS 1.0/1.1 disable default) |
 | `tls_ciphers` | string | ECDHE-only | Cipher suite ECDHE-only untuk forward secrecy (lihat defaults untuk string lengkap) |
@@ -251,7 +251,7 @@ Backup local-first (default), opsional mirror ke S3-compatible object storage.
 
 ## 8. Passwords
 
-Semua variabel di bawah ini **didefinisikan di `etc/agra/passwords.yml`** dalam format plaintext dengan chmod 0600 (hanya owner bisa baca). File ini SUDAH termasuk di `.gitignore` — JANGAN commit plaintext ke git. Variabel dari `passwords.yml` dioverride ke `globals.yml` dan role defaults secara otomatis oleh `group_vars/all.yml` (priority inventory > role defaults).
+Semua variabel di bawah ini **didefinisikan di `/etc/agra/passwords.yml`** dalam format plaintext dengan chmod 0600 (hanya owner bisa baca). File ini SUDAH termasuk di `.gitignore` — JANGAN commit plaintext ke git. Variabel dari `passwords.yml` dioverride ke `globals.yml` dan role defaults secara otomatis oleh `group_vars/all.yml` (priority inventory > role defaults).
 
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
