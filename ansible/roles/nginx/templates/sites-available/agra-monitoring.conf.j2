@@ -2,7 +2,7 @@
 server {
     listen {{ nginx_http_port }} default_server;
     listen [::]:{{ nginx_http_port }} default_server;
-    server_name {{ server_name | trim }};
+    server_name {{ (server_name.split() | join(' ')) }};
     return 301 https://$host$request_uri;
 }
 
@@ -10,15 +10,17 @@ server {
     listen {{ nginx_https_port }} ssl default_server;
     listen [::]:{{ nginx_https_port }} ssl default_server;
     http2 on;
-    server_name {{ server_name | trim }};
+    server_name {{ (server_name.split() | join(' ')) }};
 
-    ssl_certificate {{ tls_cert_path | trim }};
-    ssl_certificate_key {{ tls_key_path | trim }};
-    {% if tls_ca_path and tls_ca_path | trim | length > 0 %}
-    ssl_trusted_certificate {{ tls_ca_path | trim }};
+    ssl_certificate "{{ (tls_cert_path.split() | join('')) }}";
+    ssl_certificate_key "{{ (tls_key_path.split() | join('')) }}";
+    {% set _ca = tls_ca_path | default('') %}{% set _ca_clean = _ca.split() | join('') %}
+    {% if _ca_clean | length > 0 %}
+    ssl_trusted_certificate "{{ _ca_clean }}";
     {% endif %}
-    {% if tls_dhparam_path and tls_dhparam_path | trim | length > 0 %}
-    ssl_dhparam {{ tls_dhparam_path | trim }};
+    {% set _dh = tls_dhparam_path | default('') %}{% set _dh_clean = _dh.split() | join('') %}
+    {% if _dh_clean | length > 0 %}
+    ssl_dhparam "{{ _dh_clean }}";
     {% endif %}
 
     add_header Strict-Transport-Security "max-age={{ tls_hsts_max_age }}{% if tls_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if tls_hsts_preload %}; preload{% endif %}" always;
@@ -32,7 +34,7 @@ server {
 server {
     listen {{ nginx_http_port }} default_server;
     listen [::]:{{ nginx_http_port }} default_server;
-    server_name {{ server_name | trim }};
+    server_name {{ (server_name.split() | join(' ')) }};
 {% endif %}
 
     location = / {
@@ -40,7 +42,7 @@ server {
     }
 
     location /grafana/ {
-        proxy_pass {{ grafana_backend_url | trim }}/;
+        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -57,7 +59,7 @@ server {
     }
 
     location /grafana/api/live/ {
-        proxy_pass {{ grafana_backend_url | trim }}/api/live/;
+        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -71,7 +73,7 @@ server {
 
     location /prometheus/ {
 {% if expose_prometheus_via_nginx | default(false) | bool %}
-        proxy_pass {{ prometheus_backend_url | trim }}/prometheus/;
+        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/prometheus/;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
