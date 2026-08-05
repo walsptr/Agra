@@ -1,9 +1,68 @@
 ---
-- name: 'AGRA — Generate self-signed RSA 2048 + x509 certificate di control node (wrapper playbook)'
+# ============================================================
+# PLAY 1/2: GUARD FILE REQUIRED — JALAN SEBELUM vars_files load!
+# ============================================================
+- name: 'AGRA Certificates — GUARD. Cek /etc/agra/globals.yml WAJIB ADA'
   hosts: localhost
   connection: local
   gather_facts: false
-  become: false
+  become: true
+  tags: ['certificates', 'ssl', 'guard']
+
+  vars:
+    _guard_globals_path: "/etc/agra/globals.yml"
+    _guard_passwords_path: "/etc/agra/passwords.yml"
+
+  pre_tasks:
+    - name: 'Guard — Stat file konfigurasi WAJIB: globals + passwords'
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+      register: _guard_stat
+      loop:
+        - "{{ _guard_globals_path }}"
+        - "{{ _guard_passwords_path }}"
+      become: true
+
+    - name: 'Guard — FAIL BOX ERROR JIKA SALAH SATU FILE TIDAK ADA'
+      ansible.builtin.fail:
+        msg: |
+          ┌─────────────────────────────────────────────────────────────────────────────────┐
+          │ ✗ ERROR: File konfigurasi WAJIB TIDAK DITEMUKAN (Kolla-Ansible absolute pattern). │
+          ├─────────────────────────────────────────────────────────────────────────────────┤
+          │   Path YANG DIBUTUHKAN:                                                           │
+          │     {{ _guard_globals_path }}     ← WAJIB ADA (grafana_domain / monitoring_vip)  │
+          │     {{ _guard_passwords_path }}  ← WAJIB ADA (password vault)                    │
+          │                                                                                   │
+          │   KENAPA WAJIB ADA:                                                               │
+          │   • CN cert disusun dari: grafana_domain > monitoring_vip > hostname             │
+          │   • SAN cert mengandung: DNS:grafana_domain/VIP, IP:monitoring_vip, localhost    │
+          │   • TANPA globals.yml → CN/SAN SALAH (cuma hostname doang, HENTIKAN)             │
+          │                                                                                   │
+          │   SOLUSI 1 (install.sh REKOMENDASI):                                              │
+          │     $ cd ./agra-repo  &&  ./install.sh    # cp template idempotent no-clobber    │
+          │                                                                                   │
+          │   SOLUSI 2 (manual copy dari repo):                                               │
+          │     $ sudo mkdir -p /etc/agra/config /etc/agra/ssl                                │
+          │     $ sudo chmod 0755 /etc/agra /etc/agra/config                                  │
+          │     $ sudo chmod 0750 /etc/agra/ssl                                               │
+          │     $ sudo cp -n ./etc/agra/globals.yml   /etc/agra/globals.yml                   │
+          │     $ sudo cp -n ./etc/agra/passwords.yml /etc/agra/passwords.yml                 │
+          │     $ sudo cp -rn ./etc/agra/config/*     /etc/agra/config/ 2>/dev/null || true  │
+          │                                                                                   │
+          │   Setelah tersedia, edit: $EDITOR /etc/agra/globals.yml → set grafana_domain     │
+          │   dan monitoring_vip.                                                              │
+          └─────────────────────────────────────────────────────────────────────────────────┘
+      when: _guard_stat.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
+
+# ============================================================
+# PLAY 2/2: Generate certificate (vars_files AMAN karena ter-guard Play 1)
+# ============================================================
+- name: 'AGRA — Generate self-signed RSA 2048 + x509 certificate di control node'
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: true
   tags: ['certificates', 'ssl']
 
   vars_files:

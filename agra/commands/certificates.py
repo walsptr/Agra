@@ -63,6 +63,53 @@ def _sanitize(s: str) -> str:
     return s.replace("\x00", "").strip()
 
 
+def _require_globals_yml() -> int:
+    """GUARD KRITIS: Pastikan /etc/agra/globals.yml ADA sebelum generate/info baca domain/VIP.
+    Return RC=2 dengan RED BOX error detail yang user-friendly JIKA file TIDAK ADA.
+    Return RC=0 JIKA file ada.
+    """
+    path = ETC_DIR / "globals.yml"
+    if path.exists() and path.is_file():
+        return 0
+    box_w = 78
+    print()
+    print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+    print(f"{RED}{BOLD}✗ ERROR:{RESET} File konfigurasi WAJIB TIDAK DITEMUKAN.")
+    print(f"{RED}{BOLD}  Path yang diharapkan (absolute Kolla-Ansible pattern):{RESET}")
+    print(f"    {CYAN}{BOLD}/etc/agra/globals.yml{RESET}")
+    print()
+    print(f"{YELLOW}{BOLD}  Alasan kenapa WAJIB ADA:{RESET}")
+    print(f"    - CN (Common Name) cert diambil dari: "
+          f"{GREEN}grafana_domain{RESET} > "
+          f"{GREEN}monitoring_vip{RESET} > hostname fallback")
+    print(f"    - SAN (Subject Alt Names) cert disusun dari: "
+          f"{GREEN}DNS:<grafana_domain/VIP>{RESET}, DNS:localhost, IP:127.0.0.1, "
+          f"{GREEN}IP:<monitoring_vip>{RESET}")
+    print(f"    - SSL default paths tls_cert_path, tls_key_path ada di globals.yml")
+    print(f"    - TANPA globals.yml → CN/SAN cuma hostname doang (SALAH!), "
+          f"jadi HENTIKAN sebelum dieksekusi.")
+    print()
+    print(f"{YELLOW}{BOLD}  SOLUSI (jalankan SALAH SATU dari repo agra root):{RESET}")
+    print(f"    {BOLD}SOLUSI 1 (direkomendasikan via install.sh):{RESET}")
+    print(f"      $ ./install.sh     # mkdir /etc/agra dan copy template globals/passwords idempotent")
+    print(f"    {BOLD}SOLUSI 2 (manual copy):{RESET}")
+    print(f"      $ sudo mkdir -p /etc/agra/config /etc/agra/ssl")
+    print(f"      $ sudo chmod 0755 /etc/agra /etc/agra/config")
+    print(f"      $ sudo chmod 0750 /etc/agra/ssl")
+    print(f"      $ sudo cp -n ./etc/agra/globals.yml   /etc/agra/globals.yml")
+    print(f"      $ sudo cp -n ./etc/agra/passwords.yml /etc/agra/passwords.yml")
+    print(f"      $ sudo cp -rn ./etc/agra/config/*     /etc/agra/config/ 2>/dev/null || true")
+    print(f"    {BOLD}SOLUSI 3 (cek file exist):{RESET}")
+    print(f"      $ ls -la /etc/agra/globals.yml && echo OK")
+    print()
+    print(f"{GRAY}  Setelah file /etc/agra/globals.yml tersedia, edit value: $EDITOR /etc/agra/globals.yml")
+    print(f"  → Set `grafana_domain` (domain, prioritas TERTINGGI untuk CN/SAN) dan/atau")
+    print(f"    `monitoring_vip` (VIP IP untuk HA keepalived).{RESET}")
+    print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+    print()
+    return 2
+
+
 def _resolve_paths(args: argparse.Namespace) -> Tuple[str, str, str, str]:
     g = load_globals_yaml()
     explicit_cert = getattr(args, "cert_path", None)
@@ -135,6 +182,8 @@ def _resolve_cn(args: argparse.Namespace, g: Dict[str, Any]) -> str:
 
 def cmd_generate(args: argparse.Namespace) -> int:
     section("agra certificates generate — Self-Signed RSA 2048 + x509")
+    rc_req = _require_globals_yml()
+    if rc_req != 0: return rc_req
     g = load_globals_yaml()
     cert, key, dh, ca = _resolve_paths(args)
     is_custom, reason = _detect_custom(g, cert, key)
@@ -227,6 +276,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     section("agra certificates info — Certificate Information")
+    rc_req = _require_globals_yml()
+    if rc_req != 0: return rc_req
     ec = getattr(args, "cert_path", None)
     if isinstance(ec, str) and ec.strip():
         cert_path = ec.strip()
