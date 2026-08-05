@@ -45,8 +45,43 @@ http {
     ssl_session_cache {{ tls_session_cache }};
     ssl_session_timeout {{ tls_session_timeout }};
     ssl_session_tickets {{ tls_session_tickets }};
-    {% if tls_dhparam_path %}
-    ssl_dhparam {{ tls_dhparam_path }};
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    resolver_timeout 5s;
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # GLOBAL SSL CERTIFICATES di http {} CONTEXT (BUKAN di server block site config!)
+    # Standard Nginx best practice: SSL cert pair didefinisikan SATU KALI di level
+    # http {}, maka di-inherit OTOMATIS ke SEMUA server block listen 443 ssl.
+    #
+    # 🔥 SAFETY GUARD (FIX empty string ssl_certificate "" yang menyebabkan
+    #    emerg "invalid number of arguments"):
+    #    - Jika user override tls_*_path di globals.yml = EMPTY STRING / TANPA
+    #      VALUE (mis: `tls_cert_path:` YAML tanpa isi), MAKA FALLBACK OTOMATIS
+    #      ke DEFAULT PATH self-signed cert: `/etc/nginx/ssl/agra.crt` / agra.key
+    #    - Nuclear sanitizer pattern SHA ec49dfe: split()|join('') hapus SEMUA
+    #      embedded newline/spasi + double quotes wrap force 1 token parser Nginx.
+    #    - HANYA RENDER DIRECTIVE JIKA HASIL AKHIR BUKAN EMPTY STRING.
+    # ══════════════════════════════════════════════════════════════════════════
+    {% set _fallback_cert = nginx_config_dir ~ '/ssl/agra.crt' %}
+    {% set _fallback_key = nginx_config_dir ~ '/ssl/agra.key' %}
+    {% set _fallback_ca = nginx_config_dir ~ '/ssl/agra-ca.crt' %}
+    {% set _fallback_dh = nginx_config_dir ~ '/ssl/dhparam.pem' %}
+    {% set _cert_clean = ((tls_cert_path | default('')).split() | join('') or _fallback_cert).split() | join('') %}
+    {% set _key_clean = ((tls_key_path | default('')).split() | join('') or _fallback_key).split() | join('') %}
+    {% set _ca_raw = ((tls_ca_path | default('')).split() | join('') or _fallback_ca) %}{% set _ca_clean = (_ca_raw.split() | join('')) if (tls_ca_path | default('') and (tls_ca_path | default('')).split() | join('')) else '' %}
+    {% set _dh_clean = ((tls_dhparam_path | default('')).split() | join('') or _fallback_dh).split() | join('') %}
+    {% if _cert_clean | length > 0 %}
+    ssl_certificate "{{ _cert_clean }}";
+    {% endif %}
+    {% if _key_clean | length > 0 %}
+    ssl_certificate_key "{{ _key_clean }}";
+    {% endif %}
+    {% if _ca_clean | length > 0 %}
+    ssl_trusted_certificate "{{ _ca_clean }}";
+    {% endif %}
+    {% if _dh_clean | length > 0 %}
+    ssl_dhparam "{{ _dh_clean }}";
     {% endif %}
 
     map $http_upgrade $connection_upgrade {

@@ -12,17 +12,6 @@ server {
     http2 on;
     server_name {{ (server_name.split() | join(' ')) }};
 
-    ssl_certificate "{{ (tls_cert_path.split() | join('')) }}";
-    ssl_certificate_key "{{ (tls_key_path.split() | join('')) }}";
-    {% set _ca = tls_ca_path | default('') %}{% set _ca_clean = _ca.split() | join('') %}
-    {% if _ca_clean | length > 0 %}
-    ssl_trusted_certificate "{{ _ca_clean }}";
-    {% endif %}
-    {% set _dh = tls_dhparam_path | default('') %}{% set _dh_clean = _dh.split() | join('') %}
-    {% if _dh_clean | length > 0 %}
-    ssl_dhparam "{{ _dh_clean }}";
-    {% endif %}
-
     add_header Strict-Transport-Security "max-age={{ tls_hsts_max_age }}{% if tls_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if tls_hsts_preload %}; preload{% endif %}" always;
 
     add_header X-Content-Type-Options "nosniff" always;

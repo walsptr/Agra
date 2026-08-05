@@ -1,4 +1,61 @@
 ---
+- name: 'Nginx (Config) - PRECHECK FAIL-FAST - Compute SSL clean paths + fallback empty (anti ssl_certificate empty string emerg)'
+  ansible.builtin.set_fact:
+    _nginx_fb_cert: "{{ nginx_config_dir }}/ssl/agra.crt"
+    _nginx_fb_key: "{{ nginx_config_dir }}/ssl/agra.key"
+    _nginx_fb_dh: "{{ nginx_config_dir }}/ssl/dhparam.pem"
+    _nginx_clean_cert: "{{ (((tls_cert_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/agra.crt')).split() | join('') }}"
+    _nginx_clean_key: "{{ (((tls_key_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/agra.key')).split() | join('') }}"
+    _nginx_clean_dh: "{{ (((tls_dhparam_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/dhparam.pem')).split() | join('') }}"
+  tags: ['nginx', 'config', 'precheck', 'ssl']
+
+- name: 'Nginx (Config) - PRECHECK FAIL-FAST - Stat SSL cert + key files exist check di host (fallback aware)'
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_md5: false
+  loop:
+    - "{{ _nginx_clean_cert }}"
+    - "{{ _nginx_clean_key }}"
+  register: _nginx_ssl_files_stat
+  tags: ['nginx', 'config', 'precheck', 'ssl']
+
+- name: 'Nginx (Config) - PRECHECK FAIL-FAST enable_https=true - SSL cert+key NOT EMPTY files exists OR self-signed generate will run'
+  ansible.builtin.assert:
+    that:
+      - "not (enable_https | default(true) | bool) or _nginx_clean_cert | length > 0"
+      - "not (enable_https | default(true) | bool) or _nginx_clean_key | length > 0"
+      - "not (enable_https | default(true) | bool) or (tls_self_signed_generate | default(true) | bool) or ((_nginx_ssl_files_stat.results | map(attribute='stat.exists') | list) | select('equalto', true) | list | length == 2)"
+    fail_msg: |
+      ┌──────────────────────────────────────────────────────────────────────────────┐
+      │ NGINX PRECHECK SSL GAGAL!                                                    │
+      │ Kemungkinan penyebab dan solusi:                                             │
+      │                                                                              │
+      │ (1) tls_cert_path / tls_key_path di override di globals.yml TANPA VALUE     │
+      │     (contoh broken pattern YAML: `tls_cert_path:` no isi = empty string).    │
+      │     → ssl_certificate dirender dengan value "" = nginx EMERGENCY invalid args│
+      │                                                                              │
+      │ SOLUSI 1 - RECOMMENDED pakai auto self-signed default (tanpa setup manual):  │
+      │   DELETE atau COMMENT OUT SEMUA baris tls_cert_path: / tls_key_path: /      │
+      │   tls_dhparam_path: di file etc/agra/globals.yml.                            │
+      │   Fallback otomatis pakai path /etc/nginx/ssl/agra.crt + agra.key, dan       │
+      │   task self-signed generate OTOMATIS membuatkan file cert/key+dhparam.       │
+      │                                                                              │
+      │ SOLUSI 2 - Override dengan custom cert SSL asli milikmu:                     │
+      │   Isi VALUE BENAR dan LENGKAP di etc/agra/globals.yml, TANPA leading         │
+      │   whitespace / newline (tidak usah pakai >- folded scalar!):                 │
+      │     tls_cert_path: /etc/nginx/ssl/yourdomain.crt                             │
+      │     tls_key_path:  /etc/nginx/ssl/yourdomain.key                             │
+      │   PASTIKAN file CRT+KEY benar-benar SUDAH ADA di SEMUA node target inventory│
+      │   group monitoring (copy manual atau upload ke /etc/agra/config/nginx/ssl/). │
+      │                                                                              │
+      │ SOLUSI 3 - Temporary disable HTTPS untuk local testing saja:                 │
+      │   Set enable_https: false di globals.yml, deploy akan cuma expose port 80.  │
+      └──────────────────────────────────────────────────────────────────────────────┘
+    success_msg: "Nginx SSL paths OK (fallback aware) - cert={{ _nginx_clean_cert }}, key={{ _nginx_clean_key }}, dhparam={{ _nginx_clean_dh }}"
+  ignore_errors: false
+  tags: ['nginx', 'config', 'precheck', 'ssl', 'assert']
+
 - name: Nginx (Config) - Ensure CONFIG/READONLY dirs exist (root-owned, site+ssl config)
   ansible.builtin.file:
     path: "{{ item }}"
@@ -39,7 +96,7 @@
   ignore_errors: true
   tags: ['nginx', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
 
-- name: Nginx (SSL) - Build self-signed cert+key
+- name: Nginx (SSL) - Build self-signed cert+key (fallback-aware path)
   block:
     - name: Nginx (SSL) - Set subject_alt_name list
       ansible.builtin.set_fact:
@@ -54,11 +111,11 @@
     - name: Nginx (SSL) - Generate 2048-bit RSA private key (bare shell openssl genrsa, creates guard)
       ansible.builtin.shell:
         cmd: |
-          openssl genrsa -out "{{ tls_key_path }}" 2048 2>/dev/null
-          chmod 0600 "{{ tls_key_path }}"
+          openssl genrsa -out "{{ _nginx_clean_key }}" 2048 2>/dev/null
+          chmod 0600 "{{ _nginx_clean_key }}"
           echo "CHANGED: RSA 2048 private key generated"
       args:
-        creates: "{{ tls_key_path }}"
+        creates: "{{ _nginx_clean_key }}"
         executable: /bin/bash
       register: _ssl_key
       changed_when: _ssl_key.rc is defined
@@ -67,8 +124,8 @@
       ansible.builtin.shell:
         cmd: |
           set -e
-          KEY_PATH="{{ tls_key_path }}"
-          CRT_PATH="{{ tls_cert_path }}"
+          KEY_PATH="{{ _nginx_clean_key }}"
+          CRT_PATH="{{ _nginx_clean_cert }}"
           DAYS="{{ tls_self_signed_days_valid }}"
           CN="{{ tls_self_signed_cn }}"
           C="{{ tls_self_signed_country }}"
@@ -87,20 +144,20 @@
           chmod 0644 "${CRT_PATH}"
           echo "CHANGED: self-signed x509 cert generated, CN=${CN}, days=${DAYS}"
       args:
-        creates: "{{ tls_cert_path }}"
+        creates: "{{ _nginx_clean_cert }}"
         executable: /bin/bash
       register: _ssl_cert
       changed_when: _ssl_cert.rc is defined
   when:
     - enable_https | default(true) | bool
     - tls_self_signed_generate | default(true) | bool
-    - tls_cert_path == nginx_config_dir + '/ssl/agra.crt' or (tls_cert_path | dirname == nginx_config_dir + '/ssl' and (tls_cert_path is not exists or ansible_check_mode is true))
+    - _nginx_clean_cert == (nginx_config_dir ~ '/ssl/agra.crt')
   tags: ['nginx', 'config', 'ssl']
 
-- name: "Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)"
+- name: 'Nginx (SSL) - Generate Diffie-Hellman params (guard creates sangat lama, 2048bit ~ 10-60s)'
   ansible.builtin.command:
-    cmd: "openssl dhparam -out {{ tls_dhparam_path }} {{ tls_dhparam_bits | int }}"
-    creates: "{{ tls_dhparam_path }}"
+    cmd: "openssl dhparam -out {{ _nginx_clean_dh }} {{ tls_dhparam_bits | int }}"
+    creates: "{{ _nginx_clean_dh }}"
   environment:
     RANDFILE: /tmp/.rnd
   async: 300
