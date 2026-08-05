@@ -12,8 +12,6 @@
 - name: 'Nginx (Config) - PRECHECK FAIL-FAST - Stat SSL cert + key files exist check di host (fallback aware)'
   ansible.builtin.stat:
     path: "{{ item }}"
-    get_checksum: false
-    get_md5: false
   loop:
     - "{{ _nginx_clean_cert }}"
     - "{{ _nginx_clean_key }}"
