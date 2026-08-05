@@ -5,6 +5,12 @@ agra_deployment_mode: docker
 # 2. Grafana
 enable_grafana: true
 enable_ha_grafana: false
+# Custom domain untuk Grafana (optional override). FALLBACK PRIORITY OTOMATIS:
+#   Explicit value kamu disini (jika tidak empty string)
+#   → jika kosong: pakai monitoring_vip (jika ada / tidak kosong)
+#   → jika masih kosong: pakai inventory_hostname (hostname Ansible tiap node)
+# Contoh isi: grafana_domain: monitor.example.com
+grafana_domain: ""
 grafana_database: sqlite
 grafana_sqlite_sync_method: rsync
 grafana_sqlite_sync_interval: 60

@@ -43,9 +43,9 @@ grafana_sqlite_sync_method: rsync
 grafana_sqlite_sync_interval: "*/5 * * * *"
 grafana_sqlite_sync_ssh_user: "root"
 
-grafana_server_domain: "{{ inventory_hostname }}"
-grafana_server_root_url: "{{ (( (monitoring_vip is defined and (((monitoring_vip | default('')).split() | join('')) | length > 0)) | ternary('https://' ~ (((monitoring_vip | default('')).split() | join(''))) ~ ('/grafana' if (enable_nginx | default(true) | bool) else '') ~ '/', ((enable_nginx | default(true) | bool) | ternary('https://' ~ inventory_hostname ~ '/grafana/', 'http://' ~ inventory_hostname ~ ':' ~ grafana_port ~ '/')))) | trim }}"
-grafana_server_serve_from_sub_path: "{{ 'true' if (enable_nginx | default(true) | bool) else 'false' }}"
+grafana_server_domain: "{{ ((((grafana_domain | default('')).split() | join('')) | length > 0) | ternary(((grafana_domain | default('')).split() | join('')), ((((monitoring_vip | default('')).split() | join('')) | length > 0) | ternary(((monitoring_vip | default('')).split() | join('')), inventory_hostname)))) | trim }}"
+grafana_server_root_url: "{{ (((((monitoring_vip | default('')).split() | join('')) | length > 0) | ternary('https://' ~ (((monitoring_vip | default('')).split() | join(''))) ~ '/', ((enable_nginx | default(true) | bool) | ternary('https://' ~ inventory_hostname ~ '/', 'http://' ~ inventory_hostname ~ ':' ~ grafana_port ~ '/'))))) | trim }}"
+grafana_server_serve_from_sub_path: "false"
 grafana_server_protocol: http
 grafana_log_level: info
 grafana_secret_key: "CHANGE_ME_DEFAULT_SECRET_KEY"

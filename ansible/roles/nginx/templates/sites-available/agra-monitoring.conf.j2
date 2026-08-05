@@ -26,28 +26,13 @@ server {
     server_name {{ (server_name.split() | join(' ')) }};
 {% endif %}
 
-    location = / {
-        return 302 /grafana/;
-    }
-
-    location /grafana/ {
-        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Authorization $http_authorization;
-        proxy_pass_header Authorization;
-        proxy_read_timeout 300;
-        proxy_connect_timeout 30;
-        proxy_send_timeout 300;
-        proxy_buffering off;
-    }
-
-    location /grafana/api/live/ {
+    # ══════════════════════════════════════════════════════════════════════════
+    # GRAFANA LIVE WEBSOCKET ENDPOINT (/api/live/) — SPECIFIC PATH DI ATAS ROOT
+    # URUTAN PENTING: location block INI harus DI ATAS location / (greedy root)
+    # Supaya exact path /api/live/ tidak ketangkap location root, dapat priority.
+    # Untuk Grafana Live streaming, Alerting websocket, plugin realtime.
+    # ══════════════════════════════════════════════════════════════════════════
+    location /api/live/ {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -60,6 +45,10 @@ server {
         proxy_buffering off;
     }
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # PROMETHEUS UI SUBPATH /prometheus/ — BACKWARD COMPATIBLE, TIDAK DIUBAH
+    # Tetap pakai subpath /prometheus/ (bisa disabled via expose_prometheus_via_nginx)
+    # ══════════════════════════════════════════════════════════════════════════
     location /prometheus/ {
 {% if expose_prometheus_via_nginx | default(false) | bool %}
         proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/prometheus/;
@@ -79,7 +68,26 @@ server {
         return 301 /prometheus/;
     }
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # GRAFANA ROOT PATH / — PATH UTAMA (SEMUA REQUEST YANG TIDAK MATCH LAINNYA)
+    # Contoh path yang masuk kesini: /login, /dashboard/:id, /api/*,
+    # /public/build/*.js (aset JS/CSS). Semua di-proxy ke backend Grafana.
+    # Breaking change explicit: root path langsung serve aplikasi utama.
+    # ══════════════════════════════════════════════════════════════════════════
     location / {
-        try_files $uri $uri/ =404;
+        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Authorization $http_authorization;
+        proxy_pass_header Authorization;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+        proxy_buffering off;
     }
 }

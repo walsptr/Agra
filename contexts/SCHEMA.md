@@ -59,9 +59,10 @@ Lokasi utama: `etc/agra/globals.yml` (non-secret) dan `etc/agra/passwords.yml`
 | `grafana_sqlite_sync_method` | string | `rsync` | Metode sinkronisasi sqlite antar node saat HA |
 | `grafana_sqlite_sync_interval` | string | `*/5 * * * *` | Cron expression interval sync sqlite |
 | `grafana_sqlite_sync_ssh_user` | string | `root` | SSH user untuk rsync sync sqlite |
-| `grafana_server_domain` | string | `{{ inventory_hostname }}` | Domain server Grafana |
-| `grafana_server_root_url` | jinja computed | conditional | Root URL (otomatis pakai monitoring_vip jika ada, else nginx/port). SELALU berakhiran /grafana/ jika enable_nginx=true, untuk subpath reverse proxy Nginx /grafana/. |
-| `grafana_server_serve_from_sub_path` | jinja computed (bool string) | conditional | **WAJIB `true` jika Grafana di-host di balik Nginx reverse proxy subpath `/grafana/` (default).** Nilai conditional: `true` jika enable_nginx=true, `false` jika enable_nginx=false (direct access port 3000 tanpa subpath). Berkorespondensi dengan setting `serve_from_sub_path` di `grafana.ini [server]`. |
+| `grafana_domain` | string | `""` (empty string = pakai fallback) | **Override domain eksplisit via globals.yml.** Fallback priority otomatis (jika value empty): 1) pakai `monitoring_vip` (jika ada & tidak kosong); 2) jika VIP kosong → pakai `inventory_hostname`. Contoh isi: `grafana_domain: monitor.example.com`. |
+| `grafana_server_domain` | jinja computed | conditional | Domain server Grafana (hasil compute DARI `grafana_domain` + fallback chain). JANGAN override di level role; set via global `grafana_domain` di globals.yml. |
+| `grafana_server_root_url` | jinja computed | conditional | Root URL (otomatis pakai monitoring_vip jika ada, else nginx/port). **SELALU berakhir di `/` (path ROOT domain), TANPA suffix subpath apapun** (tidak kompatibel dengan versi 20260804 sebelumnya yang pakai suffix subpath; hapus custom root URL di globals.yml bila ada). Conditional: VIP+nginx = `https://<VIP>/`, nginx no-VIP = `https://<hostname>/`, direct nginx disabled = `http://<hostname>:<port>/`. |
+| `grafana_server_serve_from_sub_path` | bool string | `false` (hardcode) | **Selalu `false`** karena Grafana di-host di path ROOT `/` Nginx (tidak butuh URL base rewrite subpath apapun). Dulu conditional true/false (era config lama sebelum 20260804), sekarang hardcode false untuk semua deployment mode. |
 | `grafana_server_protocol` | string | `http` | Protocol server (http/https) |
 | `grafana_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
 | `grafana_secret_key` | string (secret) | vault ref | Secret key untuk signing, via `vault_grafana_secret_key` |
