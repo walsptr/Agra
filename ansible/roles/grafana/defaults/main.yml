@@ -20,6 +20,15 @@ grafana_dir_mode: "2770"
 grafana_file_mode: "0640"
 grafana_file_public_mode: "0644"
 
+# ⚠️ CONTAINER INTERNAL PATHS (inside grafana container - grafana.ini inside container MUST USE THESE!)
+# Sesuai official image defaults grafana/grafana-oss image. JANGAN DIGANTI!
+grafana_container_config_dir: /etc/grafana
+grafana_container_data_dir: /var/lib/grafana
+grafana_container_provisioning_dir: /etc/grafana/provisioning
+grafana_container_plugins_dir: "{{ grafana_container_data_dir }}/plugins"
+grafana_container_log_dir: /var/log/grafana
+grafana_container_sqlite_path: "{{ grafana_container_data_dir }}/grafana.db"
+
 grafana_database: sqlite
 grafana_database_ssl_mode: disable
 grafana_database_host: ""

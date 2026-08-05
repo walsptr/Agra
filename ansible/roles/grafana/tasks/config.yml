@@ -1,4 +1,62 @@
 ---
+- name: Grafana (Config) - Stat parent dirs (precheck ownership mode SHA e6360b0)
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  register: _grafana_stat_parent
+  loop:
+    - "{{ common_home_dir | default('/var/lib/agra') }}"
+    - "{{ common_etc_dir | default('/etc/agra') }}"
+  tags: ['grafana', 'config', 'precheck', 'dirs']
+  changed_when: false
+
+- name: "Grafana (Config) - PRECHECK FAIL-FAST: Parent dirs owner/mode SALAH (Autocorrect + Solusi disediakan)"
+  ansible.builtin.assert:
+    that:
+      - "item.0.stat.exists"
+      - "item.0.stat.pw_name == 'root'"
+      - "item.0.stat.gr_name == 'root'"
+      - "((item.0.stat.mode | default(0)) & 0o7777) == 0o2775"
+    fail_msg: |
+      ┌──────────────────────────────────────────────────────────────────────────────┐
+      │  ERROR: Parent directory {{ item.1 }} OWNERSHIP/MODE SALAH!                  │
+      │  Ini PENYEBAB UTAMA error: "mkdir /var/lib/agra: permission denied"!         │
+      │  Kamu jalankan deploy --tags grafana TANPA common role, ATAU SHA e6360b0     │
+      │  (ownership kolla pattern) BELUM PERNAH di-apply ke node ini!                │
+      │                                                                              │
+      │  EXPECTED: owner=root, group=root, mode=2775 setgid group-writable           │
+      │  ACTUAL:   owner={{ item.0.stat.pw_name | default('N/A') }},                 │
+      │            group={{ item.0.stat.gr_name | default('N/A') }},                 │
+      │            mode={%- set _m=(item.0.stat.mode|default(0)) & 0o7775 -%}{{ '%04o' | format(_m) }}│
+      │                                                                              │
+      │  SOLUSI 1 (CEPAT — jalankan di SEMUA node monitoring):                       │
+      │    sudo chown root:root {{ common_home_dir | default('/var/lib/agra') }} {{ common_etc_dir | default('/etc/agra') }}
+      │    sudo chmod 2775 {{ common_home_dir | default('/var/lib/agra') }} {{ common_etc_dir | default('/etc/agra') }}
+      │    sudo docker rm -f agra-grafana 2>/dev/null || true                        │
+      │                                                                              │
+      │  SOLUSI 2 (CLEAN — jalankan common role dulu):                               │
+      │    agra deploy -i inventory/multinode --tags common                          │
+      │    agra deploy -i inventory/multinode --tags grafana                         │
+      └──────────────────────────────────────────────────────────────────────────────┘
+      Jalankan SOLUSI 1 atau 2, lalu deploy ULANG. Solusi 1 otomatis dijalankan task
+      FORCESYNC di bawah jika playbook dijalankan dengan become=root.
+    success_msg: "Parent dir {{ item.1 }} owner=root:root mode=2775 - BENAR (SHA e6360b0)"
+  loop: "{{ _grafana_stat_parent.results | zip([common_home_dir | default('/var/lib/agra'), common_etc_dir | default('/etc/agra')]) | list }}"
+  ignore_errors: true
+  tags: ['grafana', 'config', 'precheck', 'dirs']
+
+- name: Grafana (Config) - FORCESYNC parent dirs ownership/mode ke root:root 2775 (autocorrect SHA e6360b0 jika user skip common role)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '2775'
+  loop:
+    - "{{ common_home_dir | default('/var/lib/agra') }}"
+    - "{{ common_etc_dir | default('/etc/agra') }}"
+  tags: ['grafana', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
+
 - name: Grafana (Config) - Ensure dirs exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -10,11 +68,13 @@
   loop:
     - "{{ grafana_config_dir }}"
     - "{{ grafana_data_dir }}"
+    - "{{ grafana_data_dir }}/log"
+    - "{{ grafana_data_dir }}/plugins"
     - "{{ grafana_provisioning_dir }}/datasources"
     - "{{ grafana_provisioning_dir }}/dashboards"
     - "{{ grafana_provisioning_dir }}/notifiers"
     - "{{ grafana_provisioning_dir }}/plugins"
-  tags: ['grafana', 'config', 'dirs']
+  tags: ['grafana', 'config', 'dirs', 'data']
 
 - name: Grafana (Config) - Render grafana.ini via first_found
   ansible.builtin.template:

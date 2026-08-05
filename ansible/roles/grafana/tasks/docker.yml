@@ -49,13 +49,15 @@
   ansible.builtin.shell:
     cmd: |
       RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      $RUNTIME rm -f {{ grafana_container_name }} 2>/dev/null || true
       $RUNTIME run -d \
         --name={{ grafana_container_name }} \
         --restart=always \
         --network=host \
         --user={{ grafana_docker_user }} \
-        -v {{ grafana_config_dir }}:/etc/grafana:ro \
-        -v {{ grafana_data_dir }}:/var/lib/grafana:rw \
+        -v {{ grafana_config_dir }}:{{ grafana_container_config_dir }}:ro \
+        -v {{ grafana_data_dir }}:{{ grafana_container_data_dir }}:rw \
+        -v {{ grafana_data_dir }}/log:{{ grafana_container_log_dir }}:rw \
         -e GF_SECURITY_ADMIN_USER="{{ grafana_admin_user }}" \
         -e GF_SECURITY_ADMIN_PASSWORD="{{ grafana_admin_password }}" \
         -e GF_USERS_ALLOW_SIGN_UP="false" \
@@ -64,11 +66,16 @@
         -e GF_SERVER_ROOT_URL="{{ grafana_server_root_url | trim }}" \
         -e GF_LOG_LEVEL="{{ grafana_log_level }}" \
         -e GF_SECURITY_SECRET_KEY="{{ grafana_secret_key }}" \
+        -e GF_PATHS_DATA="{{ grafana_container_data_dir }}" \
+        -e GF_PATHS_LOGS="{{ grafana_container_log_dir }}" \
+        -e GF_PATHS_PLUGINS="{{ grafana_container_plugins_dir }}" \
+        -e GF_PATHS_PROVISIONING="{{ grafana_container_provisioning_dir }}" \
+        -e GF_DATABASE_PATH="{{ grafana_container_sqlite_path }}" \
         --health-cmd="wget -qO- http://{{ grafana_web_listen_address | trim }}/api/health || exit 1" \
         --health-interval=30s \
         --health-timeout=10s \
         --health-retries=3 \
-        --health-start-period=60s \
+        --health-start-period=120s \
         {{ grafana_image }}:{{ grafana_tag }}
   when: _gf_container_running.rc != 0
   changed_when: true
