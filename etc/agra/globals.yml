@@ -5,12 +5,6 @@ agra_deployment_mode: docker
 # 2. Grafana
 enable_grafana: true
 enable_ha_grafana: false
-# Custom domain untuk Grafana (optional override). FALLBACK PRIORITY OTOMATIS:
-#   Explicit value kamu disini (jika tidak empty string)
-#   → jika kosong: pakai monitoring_vip (jika ada / tidak kosong)
-#   → jika masih kosong: pakai inventory_hostname (hostname Ansible tiap node)
-# Contoh isi: grafana_domain: monitor.example.com
-grafana_domain: ""
 grafana_database: sqlite
 grafana_sqlite_sync_method: rsync
 grafana_sqlite_sync_interval: 60
@@ -38,6 +32,14 @@ prometheus_image: prom/prometheus
 prometheus_tag: v2.53.0
 prometheus_native_version: "2.53.0"
 expose_prometheus_via_nginx: false
+# Domain khusus untuk expose Prometheus via HTTPS dedicated server block Nginx (SCALABLE: bisa pakai SSL cert sendiri per domain).
+# JIKA diisi (mis. "prometheus.example.com"):
+#   - expose_prometheus_via_nginx OTOMATIS dianggap true
+#   - Akan dibuat HTTPS server block tersendiri dengan server_name={{ prometheus_domain }}
+#   - proxy_pass ke upstream http://127.0.0.1:9090 (tanpa subpath /prometheus)
+#   - SSL cert untuk block ini bisa di-custom via `tls_prometheus_cert_path` / `tls_prometheus_key_path` (fallback ke global tls_cert_path / tls_key_path)
+# JIKA dikosongkan (default ""): Prometheus expose via path /prometheus subpath default server block (atur expose_prometheus_via_nginx=true jika ingin)
+prometheus_domain: ""
 
 # 4. Node Exporter
 enable_node_exporter: true
@@ -61,19 +63,24 @@ keepalived_auth_pass: ""
 # 6. Nginx/TLS
 enable_nginx: true
 enable_https: true
-# Default lokasi self-signed certificate, RSA private key, CA chain, dan Diffie-Hellman parameter di CONTROL NODE (path absolute /etc/agra/ssl).
-# Di-generate secara eksplisit SEBELUM deploy via: agra certificates generate [--include-dhparam]
-# Role nginx (config task block custom copy) akan OTOMATIS men-copy file dari /etc/agra/ssl ke managed host
-# (target path: nginx_config_dir/ssl) JIKA file ditemukan. Jika tidak ditemukan + enable_https true,
-# inline self-signed generate di managed host tetap dijalankan sebagai backward compat (creates guard).
-# Untuk custom CA-signed cert: override path dibawah ke lokasi cert anda (mis. /etc/letsencrypt/live/xxx),
-# ATAU taruh file agra.crt, agra.key, (opsional agra-ca.crt) di folder: /etc/agra/config/nginx/ssl/
 tls_cert_path: /etc/agra/ssl/agra.crt
 tls_key_path: /etc/agra/ssl/agra.key
 tls_ca_path: /etc/agra/ssl/agra-ca.crt
-tls_dhparam_path: /etc/agra/ssl/dhparam.pem
 tls_self_signed_days_valid: 3650
 tls_self_signed_cn: "{{ monitoring_vip | default('localhost') }}"
+# ── Dedicated SSL paths PER SERVICE (scalable untuk multi-domain berbeda cert) ──
+# Jika dikosongkan ("") → FALLBACK otomatis ke global tls_cert_path / tls_key_path (backward compat).
+# Path source ini DIBACA dari CONTROL NODE saat deploy (biasanya /etc/agra/ssl/),
+# lalu di-copy otomatis ke managed node /etc/nginx/ssl/<service>.{crt,key} oleh role nginx config task block custom copy.
+
+# Dedicated cert untuk Grafana default HTTPS server block (server_name = grafana_domain / monitoring_vip):
+tls_grafana_cert_path: ""
+tls_grafana_key_path: ""
+
+# Dedicated cert untuk Prometheus dedicated HTTPS server block (jika prometheus_domain diisi):
+# Contoh custom: /etc/letsencrypt/live/prometheus.example.com/fullchain.pem
+tls_prometheus_cert_path: ""
+tls_prometheus_key_path: ""
 
 # 7. Backup & Restore
 backup_destination_type: local

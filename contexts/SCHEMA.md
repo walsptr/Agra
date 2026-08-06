@@ -59,13 +59,12 @@ Lokasi utama: `etc/agra/globals.yml` (non-secret) dan `etc/agra/passwords.yml`
 | `grafana_sqlite_sync_method` | string | `rsync` | Metode sinkronisasi sqlite antar node saat HA |
 | `grafana_sqlite_sync_interval` | string | `*/5 * * * *` | Cron expression interval sync sqlite |
 | `grafana_sqlite_sync_ssh_user` | string | `root` | SSH user untuk rsync sync sqlite |
-| `grafana_domain` | string | `""` (empty string = pakai fallback) | **Override domain eksplisit via globals.yml.** Fallback priority otomatis (jika value empty): 1) pakai `monitoring_vip` (jika ada & tidak kosong); 2) jika VIP kosong → pakai `inventory_hostname`. Contoh isi: `grafana_domain: monitor.example.com`. |
-| `grafana_server_domain` | jinja computed | conditional | Domain server Grafana (hasil compute DARI `grafana_domain` + fallback chain). JANGAN override di level role; set via global `grafana_domain` di globals.yml. |
-| `grafana_server_root_url` | jinja computed | conditional | Root URL (otomatis pakai monitoring_vip jika ada, else nginx/port). **SELALU berakhir di `/` (path ROOT domain), TANPA suffix subpath apapun** (tidak kompatibel dengan versi 20260804 sebelumnya yang pakai suffix subpath; hapus custom root URL di globals.yml bila ada). Conditional: VIP+nginx = `https://<VIP>/`, nginx no-VIP = `https://<hostname>/`, direct nginx disabled = `http://<hostname>:<port>/`. |
-| `grafana_server_serve_from_sub_path` | bool string | `false` (hardcode) | **Selalu `false`** karena Grafana di-host di path ROOT `/` Nginx (tidak butuh URL base rewrite subpath apapun). Dulu conditional true/false (era config lama sebelum 20260804), sekarang hardcode false untuk semua deployment mode. |
+| `grafana_server_domain` | string | `{{ inventory_hostname }}` | Domain server Grafana |
+| `grafana_server_root_url` | jinja computed | conditional | Root URL (otomatis pakai monitoring_vip jika ada, else nginx/port) |
 | `grafana_server_protocol` | string | `http` | Protocol server (http/https) |
 | `grafana_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
 | `grafana_secret_key` | string (secret) | vault ref | Secret key untuk signing, via `vault_grafana_secret_key` |
+| `grafana_domain` | string | `""` | Custom domain expose Grafana HTTPS (mis. `monitor.example.com`). Jika diisi menjadi server_name utama block HTTPS default. |
 | `grafana_web_listen_address` | jinja computed | conditional | Bind address: `127.0.0.1:3000` (nginx aktif) / `0.0.0.0:3000` (direct) |
 | `grafana_prometheus_datasource_name` | string | `Prometheus` | Nama display datasource Prometheus |
 | `grafana_prometheus_datasource_uid` | string | `prometheus-main` | UID datasource Prometheus (stabil) |
@@ -98,6 +97,7 @@ Lokasi utama: `etc/agra/globals.yml` (non-secret) dan `etc/agra/passwords.yml`
 | `prometheus_web_listen_address` | string | computed | Bind address: `127.0.0.1:9090` jika nginx aktif tanpa expose, else `0.0.0.0:9090` |
 | `prometheus_skip_head` | string | `65534` | UID user nobody untuk ownership TSDB dir + docker container user |
 | `expose_prometheus_via_nginx` | bool | `false` | Expose Prometheus UI publik lewat Nginx path `/prometheus/` |
+| `prometheus_domain` | string | `""` | Domain dedicated expose Prometheus HTTPS (mis. `prom.example.com`). Jika diisi → expose dianggap true & dedicated server block dibuat; ssl cert bisa dedicated via `tls_prometheus_cert_path`; fallback empty = expose via `/prometheus` subpath |
 
 Catatan: Tidak ada `enable_ha_prometheus`. Ketahanan Prometheus murni
 konsekuensi jumlah host di `groups['monitoring']`/`groups['prometheus']`.
@@ -189,11 +189,15 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `tls_self_signed_locality` | string | `Jakarta` | Subject L (Locality) cert |
 | `tls_self_signed_organization` | string | `agra-monitoring` | Subject O (Organization) cert |
 | `tls_self_signed_organizational_unit` | string | `it` | Subject OU (Organizational Unit) cert |
-| `tls_cert_path` | string | `/etc/agra/ssl/agra.crt` | Path certificate. Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA-signed cert custom (mis. /etc/letsencrypt/live/xxx/fullchain.pem). |
-| `tls_key_path` | string | `/etc/agra/ssl/agra.key` | Path private key. Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA-signed cert custom (mis. /etc/letsencrypt/live/xxx/privkey.pem). |
-| `tls_ca_path` | string | `/etc/agra/ssl/agra-ca.crt` | Path CA chain (opsional). Default source adalah pre-generated via command `agra certificates generate` di control node. Bisa di-override ke path CA chain custom. |
-| `tls_dhparam_path` | string | `/etc/agra/ssl/dhparam.pem` | Path Diffie-Hellman params. Default source adalah pre-generated via command `agra certificates generate --include-dhparam` di control node. Bisa di-override ke path DH param custom. |
+| `tls_cert_path` | string | `/etc/agra/ssl/agra.crt` | Path certificate (default = auto self-signed) |
+| `tls_key_path` | string | `/etc/agra/ssl/agra.key` | Path private key |
+| `tls_ca_path` | string | `/etc/agra/ssl/agra-ca.crt` | Path CA chain (opsional) |
+| `tls_dhparam_path` | string | `/etc/agra/ssl/dhparam.pem` | Path Diffie-Hellman params |
 | `tls_dhparam_bits` | int | `2048` | Panjang bit DH param (2048 = balance keamanan & waktu generate) |
+| `tls_grafana_cert_path` | path | `""` | Dedicated cert Grafana HTTPS default server block (scalable per-domain). Kosong → fallback `tls_cert_path` global. |
+| `tls_grafana_key_path` | path | `""` | Dedicated key Grafana. |
+| `tls_prometheus_cert_path` | path | `""` | Dedicated cert Prometheus dedicated HTTPS server block. Kosong → fallback `tls_cert_path` global. |
+| `tls_prometheus_key_path` | path | `""` | Dedicated key Prometheus. |
 | `tls_protocols` | string | `TLSv1.2 TLSv1.3` | Protocols TLS yang diizinkan |
 | `tls_ciphers` | string | *cipher suite string* | Cipher suite ECDHE-only (forward secrecy) |
 | `tls_prefer_server_ciphers` | string | `on` | Prioritaskan cipher order server |

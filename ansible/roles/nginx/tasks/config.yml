@@ -1,61 +1,4 @@
 ---
-- name: 'Nginx (Config) - PRECHECK FAIL-FAST - Compute SSL clean paths + fallback empty (anti ssl_certificate empty string emerg)'
-  ansible.builtin.set_fact:
-    _nginx_fb_cert: "{{ nginx_config_dir }}/ssl/agra.crt"
-    _nginx_fb_key: "{{ nginx_config_dir }}/ssl/agra.key"
-    _nginx_fb_dh: "{{ nginx_config_dir }}/ssl/dhparam.pem"
-    _nginx_clean_cert: "{{ (((tls_cert_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/agra.crt')).split() | join('') }}"
-    _nginx_clean_key: "{{ (((tls_key_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/agra.key')).split() | join('') }}"
-    _nginx_clean_dh: "{{ (((tls_dhparam_path | default('')).split() | join('')) or (nginx_config_dir ~ '/ssl/dhparam.pem')).split() | join('') }}"
-  tags: ['nginx', 'config', 'precheck', 'ssl']
-
-- name: 'Nginx (Config) - PRECHECK FAIL-FAST - Stat SSL cert + key files exist check di host (fallback aware)'
-  ansible.builtin.stat:
-    path: "{{ item }}"
-  loop:
-    - "{{ _nginx_clean_cert }}"
-    - "{{ _nginx_clean_key }}"
-  register: _nginx_ssl_files_stat
-  tags: ['nginx', 'config', 'precheck', 'ssl']
-
-- name: 'Nginx (Config) - PRECHECK FAIL-FAST enable_https=true - SSL cert+key NOT EMPTY files exists OR self-signed generate will run'
-  ansible.builtin.assert:
-    that:
-      - "not (enable_https | default(true) | bool) or _nginx_clean_cert | length > 0"
-      - "not (enable_https | default(true) | bool) or _nginx_clean_key | length > 0"
-      - "not (enable_https | default(true) | bool) or (tls_self_signed_generate | default(true) | bool) or ((_nginx_ssl_files_stat.results | map(attribute='stat.exists') | list) | select('equalto', true) | list | length == 2)"
-    fail_msg: |
-      ┌──────────────────────────────────────────────────────────────────────────────┐
-      │ NGINX PRECHECK SSL GAGAL!                                                    │
-      │ Kemungkinan penyebab dan solusi:                                             │
-      │                                                                              │
-      │ (1) tls_cert_path / tls_key_path di override di globals.yml TANPA VALUE     │
-      │     (contoh broken pattern YAML: `tls_cert_path:` no isi = empty string).    │
-      │     → ssl_certificate dirender dengan value "" = nginx EMERGENCY invalid args│
-      │                                                                              │
-      │ SOLUSI 1 - RECOMMENDED pakai default pre-generated cert (control node):      │
-      │   Default utama path: /etc/agra/ssl/agra.crt + /etc/agra/ssl/agra.key        │
-      │   (di-generate SEBELUM deploy via `agra certificates generate`).             │
-      │   Biarkan default value di /etc/agra/globals.yml (tidak di-override).        │
-      │   Secondary fallback (backward compat): JIKA control node cert TIDAK ada /   │
-      │   tidak ter-copy → inline self-signed generate di managed host membuat file  │
-      │   di /etc/nginx/ssl/agra.crt + agra.key (dengan creates guard).              │
-      │                                                                              │
-      │ SOLUSI 2 - Override dengan custom cert SSL asli milikmu:                     │
-      │   Isi VALUE BENAR dan LENGKAP di /etc/agra/globals.yml, TANPA leading        │
-      │   whitespace / newline (tidak usah pakai >- folded scalar!):                 │
-      │     tls_cert_path: /etc/nginx/ssl/yourdomain.crt                             │
-      │     tls_key_path:  /etc/nginx/ssl/yourdomain.key                             │
-      │   PASTIKAN file CRT+KEY benar-benar SUDAH ADA di SEMUA node target inventory│
-      │   group monitoring (copy manual atau upload ke /etc/agra/config/nginx/ssl/). │
-      │                                                                              │
-      │ SOLUSI 3 - Temporary disable HTTPS untuk local testing saja:                 │
-      │   Set enable_https: false di globals.yml, deploy akan cuma expose port 80.  │
-      └──────────────────────────────────────────────────────────────────────────────┘
-    success_msg: "Nginx SSL paths OK (fallback aware) - cert={{ _nginx_clean_cert }}, key={{ _nginx_clean_key }}, dhparam={{ _nginx_clean_dh }}"
-  ignore_errors: false
-  tags: ['nginx', 'config', 'precheck', 'ssl', 'assert']
-
 - name: Nginx (Config) - Ensure CONFIG/READONLY dirs exist (root-owned, site+ssl config)
   ansible.builtin.file:
     path: "{{ item }}"
@@ -96,20 +39,28 @@
   ignore_errors: true
   tags: ['nginx', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
 
-- name: Nginx (SSL) - Build self-signed cert+key (fallback-aware path)
+- name: Nginx (SSL) - Build self-signed cert+key
   block:
     - name: Nginx (SSL) - Set subject_alt_name list
       ansible.builtin.set_fact:
-        _nginx_san_list: "{{ (['DNS:' + tls_self_signed_cn, 'DNS:localhost', 'IP:127.0.0.1'] + (['IP:' + monitoring_vip] if (((monitoring_vip | default('')) | trim) | length > 0) else [])) }}"
+        _nginx_san_list: >-
+          {{
+            ['DNS:' + tls_self_signed_cn,
+              'DNS:localhost',
+              'IP:127.0.0.1']
+            + (['IP:' + monitoring_vip] if (monitoring_vip is defined and monitoring_vip | length > 0 else []))
+            + (['DNS:' + prometheus_domain | trim] if ((prometheus_domain | default('') | trim | length) > 0) else [])
+            + (['DNS:' + grafana_domain | trim] if ((grafana_domain | default('') | trim | length) > 0) else [])
+          }}
 
     - name: Nginx (SSL) - Generate 2048-bit RSA private key (bare shell openssl genrsa, creates guard)
       ansible.builtin.shell:
         cmd: |
-          openssl genrsa -out "{{ _nginx_clean_key }}" 2048 2>/dev/null
-          chmod 0600 "{{ _nginx_clean_key }}"
+          openssl genrsa -out "{{ tls_key_path }}" 2048 2>/dev/null
+          chmod 0600 "{{ tls_key_path }}"
           echo "CHANGED: RSA 2048 private key generated"
       args:
-        creates: "{{ _nginx_clean_key }}"
+        creates: "{{ tls_key_path }}"
         executable: /bin/bash
       register: _ssl_key
       changed_when: _ssl_key.rc is defined
@@ -118,8 +69,8 @@
       ansible.builtin.shell:
         cmd: |
           set -e
-          KEY_PATH="{{ _nginx_clean_key }}"
-          CRT_PATH="{{ _nginx_clean_cert }}"
+          KEY_PATH="{{ tls_key_path }}"
+          CRT_PATH="{{ tls_cert_path }}"
           DAYS="{{ tls_self_signed_days_valid }}"
           CN="{{ tls_self_signed_cn }}"
           C="{{ tls_self_signed_country }}"
@@ -138,20 +89,20 @@
           chmod 0644 "${CRT_PATH}"
           echo "CHANGED: self-signed x509 cert generated, CN=${CN}, days=${DAYS}"
       args:
-        creates: "{{ _nginx_clean_cert }}"
+        creates: "{{ tls_cert_path }}"
         executable: /bin/bash
       register: _ssl_cert
       changed_when: _ssl_cert.rc is defined
   when:
     - enable_https | default(true) | bool
     - tls_self_signed_generate | default(true) | bool
-    - _nginx_clean_cert == (nginx_config_dir ~ '/ssl/agra.crt')
+    - tls_cert_path == nginx_config_dir + '/ssl/agra.crt' or (tls_cert_path | dirname == nginx_config_dir + '/ssl' and (tls_cert_path is not exists or ansible_check_mode is true))
   tags: ['nginx', 'config', 'ssl']
 
-- name: 'Nginx (SSL) - Generate Diffie-Hellman params (guard creates sangat lama, 2048bit ~ 10-60s)'
+- name: "Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)"
   ansible.builtin.command:
-    cmd: "openssl dhparam -out {{ _nginx_clean_dh }} {{ tls_dhparam_bits | int }}"
-    creates: "{{ _nginx_clean_dh }}"
+    cmd: "openssl dhparam -out {{ tls_dhparam_path }} {{ tls_dhparam_bits | int }}"
+    creates: "{{ tls_dhparam_path }}"
   environment:
     RANDFILE: /tmp/.rnd
   async: 300
@@ -182,6 +133,66 @@
       loop: "{{ _custom_ssl_stat.results }}"
       when: item.stat is defined and item.stat.exists
       notify: ['reload nginx']
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL Per-Service Dedicated) - Copy dedicated grafana cert ke managed-host
+  block:
+    - name: Stat dedicated grafana cert di control node source
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+        get_checksum: false
+      register: _ded_stat_g
+      loop:
+        - src: "{{ tls_grafana_cert_path }}"
+          dst: "{{ nginx_config_dir }}/ssl/grafana.crt"
+          mode: '0644'
+        - src: "{{ tls_grafana_key_path }}"
+          dst: "{{ nginx_config_dir }}/ssl/grafana.key"
+          mode: '0600'
+      when: (tls_grafana_cert_path | default('') | trim | length > 0) and (tls_grafana_key_path | default('') | trim | length > 0)
+
+    - name: Copy dedicated grafana cert & key jika source ada
+      ansible.builtin.copy:
+        src: "{{ item.item.src }}"
+        dest: "{{ item.item.dst }}"
+        owner: root
+        group: root
+        mode: "{{ item.item.mode }}"
+        remote_src: true
+      loop: "{{ _ded_stat_g.results }}"
+      when: _ded_stat_g is defined and item is defined and item.stat is defined and item.stat.exists
+      notify: ['reload nginx']
+  when: enable_https | default(true) | bool
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL Per-Service Dedicated) - Copy dedicated prometheus cert ke managed-host
+  block:
+    - name: Stat dedicated prometheus cert di control node source
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+        get_checksum: false
+      register: _ded_stat_p
+      loop:
+        - src: "{{ tls_prometheus_cert_path }}"
+          dst: "{{ nginx_config_dir }}/ssl/prometheus.crt"
+          mode: '0644'
+        - src: "{{ tls_prometheus_key_path }}"
+          dst: "{{ nginx_config_dir }}/ssl/prometheus.key"
+          mode: '0600'
+      when: ((tls_prometheus_cert_path | default('') | trim | length > 0) and (tls_prometheus_key_path | default('') | trim | length > 0)) or ((prometheus_domain | default('') | trim | length) > 0)
+
+    - name: Copy dedicated prometheus cert & key jika source ada
+      ansible.builtin.copy:
+        src: "{{ item.item.src }}"
+        dest: "{{ item.item.dst }}"
+        owner: root
+        group: root
+        mode: "{{ item.item.mode }}"
+        remote_src: true
+      loop: "{{ _ded_stat_p.results }}"
+      when: _ded_stat_p is defined and item is defined and item.stat is defined and item.stat.exists
+      notify: ['reload nginx']
+  when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
 
 - name: Nginx (Config) - Render nginx.conf via first_found

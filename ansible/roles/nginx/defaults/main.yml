@@ -18,19 +18,6 @@ nginx_cache_dir: /var/cache/nginx
 nginx_run_dir: /var/run
 nginx_pid_path: /var/run/nginx.pid
 
-# ⚠️ NGINX USER: BEDA NATIVE VS DOCKER OFFICIAL IMAGE!
-# Native package Ubuntu/Debian = www-data (www-data user group).
-# Official docker image nginx (alpine/debian) = user=nginx UID=101 GID=101.
-# JANGAN GUNA www-data di docker mode! nginx.conf inside container getpwnam() ENOENT emerg.
-nginx_native_user: www-data
-nginx_native_group: www-data
-nginx_container_user: nginx
-nginx_container_group: nginx
-nginx_uid: 101
-nginx_gid: 101
-nginx_dir_mode: "2775"
-nginx_file_mode: "0644"
-
 nginx_worker_processes: auto
 nginx_worker_connections: 1024
 nginx_keepalive_timeout: 65
@@ -45,11 +32,19 @@ tls_self_signed_locality: Jakarta
 tls_self_signed_organization: agra-monitoring
 tls_self_signed_organizational_unit: it
 
-tls_cert_path: /etc/agra/ssl/agra.crt
-tls_key_path: /etc/agra/ssl/agra.key
-tls_ca_path: /etc/agra/ssl/agra-ca.crt
-tls_dhparam_path: /etc/agra/ssl/dhparam.pem
+tls_cert_path: "{{ nginx_config_dir }}/ssl/agra.crt"
+tls_key_path: "{{ nginx_config_dir }}/ssl/agra.key"
+tls_ca_path: "{{ nginx_config_dir }}/ssl/agra-ca.crt"
+tls_dhparam_path: "{{ nginx_config_dir }}/ssl/dhparam.pem"
 tls_dhparam_bits: 2048
+# ── Dedicated SSL paths PER SERVICE (scalable multi-domain certs) ──
+# "" (empty) = auto-fallback ke global tls_cert_path / tls_key_path di render template & task config.
+tls_grafana_cert_path: ""
+tls_grafana_key_path: ""
+tls_prometheus_cert_path: ""
+tls_prometheus_key_path: ""
+tls_grafana_ca_path: ""
+tls_prometheus_ca_path: ""
 tls_protocols: "TLSv1.2 TLSv1.3"
 tls_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
 tls_prefer_server_ciphers: "on"
@@ -64,6 +59,10 @@ tls_hsts_preload: false
 
 grafana_backend_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}"
 prometheus_backend_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"
+grafana_domain: ""
+prometheus_domain: ""
+_prometheus_expose_effective: "{{ (expose_prometheus_via_nginx | default(false) | bool) or ((prometheus_domain | default('') | trim | length) > 0) }}"
+_grafana_effective_server_names: "{{ ([grafana_domain] if ((grafana_domain | default('') | trim | length) > 0) else []) + ([monitoring_vip] if ((monitoring_vip | default('') | trim | length) > 0) else []) + [inventory_hostname] + ['_'] | unique | join(' ') }}"
 server_name: "{{ monitoring_vip | default(inventory_hostname) }} _"
 nginx_http_port: 80
 nginx_https_port: 443

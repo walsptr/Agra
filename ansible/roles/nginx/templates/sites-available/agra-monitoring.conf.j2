@@ -1,8 +1,12 @@
+{% set _prometheus_domain_trim = (prometheus_domain | default('') | trim) %}
+{% set _prometheus_domain_has = (_prometheus_domain_trim | length > 0) %}
+{% set _http_server_names = _grafana_effective_server_names + ((' ' + _prometheus_domain_trim) if _prometheus_domain_has else '') %}
+
 {% if enable_https | default(true) | bool %}
 server {
     listen {{ nginx_http_port }} default_server;
     listen [::]:{{ nginx_http_port }} default_server;
-    server_name {{ (server_name.split() | join(' ')) }};
+    server_name {{ _http_server_names }};
     return 301 https://$host$request_uri;
 }
 
@@ -10,7 +14,10 @@ server {
     listen {{ nginx_https_port }} ssl default_server;
     listen [::]:{{ nginx_https_port }} ssl default_server;
     http2 on;
-    server_name {{ (server_name.split() | join(' ')) }};
+    server_name {{ _grafana_effective_server_names }};
+
+    ssl_certificate     {{ nginx_config_dir }}/ssl/{{ 'grafana.crt' if ((tls_grafana_cert_path | default('') | trim | length) > 0) else 'agra.crt' }};
+    ssl_certificate_key {{ nginx_config_dir }}/ssl/{{ 'grafana.key' if ((tls_grafana_key_path  | default('') | trim | length) > 0) else 'agra.key' }};
 
     add_header Strict-Transport-Security "max-age={{ tls_hsts_max_age }}{% if tls_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if tls_hsts_preload %}; preload{% endif %}" always;
 
@@ -23,58 +30,14 @@ server {
 server {
     listen {{ nginx_http_port }} default_server;
     listen [::]:{{ nginx_http_port }} default_server;
-    server_name {{ (server_name.split() | join(' ')) }};
+    server_name {{ _grafana_effective_server_names }};
 {% endif %}
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # GRAFANA LIVE WEBSOCKET ENDPOINT (/api/live/) — SPECIFIC PATH DI ATAS ROOT
-    # URUTAN PENTING: location block INI harus DI ATAS location / (greedy root)
-    # Supaya exact path /api/live/ tidak ketangkap location root, dapat priority.
-    # Untuk Grafana Live streaming, Alerting websocket, plugin realtime.
-    # ══════════════════════════════════════════════════════════════════════════
-    location /api/live/ {
-        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400;
-        proxy_buffering off;
+    location = / {
+        return 302 /grafana/;
     }
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # PROMETHEUS UI SUBPATH /prometheus/ — BACKWARD COMPATIBLE, TIDAK DIUBAH
-    # Tetap pakai subpath /prometheus/ (bisa disabled via expose_prometheus_via_nginx)
-    # ══════════════════════════════════════════════════════════════════════════
-    location /prometheus/ {
-{% if expose_prometheus_via_nginx | default(false) | bool %}
-        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/prometheus/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300;
-        proxy_connect_timeout 30;
-{% else %}
-        return 403 "Prometheus UI access DISABLED via agra flag 'expose_prometheus_via_nginx=false'. Set ke true di globals.yml + re-deploy jika ingin expose (PERINGATAN: resiko security, Prometheus default tidak auth)";
-{% endif %}
-    }
-
-    location = /prometheus {
-        return 301 /prometheus/;
-    }
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # GRAFANA ROOT PATH / — PATH UTAMA (SEMUA REQUEST YANG TIDAK MATCH LAINNYA)
-    # Contoh path yang masuk kesini: /login, /dashboard/:id, /api/*,
-    # /public/build/*.js (aset JS/CSS). Semua di-proxy ke backend Grafana.
-    # Breaking change explicit: root path langsung serve aplikasi utama.
-    # ══════════════════════════════════════════════════════════════════════════
-    location / {
+    location /grafana/ {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
@@ -90,4 +53,105 @@ server {
         proxy_send_timeout 300;
         proxy_buffering off;
     }
+
+    location /grafana/api/live/ {
+        proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }
+
+{% if _prometheus_expose_effective and not _prometheus_domain_has %}
+    location /prometheus/ {
+        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/prometheus/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+    }
+
+    location = /prometheus {
+        return 301 /prometheus/;
+    }
+{% else %}
+    location /prometheus/ {
+{% if _prometheus_expose_effective and _prometheus_domain_has %}
+        return 301 https://{{ _prometheus_domain_trim }}$request_uri;
+{% else %}
+        return 403 "Prometheus UI access DISABLED via agra flag 'expose_prometheus_via_nginx=false' and 'prometheus_domain' empty. Set expose_prometheus_via_nginx=true OR isi prometheus_domain di globals.yml + re-deploy jika ingin expose (PERINGATAN: resiko security, Prometheus default tidak auth)";
+{% endif %}
+    }
+
+    location = /prometheus {
+{% if _prometheus_expose_effective and _prometheus_domain_has %}
+        return 301 https://{{ _prometheus_domain_trim }}/;
+{% else %}
+        return 301 /prometheus/;
+{% endif %}
+    }
+{% endif %}
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
 }
+
+{% if enable_https | default(true) | bool and _prometheus_domain_has %}
+server {
+    listen {{ nginx_https_port }} ssl;
+    listen [::]:{{ nginx_https_port }} ssl;
+    http2 on;
+    server_name {{ _prometheus_domain_trim }};
+
+    ssl_certificate     {{ nginx_config_dir }}/ssl/{{ 'prometheus.crt' if ((tls_prometheus_cert_path | default('') | trim | length) > 0) else 'agra.crt' }};
+    ssl_certificate_key {{ nginx_config_dir }}/ssl/{{ 'prometheus.key' if ((tls_prometheus_key_path  | default('') | trim | length) > 0) else 'agra.key' }};
+
+    add_header Strict-Transport-Security "max-age={{ tls_hsts_max_age }}{% if tls_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if tls_hsts_preload %}; preload{% endif %}" always;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location / {
+        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 30;
+        proxy_send_timeout 300;
+        proxy_buffering off;
+    }
+
+    location /api/ {
+        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+    }
+
+    location /graph {
+        proxy_pass {{ (prometheus_backend_url.split() | join('')) }}/graph;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+{% endif %}
