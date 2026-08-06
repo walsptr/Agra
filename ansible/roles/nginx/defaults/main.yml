@@ -18,6 +18,24 @@ nginx_cache_dir: /var/cache/nginx
 nginx_run_dir: /var/run
 nginx_pid_path: /var/run/nginx.pid
 
+# ── Nginx worker process ownership (runtime writable dirs: log & cache) ──
+# User/Group STRING name (untuk directive `user X;` di nginx.conf.j2):
+#  - docker: nginx:nginx (default user di dalam image alpine nginx official)
+#  - native: www-data:www-data (default Ubuntu/Debian nginx package)
+nginx_container_user: "nginx"
+nginx_native_user: "www-data"
+
+# UID / GID NUMERIC for chown task config.yml L17-27 (runtime dirs log cache):
+# Docker nginx:1.27-alpine official image: nginx user/group = UID 101 / GID 101
+#   (verify: docker run --rm nginx:1.27-alpine id nginx → uid=101 gid=101 groups=101)
+# Native Ubuntu/Debian www-data user = UID 33 / GID 33
+# Advanced user bisa override via globals.yml jika UID host beda.
+nginx_uid: "{{ 101 if ((agra_deployment_mode | default('native')) == 'docker') else 33 }}"
+nginx_gid: "{{ 101 if ((agra_deployment_mode | default('native')) == 'docker') else 33 }}"
+
+# Default mode UNTUK RUNTIME WRITABLE dirs (log/cache). 0755 = rwxr-xr-x (user write, group+other read-only). Bisa override 0750 jika paranoid.
+nginx_dir_mode: "0755"
+
 nginx_worker_processes: auto
 nginx_worker_connections: 1024
 nginx_keepalive_timeout: 65

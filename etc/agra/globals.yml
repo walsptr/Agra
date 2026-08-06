@@ -82,6 +82,15 @@ tls_grafana_key_path: ""
 tls_prometheus_cert_path: ""
 tls_prometheus_key_path: ""
 
+# ── Advanced: Nginx worker ownership override (HANYA JIKA custom image/UID host BEDA default) ──
+# Default otomatis compute tergantung deployment_mode:
+#   docker: uid=101, gid=101 (official nginx alpine image user nginx)
+#   native: uid=33,  gid=33  (Ubuntu/Debian www-data user system package)
+# Uncomment DAN ISI HANYA JIKA Anda pakai custom nginx image dengan UID/GID BEDA
+# nginx_uid: 101
+# nginx_gid: 101
+# nginx_dir_mode: "0755"
+
 # 7. Backup & Restore
 backup_destination_type: local
 backup_destination_path: /var/backups/agra

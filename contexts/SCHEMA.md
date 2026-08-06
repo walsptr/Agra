@@ -214,6 +214,9 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `server_name` | string | `{{ monitoring_vip | default(inventory_hostname) }} _` | server_name directive (catch-all dengan `_`) |
 | `nginx_http_port` | int | `80` | Port HTTP |
 | `nginx_https_port` | int | `443` | Port HTTPS |
+| `nginx_uid` | int | `101` (docker) / `33` (native) | UID numeric user nginx worker, untuk chown runtime dirs writable (log/cache). Override di globals.yml jika host UID beda (misal custom build image nginx). |
+| `nginx_gid` | int | `101` (docker) / `33` (native) | GID numeric group nginx worker. |
+| `nginx_dir_mode` | string (octal) | `"0755"` | File mode untuk log/cache runtime writable dirs (default rwxr-xr-x). Valid octal string e.g. `"0750"` untuk restrict group non-writable. |
 
 Catatan: Untuk custom cert CA-signed, taruh `agra.crt`, `agra.key`, opsional `agra-ca.crt` di folder `/etc/agra/config/nginx/ssl/` (di control node sebelum deploy, atau remote di managed host) — config.yml akan otomatis copy ke `/etc/nginx/ssl/` tanpa overwrite self-signed generate.
 
