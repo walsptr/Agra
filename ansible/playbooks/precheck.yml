@@ -220,37 +220,210 @@
       run_once: true
       delegate_to: localhost
 
-    - name: 'Precheck (TOPOLOGI) — FALLBACK DIRECT PARSE /etc/agra/globals.yml (slurp + from_yaml) jika aggregate masih kosong'
+    # ──────────────────────────────────────────────────────────────
+    # UNIVERSAL SINGLE SLURP /etc/agra/globals.yml
+    # HANYA 1 KALI CALL slurp DI SELURUH PRECHECK (optimasi I/O, NFR-2).
+    # MONITORING_VIP fallback separate slurp LAMA DIHAPUS → merge disini.
+    # Ignore_errors = true → YAML invalid globals.yml TIDAK CRASH playbook
+    # (triple safety: vars context | direct parse | default guard layer 1).
+    # ──────────────────────────────────────────────────────────────
+    - name: 'Precheck (GLOBAL DIRECT PARSE) — BLOCK: Universal Single Slurp /etc/agra/globals.yml extract 20 critical vars + aggregate first-found (P1 var ctx / P2 direct parse / P3 default SCHEMA)'
       block:
-        - name: 'Precheck — slurp globals.yml di localhost'
+        # ── TASK 1a: SLURP 1x only (control node localhost) ──
+        - name: 'Precheck DIRECT PARSE 1/4 — slurp /etc/agra/globals.yml (SINGLE I/O READ di seluruh playbook)'
           ansible.builtin.slurp:
             src: "/etc/agra/globals.yml"
-          register: _precheck_globals_slurp
+          register: _precheck_globals_slurp_universal
           delegate_to: localhost
 
-        - name: 'Precheck — extract monitoring_vip dari parsed YAML globals jika fact diatas masih kosong'
-          ansible.builtin.set_fact:
-            _precheck_monitoring_vip: >-
-              {%- set parsed = (_precheck_globals_slurp.content | b64decode | from_yaml) or {} -%}
-              {%- set from_file = parsed.get('monitoring_vip', '') | default('') | trim -%}
-              {%- if from_file | length > 0 and (_precheck_monitoring_vip | default('') | length == 0) -%}
-                {{ from_file }}
-              {%- else -%}
-                {{ _precheck_monitoring_vip | default('') | trim }}
-              {%- endif -%}
+        # ── TASK 1b-0a: PYTHON SAFE PARSE via command module (yaml.safe_load try/except, output JSON) ──
+        #    WHY: Jinja filter `from_yaml` inside set_fact args dievaluasi saat "Finalization of task args"
+        #         (SEBELUM task berjalan), jadi ignore_errors:true TIDAK menangkap YAML error dengan bersih
+        #         (tampilkan "fatal: ... FAILED!" stack trace ke user). Dengan task command python,
+        #         yaml.safe_load dibungkus try/except → selalu output JSON valid → from_json NEVER FAILS,
+        #         dan ignore_errors di task command BISA menyerap error dengan bersih (no fatal output).
+        - name: 'Precheck DIRECT PARSE 2a/4 — python yaml.safe_load /etc/agra/globals.yml try/except error-safe output JSON'
+          ansible.builtin.command:
+            cmd: >-
+              python3 -c "
+              import yaml, json, sys
+              try:
+                  with open('/etc/agra/globals.yml', 'r') as fh:
+                      raw = fh.read()
+                  parsed = yaml.safe_load(raw) if raw.strip() else {}
+                  if not isinstance(parsed, dict):
+                      parsed = {}
+              except Exception:
+                  parsed = {}
+              print(json.dumps(parsed))
+              "
           delegate_to: localhost
+          register: _precheck_globals_pyparse
+          ignore_errors: true
+          changed_when: false
+          failed_when: false
+          check_mode: false
+
+        # ── TASK 1b-0b: SET FACT dari python parse JSON (100% error-safe, JSON selalu valid) ──
+        - name: 'Precheck DIRECT PARSE 2b/4 — set_fact _precheck_globals_parsed_dict dari stdout python parse JSON (fallback empty dict)'
+          ansible.builtin.set_fact:
+            _precheck_globals_parsed_dict: >-
+              {%- set safe_stdout = (_precheck_globals_pyparse.stdout | default('{}')) | string | trim -%}
+              {%- set json_str = '{}' if (safe_stdout | length == 0) else safe_stdout -%}
+              {{ json_str | from_json }}
+          delegate_to: localhost
+
+        # ── TASK 1b: EXTRACT 20 vars _precheck_g_* dari parsed dict ──
+        - name: 'Precheck DIRECT PARSE 3/4 — extract 20 helper _precheck_g_<varname> dari parsed YAML globals.yml (jika key tidak ada → empty string "")'
+          ansible.builtin.set_fact:
+            # 6 Infrastructure vars
+            _precheck_g_agra_deployment_mode:   "{{ _precheck_globals_parsed_dict.get('agra_deployment_mode', '') | default('') | string | trim }}"
+            _precheck_g_enable_https:           "{{ (_precheck_globals_parsed_dict.get('enable_https', None) | default(true)) | bool }}"
+            _precheck_g_tls_enabled:            "{{ (_precheck_globals_parsed_dict.get('tls_enabled', None) | default(true)) | bool }}"
+            _precheck_g_enable_ha_grafana:      "{{ (_precheck_globals_parsed_dict.get('enable_ha_grafana', None) | default(false)) | bool }}"
+            _precheck_g_overwrite_ssl_certs:    "{{ (_precheck_globals_parsed_dict.get('overwrite_ssl_certs', None) | default(false)) | bool }}"
+            _precheck_g_monitoring_vip:         "{{ _precheck_globals_parsed_dict.get('monitoring_vip', '') | default('') | string | trim }}"
+            # 6 Grafana vars
+            _precheck_g_grafana_domain:         "{{ _precheck_globals_parsed_dict.get('grafana_domain', '') | default('') | string | trim }}"
+            _precheck_g_grafana_database:       "{{ _precheck_globals_parsed_dict.get('grafana_database', '') | default('') | string | trim }}"
+            _precheck_g_grafana_database_host:  "{{ _precheck_globals_parsed_dict.get('grafana_database_host', '') | default('') | string | trim }}"
+            _precheck_g_grafana_database_port:  "{{ _precheck_globals_parsed_dict.get('grafana_database_port', 3306) | default(3306) | int }}"
+            _precheck_g_grafana_tag:            "{{ _precheck_globals_parsed_dict.get('grafana_tag', '') | default('') | string | trim }}"
+            _precheck_g_grafana_native_version: "{{ _precheck_globals_parsed_dict.get('grafana_native_version', '') | default('') | string | trim }}"
+            # 3 Prometheus vars
+            _precheck_g_prometheus_domain:         "{{ _precheck_globals_parsed_dict.get('prometheus_domain', '') | default('') | string | trim }}"
+            _precheck_g_prometheus_tag:            "{{ _precheck_globals_parsed_dict.get('prometheus_tag', '') | default('') | string | trim }}"
+            _precheck_g_prometheus_native_version: "{{ _precheck_globals_parsed_dict.get('prometheus_native_version', '') | default('') | string | trim }}"
+            # 2 Node Exporter vars
+            _precheck_g_node_exporter_tag:            "{{ _precheck_globals_parsed_dict.get('node_exporter_tag', '') | default('') | string | trim }}"
+            _precheck_g_node_exporter_native_version: "{{ _precheck_globals_parsed_dict.get('node_exporter_native_version', '') | default('') | string | trim }}"
+            # 2 TLS vars
+            _precheck_g_tls_cert_path: "{{ _precheck_globals_parsed_dict.get('tls_cert_path', '') | default('') | string | trim }}"
+            _precheck_g_tls_key_path:  "{{ _precheck_globals_parsed_dict.get('tls_key_path', '') | default('') | string | trim }}"
+          delegate_to: localhost
+
+        # ── TASK 1c: AGGREGATE FIRST-FOUND 20 vars _precheck_v_* (P1 / P2 / P3) ──
+        - name: 'Precheck DIRECT PARSE 4/4 — FIRST-FOUND AGGREGATE 20 _precheck_v_<varname> = P1 vars context / P2 direct parse globals / P3 fallback default SCHEMA.md. Juga backward compat bridge fact _precheck_monitoring_vip untuk assertion monitoring_vip lama.'
+          ansible.builtin.set_fact:
+            # 6 Infrastructure vars (mode bool)
+            _precheck_v_agra_deployment_mode: >-
+              {%- set p1 = agra_deployment_mode | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_agra_deployment_mode | default('') | string | trim -%}
+              {%- set p3 = 'docker' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_enable_https: >-
+              {%- set p1_raw = enable_https | default(None) -%}
+              {%- set p2_raw = _precheck_g_enable_https | default(None) -%}
+              {%- set p3 = true -%}
+              {%- if p1_raw is not none and (p1_raw | string | length > 0) -%}{{ p1_raw | bool }}{%- elif p2_raw is not none -%}{{ p2_raw | bool }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_tls_enabled: >-
+              {%- set p1_raw = tls_enabled | default(None) -%}
+              {%- set p2_raw = _precheck_g_tls_enabled | default(None) -%}
+              {%- set p3 = true -%}
+              {%- if p1_raw is not none and (p1_raw | string | length > 0) -%}{{ p1_raw | bool }}{%- elif p2_raw is not none -%}{{ p2_raw | bool }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_enable_ha_grafana: >-
+              {%- set p1_raw = enable_ha_grafana | default(None) -%}
+              {%- set p2_raw = _precheck_g_enable_ha_grafana | default(None) -%}
+              {%- set p3 = false -%}
+              {%- if p1_raw is not none and (p1_raw | string | length > 0) -%}{{ p1_raw | bool }}{%- elif p2_raw is not none -%}{{ p2_raw | bool }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_overwrite_ssl_certs: >-
+              {%- set p1_raw = overwrite_ssl_certs | default(None) -%}
+              {%- set p2_raw = _precheck_g_overwrite_ssl_certs | default(None) -%}
+              {%- set p3 = false -%}
+              {%- if p1_raw is not none and (p1_raw | string | length > 0) -%}{{ p1_raw | bool }}{%- elif p2_raw is not none -%}{{ p2_raw | bool }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_monitoring_vip: >-
+              {%- set p1 = monitoring_vip | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_monitoring_vip | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            # BACKWARD COMPAT BRIDGE: assertion monitoring_vip LAMA reference _precheck_monitoring_vip (tanpa _v_) → TETAP WORKS
+            _precheck_monitoring_vip: >-
+              {{ _precheck_v_monitoring_vip | default('') | string | trim }}
+            # 6 Grafana vars
+            _precheck_v_grafana_domain: >-
+              {%- set p1 = grafana_domain | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_grafana_domain | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_grafana_database: >-
+              {%- set p1 = grafana_database | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_grafana_database | default('') | string | trim -%}
+              {%- set p3 = 'sqlite' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_grafana_database_host: >-
+              {%- set p1 = grafana_database_host | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_grafana_database_host | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_grafana_database_port: >-
+              {%- set p1 = grafana_database_port | default(0) | int -%}
+              {%- set p2 = _precheck_g_grafana_database_port | default(0) | int -%}
+              {%- set p3 = 3306 -%}
+              {%- if p1 | int > 0 -%}{{ p1 | int }}{%- elif p2 | int > 0 -%}{{ p2 | int }}{%- else -%}{{ p3 | int }}{%- endif -%}
+            _precheck_v_grafana_tag: >-
+              {%- set p1 = grafana_tag | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_grafana_tag | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_grafana_native_version: >-
+              {%- set p1 = grafana_native_version | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_grafana_native_version | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            # 3 Prometheus vars
+            _precheck_v_prometheus_domain: >-
+              {%- set p1 = prometheus_domain | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_prometheus_domain | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_prometheus_tag: >-
+              {%- set p1 = prometheus_tag | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_prometheus_tag | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_prometheus_native_version: >-
+              {%- set p1 = prometheus_native_version | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_prometheus_native_version | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            # 2 Node Exporter vars
+            _precheck_v_node_exporter_tag: >-
+              {%- set p1 = node_exporter_tag | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_node_exporter_tag | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_node_exporter_native_version: >-
+              {%- set p1 = node_exporter_native_version | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_node_exporter_native_version | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            # 2 TLS vars
+            _precheck_v_tls_cert_path: >-
+              {%- set p1 = tls_cert_path | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_tls_cert_path | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+            _precheck_v_tls_key_path: >-
+              {%- set p1 = tls_key_path | default('') | string | trim -%}
+              {%- set p2 = _precheck_g_tls_key_path | default('') | string | trim -%}
+              {%- set p3 = '' -%}
+              {%- if p1 | length > 0 -%}{{ p1 }}{%- elif p2 | length > 0 -%}{{ p2 }}{%- else -%}{{ p3 }}{%- endif -%}
+          delegate_to: localhost
+      # BLOCK LEVEL ignore_errors + when + run_once:
+      ignore_errors: true
       when:
         - _precheck_etcagra_stat.results[0].stat.exists | default(false) | bool
-        - _precheck_monitoring_vip | default('') | length == 0
       run_once: true
+      delegate_to: localhost
       tags: ['always']
 
     - name: 'Precheck (TOPOLOGI) — Multi-node WAJIB monitoring_vip (validasi via aggregate 4-sumber fact)'
       ansible.builtin.assert:
         that:
-          - _precheck_monitoring_vip | default('') | length > 0
+          - _precheck_v_monitoring_vip | length > 0
         fail_msg: >-
           Multi-node HA: groups['monitoring']={{ groups['monitoring'] | length }} node TAPI monitoring_vip KOSONG.
+          Fact pertama dicari aggregate first-found _precheck_v_monitoring_vip.
           Keepalived HA butuh Virtual IP.
           
           Lokasi config yang dicari (4 SUMBER, first found non-empty):
@@ -275,35 +448,36 @@
     - name: 'Precheck (GRAFANA DB) — Mode DB valid'
       ansible.builtin.assert:
         that:
-          - grafana_database | default('sqlite') in ['sqlite', 'mysql', 'postgresql']
+          - _precheck_v_grafana_database in ['sqlite', 'mysql', 'postgresql']
         fail_msg: >-
-          grafana_database='{{ grafana_database | default("") }}' INVALID.
+          grafana_database='{{ _precheck_v_grafana_database }}' INVALID.
           Hanya 3 mode yang didukung: sqlite (file lokal) | mysql (external) | postgresql (external).
           Perbaiki globals.yml grafana_database ke salah satu dari 3.
+          2 sumber dicari: 1) vars context / include_vars globals.yml 2) direct parse /etc/agra/globals.yml. Cek YAML syntax: python3 -c "import yaml; yaml.safe_load(open('/etc/agra/globals.yml')); print('OK')"
       run_once: true
       delegate_to: localhost
 
     - name: 'Precheck (GRAFANA DB) — External mysql/pg WAJIB host tidak kosong'
       ansible.builtin.assert:
         that:
-          - grafana_database_host | default('') | length > 0
+          - _precheck_v_grafana_database_host | length > 0
         fail_msg: >-
-          grafana_database='{{ grafana_database }}' external TAPI grafana_database_host KOSONG.
+          grafana_database='{{ _precheck_v_grafana_database }}' external TAPI grafana_database_host KOSONG.
           RULES §9: agra TIDAK install DB — user harus sudah punya external DB server.
           Perbaiki set grafana_database_host di globals.yml atau inventory.
       when:
-        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+        - _precheck_v_grafana_database in ['mysql', 'postgresql']
       run_once: true
       delegate_to: localhost
 
     - name: 'Precheck (GRAFANA DB) — Connectivity check ke external DB host port'
       ansible.builtin.wait_for:
-        host: "{{ grafana_database_host | default('') }}"
-        port: "{{ grafana_database_port | default(3306) | int }}"
+        host: "{{ _precheck_v_grafana_database_host }}"
+        port: "{{ _precheck_v_grafana_database_port | int }}"
         state: started
         timeout: 5
       when:
-        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+        - _precheck_v_grafana_database in ['mysql', 'postgresql']
       run_once: true
       delegate_to: localhost
       register: _db_check
@@ -314,11 +488,11 @@
         that:
           - _db_check is not failed
         fail_msg: >-
-          External DB {{ grafana_database | default('') }} di {{ grafana_database_host | default('') }}:{{ grafana_database_port | default(3306) }}
+          External DB {{ _precheck_v_grafana_database }} di {{ _precheck_v_grafana_database_host }}:{{ _precheck_v_grafana_database_port }}
           TIDAK TERCAPAI dalam 5 detik. Grafana tidak akan bisa connect saat deploy.
           Checklist perbaikan: (a) host/port benar, (b) firewall open, (c) service DB hidup.
       when:
-        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+        - _precheck_v_grafana_database in ['mysql', 'postgresql']
         - _db_check is failed
       run_once: true
       delegate_to: localhost
@@ -331,11 +505,11 @@
           Mode docker tapi {{ item.name }}_tag KOSONG.
           Tag wajib untuk reproducible deployment. Set {{ item.name }}_tag di globals.yml.
       loop:
-        - { name: 'prometheus', tag: "{{ prometheus_tag | default('') }}" }
-        - { name: 'grafana', tag: "{{ grafana_tag | default('') }}" }
-        - { name: 'node_exporter', tag: "{{ node_exporter_tag | default('') }}" }
+        - { name: 'prometheus', tag: "{{ _precheck_v_prometheus_tag }}" }
+        - { name: 'grafana', tag: "{{ _precheck_v_grafana_tag }}" }
+        - { name: 'node_exporter', tag: "{{ _precheck_v_node_exporter_tag }}" }
       when:
-        - (agra_deployment_mode | default('docker')) == 'docker'
+        - _precheck_v_agra_deployment_mode == 'docker'
       run_once: true
       delegate_to: localhost
 
@@ -348,11 +522,11 @@
           Perlu spesifikasi versi untuk pin reproducible install native OS package.
           Set {{ item.name }}_native_version di globals.yml.
       loop:
-        - { name: 'prometheus', ver: "{{ prometheus_native_version | default('') }}" }
-        - { name: 'grafana', ver: "{{ grafana_native_version | default('') }}" }
-        - { name: 'node_exporter', ver: "{{ node_exporter_native_version | default('') }}" }
+        - { name: 'prometheus', ver: "{{ _precheck_v_prometheus_native_version }}" }
+        - { name: 'grafana', ver: "{{ _precheck_v_grafana_native_version }}" }
+        - { name: 'node_exporter', ver: "{{ _precheck_v_node_exporter_native_version }}" }
       when:
-        - (agra_deployment_mode | default('')) == 'native'
+        - _precheck_v_agra_deployment_mode == 'native'
       run_once: true
       delegate_to: localhost
 
@@ -360,11 +534,11 @@
       block:
         - name: 'Precheck TLS — Stat cert file'
           ansible.builtin.stat:
-            path: "{{ tls_cert_path | default('') }}"
+            path: "{{ _precheck_v_tls_cert_path }}"
           register: _cert_stat
         - name: 'Precheck TLS — Hitung days remaining via openssl x509'
           ansible.builtin.command: >-
-            openssl x509 -in {{ tls_cert_path | default('') }} -noout -enddate
+            openssl x509 -in {{ _precheck_v_tls_cert_path }} -noout -enddate
           register: _cert_end
           changed_when: false
           failed_when: false
@@ -372,7 +546,7 @@
         - name: 'Precheck TLS — WARNING kalau remaining < 30 hari'
           ansible.builtin.debug:
             msg: >-
-              ⚠️ PERINGATAN: TLS cert {{ tls_cert_path | default('') }} akan EXPIRED DALAM < 30 HARI
+              ⚠️ PERINGATAN: TLS cert {{ _precheck_v_tls_cert_path }} akan EXPIRED DALAM < 30 HARI
               (enddate={{ _cert_end.stdout | default('N/A') }}). Jalankan `agra tls regenerate` untuk
               generate cert self-signed baru (DESIGN §6, Task 13).
           when:
@@ -380,17 +554,17 @@
             - _cert_end.rc == 0
             - (('notAfter=' in _cert_end.stdout) or ('notAfter' in _cert_end.stdout))
       when:
-        - enable_https | default(true) | bool
-        - tls_cert_path | default('') | length > 0
+        - _precheck_v_enable_https | bool
+        - _precheck_v_tls_cert_path | length > 0
       ignore_errors: true
 
 
     - name: 'Precheck (DEPLOYMENT MODE) — Mode docker/native valid'
       ansible.builtin.assert:
         that:
-          - (agra_deployment_mode | default('__unset__')) in ['docker', 'native']
+          - _precheck_v_agra_deployment_mode in ['docker', 'native']
         fail_msg: >-
-          agra_deployment_mode='{{ agra_deployment_mode | default('') }}' INVALID.
+          agra_deployment_mode='{{ _precheck_v_agra_deployment_mode }}' INVALID.
           Hanya support: 'docker' (default) atau 'native' (systemd).
           Perbaiki globals.yml atau set via CLI env AGRA_DEPLOYMENT_MODE.
       run_once: true
@@ -401,7 +575,7 @@
         msg:
           - "✅ AGRA PRECHECK PASSED"
           - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | default([]) | length }} node_exporter target(s)"
-          - "Deployment mode: {{ agra_deployment_mode | default('docker') }}"
-          - "Grafana database: {{ grafana_database | default('sqlite') }}"
-          - "HA: enable_ha_grafana={{ enable_ha_grafana | default(false) }}; keepalived={{ groups['monitoring'] | length > 1 }}"
+          - "Deployment mode: {{ _precheck_v_agra_deployment_mode }}"
+          - "Grafana database: {{ _precheck_v_grafana_database }}"
+          - "HA: enable_ha_grafana={{ _precheck_v_enable_ha_grafana }}; keepalived={{ groups['monitoring'] | length > 1 }}"
       run_once: true
