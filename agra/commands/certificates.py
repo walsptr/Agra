@@ -94,6 +94,72 @@ def _detect_sudo_capable() -> Tuple[bool, str]:
         return False, f"Kesalahan detect sudo: {str(e)[:200]}"
 
 
+def _ensure_running_as_root() -> int:
+    """CRITICAL GUARD: PASTIKAN SELURUH PROCESS INI BERJALAN SEBAGAI ROOT (EUID 0).
+    Alasan: SELURUH native Python filesystem calls (Path.exists/stat/mkdir/os.chmod)
+    butuh akses ke /etc/agra yang root-owned 0750 ssl dir; wrapper sudo HANYA di
+    subprocess tidak bisa meng-elevate native Python stat calls.
+    Strategi:
+      (a) SUDAH ROOT → return 0.
+      (b) BELUM ROOT tapi sudo passwordless CAPABLE → RE-EXECUTE SELURUH PROCESS DENGAN
+          SUDO via os.execvp() (REPLACE process ini dengan sudo python/m ...).
+          Setelah re-exec semua Python native call RUN AS ROOT = TANPA EACCES Errno 13 Permission denied.
+      (c) BELUM ROOT & SUDO TIDAK CAPABLE → RED BOX ERROR user-friendly minta user
+          jalankan SECARA EKSPLISIT dengan SUDO: `sudo agra certificates ...`
+          Return RC=3, JANGAN SAMPAI Traceback Python mentah muncul di user face.
+    """
+    if _is_root():
+        return 0
+    capable, fail_reason = _detect_sudo_capable()
+    if capable:
+        info(f"{YELLOW}Auto-elevate ke root via passwordless sudo... (re-exec process dengan sudo){RESET}")
+        debug(f"sys.executable = {sys.executable}")
+        debug(f"sys.argv = {sys.argv}")
+        argv0_abs = str(Path(sys.argv[0]).resolve())
+        is_python_entry = False
+        if re.search(r'(python|pypy)[2-3]?\d*$', Path(argv0_abs).name, re.IGNORECASE) is not None:
+            is_python_entry = True
+        if is_python_entry:
+            exec_args = ["sudo", "-n", sys.executable] + list(sys.argv[1:])
+        else:
+            exec_args = ["sudo", "-n", argv0_abs] + list(sys.argv[1:])
+        debug(f"Re-exec via os.execvp: args = {exec_args}")
+        try:
+            os.execvp("sudo", exec_args)
+        except OSError as exc:
+            error(f"Gagal auto-elevate sudo exec: {exc}")
+            return 1
+        return 0
+    box_w = 78
+    print()
+    print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+    print(f"{RED}{BOLD}✗ CRITICAL: Command ini BUTUH PRIVILEGE ROOT untuk tulis/baca di /etc/agra (root-owned dirs).{RESET}")
+    print()
+    print(f"{YELLOW}{BOLD}  Alasan script Python native tidak bisa auto-elevate filesystem call:{RESET}")
+    print(f"    {GRAY}- {fail_reason}{RESET}")
+    print(f"    {GRAY}- (Wrapper sudo hanya berlaku ke SUBPROCESS openssl/mkdir; Python native stat/exists/mkdir{RESET}")
+    print(f"    {GRAY}  butuh EUID=0 atau /etc/agra/ssl permission di-reduce, TAPI KITA TIDAK reduce permission{RESET}")
+    print(f"    {GRAY}  karena private key 0600 harus root-owned untuk keamanan ssl.){RESET}")
+    print()
+    print(f"{GREEN}{BOLD}  SOLUSI (PILIH SALAH SATU, PALING MUDAH = SOLUSI 1):{RESET}")
+    print(f"    {BOLD}SOLUSI 1 [REKOMENDASI PALING SIMPLE]: Jalankan SECARA EKSPLISIT DENGAN SUDO:{RESET}")
+    print(f"      $ sudo agra certificates generate"
+          f"{' --include-dhparam' if ('dhparam' in ' '.join(sys.argv[1:]) or '--include-dhparam' in sys.argv[1:]) else ''} [--force]")
+    print(f"    {BOLD}SOLUSI 2 [Passwordless permanent, untuk CI/automation]:{RESET}")
+    print(f"      Tambahkan line ini ke /etc/sudoers.d/agra (root):")
+    print(f"        {GRAY}{os.environ.get('USER', '<your-user>')} ALL=(ALL) NOPASSWD: ALL{RESET}")
+    print(f"      (Atau lebih restrict hanya untuk command agra:)")
+    print(f"        {GRAY}{os.environ.get('USER', '<your-user>')} ALL=(ALL) NOPASSWD: {Path(sys.argv[0]).resolve()}{RESET}")
+    print(f"    {BOLD}SOLUSI 3 [Login root via su, kemudian run]:{RESET}")
+    print(f"      $ su -c \"agra certificates generate --include-dhparam\"")
+    print()
+    print(f"{GRAY}  Info: /etc/agra/ssl 0750 owner root:root adalah POLICY BY DESIGN untuk melindungi{RESET}")
+    print(f"        private key SSL (mode 0600, TIDAK BOLEH di-read user biasa.){RESET}")
+    print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+    print()
+    return 3
+
+
 def _run_cmd(args_list: List[str], *, use_root: bool = True,
              check_stderr: bool = False, timeout_s: int = 180) -> Tuple[int, str, str]:
     """Menjalankan shell command, OTOMATIS PREFIX SUDO jika use_root=True DAN user BUKAN root.
@@ -258,6 +324,9 @@ def _resolve_cn(args: argparse.Namespace, g: Dict[str, Any]) -> str:
 
 def cmd_generate(args: argparse.Namespace) -> int:
     section("agra certificates generate — Self-Signed RSA 2048 + x509")
+    rc_need_root = _ensure_running_as_root()
+    if rc_need_root != 0:
+        return rc_need_root
     rc_req = _require_globals_yml()
     if rc_req != 0: return rc_req
     g = load_globals_yaml()
@@ -375,6 +444,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     section("agra certificates info — Certificate Information")
+    rc_need_root = _ensure_running_as_root()
+    if rc_need_root != 0:
+        return rc_need_root
     rc_req = _require_globals_yml()
     if rc_req != 0: return rc_req
     ec = getattr(args, "cert_path", None)
