@@ -181,7 +181,7 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `nginx_worker_connections` | int | `1024` | Max connections per worker |
 | `nginx_keepalive_timeout` | int | `65` | Keepalive timeout detik |
 | `nginx_client_max_body_size` | string | `25m` | Max upload body size |
-| `tls_self_signed_generate` | bool | `true` | Auto-generate self-signed cert jika custom cert tidak ada |
+| `tls_self_signed_generate` | bool | `false` | ⚠️ LEGACY, DO NOT MODIFY. Inline managed-host generate SSL DITONGAK TOTAL sejak v0.1.0+. Generate self-signed via CLI `agra certificates generate` pre-deploy, atau set `tls_cert_path` / `tls_key_path` untuk custom CA/LetsEncrypt di /etc/agra/globals.yml. |
 | `tls_self_signed_cn` | string | `{{ monitoring_vip | default(inventory_hostname) }}` | Common Name self-signed cert |
 | `tls_self_signed_days_valid` | int | `3650` | Masa berlaku self-signed cert (10 tahun) |
 | `tls_self_signed_country` | string | `ID` | Subject C (Country) cert |

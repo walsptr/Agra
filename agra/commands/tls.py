@@ -1,7 +1,7 @@
 """agra tls — subcommands regenerate & info/check.
 
 tls regenerate = Hapus self-signed cert default (trigger creates guard idempotent),
-                 lalu re-run deploy --tags nginx dengan tls_self_signed_generate=true.
+                 lalu generate via `agra certificates generate --force` dan copy via deploy --tags nginx (TANPA inline managed-host generate).
                  SAFETY: custom cert (user-provided) TIDAK boleh di-regenerate otomatis.
 
 tls info / check = Pure Python panggil openssl CLI, parse & print detail cert
@@ -223,13 +223,16 @@ def cmd_regenerate(args: argparse.Namespace) -> int:
     elif rc_del == 130:
         return 130
 
-    section("RUN: deploy playbook dengan tags=nginx + extra_vars tls_self_signed_generate=true")
-    info("Extra var tls_self_signed_generate=true memastikan block self-signed di role nginx AKTIF (creates: tidak ada → regenerate baru).")
-    info("Hanya role nginx yang di-re-run (idempotent creates guard → TRIGGER regenerate).")
-
-    extra_vars: Dict[str, Any] = {
-        "tls_self_signed_generate": True,
-    }
+    section("RUN: regenerate cert via `agra certificates generate --force` (CONTROL NODE ONLY, konsisten multi-node)")
+    info("Generate di control node → Default Source copy ke SEMUA managed-host via deploy --tags nginx (NO inline generate).")
+    cert_cmd = [sys.executable, "-m", "agra", "certificates", "generate", "--force"]
+    if getattr(args, "include_dhparam", False):
+        cert_cmd.append("--include-dhparam")
+    rc_cert = subprocess.call(cert_cmd)
+    if rc_cert != 0:
+        error(f"agra certificates generate --force GAGAL (rc={rc_cert}). Hentikan.")
+        return rc_cert
+    info("Cert control-node regenerate SUKSES. Lanjut copy via deploy --tags nginx ...")
 
     rc_pb = run_playbook(
         "deploy",
@@ -237,10 +240,9 @@ def cmd_regenerate(args: argparse.Namespace) -> int:
         tags=["nginx"],
         skip_tags=None,
         limit=getattr(args, "limit", None),
-        extra_vars=extra_vars,
         extra_vars_raw=getattr(args, "extra_vars", None) or None,
         verbosity=getattr(args, "verbose", 0),
-        description="Re-run deploy playbook TAGS=nginx SAJA (self-signed cert regenerate via creates guard idempotent)",
+        description="Re-run deploy playbook TAGS=nginx SAJA (copy cert baru control-node → managed-host).",
         abort_on_nonzero=False,
     )
 

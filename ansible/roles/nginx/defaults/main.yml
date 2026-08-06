@@ -41,13 +41,14 @@ nginx_worker_connections: 1024
 nginx_keepalive_timeout: 65
 nginx_client_max_body_size: 25m
 
-# AUTO GENERATE SSL INLINE MANAGED-HOST SAAT DEPLOY: TIDAK DIREKOMENDASIKAN DEFAULT.
-# Generate SSL SEHARUSNYA dijalankan via PRE-DEPLOY COMMAND `agra certificates generate`
-# di control node (HANYA di control node, disimpan ke /etc/agra/ssl → copy otomatis).
-# Advanced user BISA ENABLE INLINE LAGI via extra_vars deploy (TIDAK permanen di globals
-# agar user tidak sembarangan set true, karena inline managed-host cert TIDAK konsisten
-# antar node di multi-node HA):
-#   ansible-playbook ... --extra-vars tls_self_signed_generate=true
+# ⚠️ WARNING (JANGAN DIUBAH): Auto generate ssl inline managed-host DITONGAK TOTAL.
+# Generate SSL HANYA via 2 CARA (TIDAK ADA FALLBACK LAIN):
+#   1. [DIREKOMENDASIKAN Self-Signed Internal]:
+#      $ agra certificates generate --include-dhparam
+#   2. [Custom CA / LetsEncrypt]:
+#      Set tls_cert_path / tls_key_path di /etc/agra/globals.yml
+# Default SELALU false. JANGAN di-set true (tidak ada logic block generate lagi di
+# role nginx → true tidak ada efek, tapi dibiarkan false agar backward compat parsers.)
 tls_self_signed_generate: false
 tls_self_signed_cn: "{{ monitoring_vip | default(inventory_hostname) }}"
 tls_self_signed_days_valid: 3650

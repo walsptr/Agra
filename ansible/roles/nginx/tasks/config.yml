@@ -184,11 +184,14 @@
           │     {{ nginx_config_dir }}/ssl/agra.crt  ← cert PEM (public)                     │
           │     {{ nginx_config_dir }}/ssl/agra.key  ← private key PEM (secret, 0600)        │
           │                                                                                  │
-          │   KENAPA TERJADI? 2 Penyebab:                                                    │
+          │   KENAPA TERJADI? 3 Penyebab:                                                    │
           │   1. LUPA generate self-signed via PRE-DEPLOY CLI `agra certificates generate`   │
           │      di control node (belum ada file di /etc/agra/ssl/ → tidak ke-copy).         │
           │   2. LUPA set `tls_cert_path` di globals.yml untuk custom CA-signed /            │
           │      LetsEncrypt (cert user di path lain tapi tidak diberitahu ke role).         │
+          │   3. Upgrade dari versi lama yang masih mengandalkan inline generate managed-host│
+          │      (fitur DITONGAK TOTAL sejak v0.1.0+). Gunakan command CLI                  │
+          │      `agra certificates generate`.                                               │
           │                                                                                  │
           │   SOLUSI (PILIH SALAH SATU, URUTAN SESUAI PRIORITAS):                            │
           │   ┌────────────────────────────────────────────────────────────────────────────┐ │
@@ -215,17 +218,6 @@
           │   │         tls_prometheus_key_path:   "/etc/letsencrypt/live/prom.example.com/privkey.pem"     │ │
           │   │   2d. Re-deploy: agra deploy -i inventory.ini → custom cert di-copy       │ │
           │   │       otomatis via block copy custom / dedicated.                          │ │
-          │   ├────────────────────────────────────────────────────────────────────────────┤ │
-          │   │ SOLUSI 3 [ADVANCED, INLINE MANAGED-HOST (TIDAK DIREKOMENDASIKAN UNTUK      │ │
-          │   │            MULTI-NODE)]:                                                   │ │
-          │   │   JIKA user BENAR-BENAR ingin mengembalikan OLD BEHAVIOR generate inline  │ │
-          │   │   managed-host per-node (self-signed per-node, CN/SAN TIDAK konsisten di  │ │
-          │   │   HA), jalankan deploy dengan EXTRA VARS TEMPORER (JANGAN set permanen di │ │
-          │   │   globals.yml agar tidak diwariskan ke node lain tanpa sengaja):           │ │
-          │   │     $ agra deploy -i inventory.ini --extra-vars tls_self_signed_generate=true│ │
-          │   │   Catatan: dhparam TIDAK DI-generate inline. Untuk dhparam tetap via       │ │
-          │   │   `agra certificates generate --include-dhparam` pre-deploy ATAU user      │ │
-          │   │   generate secara manual dan copy ke tls_dhparam_path.                     │ │
           │   └────────────────────────────────────────────────────────────────────────────┘ │
           └─────────────────────────────────────────────────────────────────────────────────┘
       when: _final_ssl_stat.results | selectattr('stat.exists', 'equalto', false) | list | length > 0

@@ -22,7 +22,13 @@ Untuk mode native, gunakan flag yang setara dengan suffix `--grafana-native-vers
 
 ---
 
-## Q2: Saya punya sertifikat TLS CA-signed dari Let's Encrypt / Digicert / Internal CA. Bagaimana cara menggunakannya, bukan self-signed?
+## Q2: Bagaimana generate SSL cert?
+
+**Jawaban:** HANYA via 2 cara: self-signed via `agra certificates generate --include-dhparam` di control node, ATAU set variabel tls_cert_path / tls_key_path di /etc/agra/globals.yml untuk custom CA/LetsEncrypt.
+
+---
+
+## Q3: Saya punya sertifikat TLS CA-signed dari Let's Encrypt / Digicert / Internal CA. Bagaimana cara menggunakannya, bukan self-signed?
 
 **Jawaban:**
 
@@ -35,10 +41,9 @@ cp /path/to/your/privkey.pem etc/agra/config/nginx/ssl/agra.key
 chmod 0600 etc/agra/config/nginx/ssl/agra.key
 ```
 
-2. Di `etc/agra/globals.yml`, set agar tidak generate self-signed dan arahkan ke path override:
+2. Di `etc/agra/globals.yml`, arahkan ke path cert:
 
 ```yaml
-tls_self_signed_generate: false
 tls_cert_path: /etc/nginx/ssl/agra.crt
 tls_key_path: /etc/nginx/ssl/agra.key
 ```
@@ -53,7 +58,7 @@ Opsional: jika Anda juga butuh CA Chain / DHParam tambahan, taruh di folder yang
 
 ---
 
-## Q3: Ingin menambah host baru untuk monitoring node_exporter saja (misal server aplikasi / database). Apakah harus menambahkannya ke grup `monitoring`?
+## Q4: Ingin menambah host baru untuk monitoring node_exporter saja (misal server aplikasi / database). Apakah harus menambahkannya ke grup `monitoring`?
 
 **Jawaban: TIDAK PERLU.** Host aplikasi/database yang hanya dipasangi node_exporter harus dimasukkan ke grup **`node_exporter`** secara terpisah, BUKAN ke grup `monitoring` (grup monitoring = tempat co-located Grafana + Prometheus + Nginx + Keepalived).
 
@@ -87,7 +92,7 @@ agra deploy -i inventory/multinode -t node_exporter -l app1,app2,db1
 
 ---
 
-## Q4: Keepalived VIP tidak mau muncul / stuck di state BACKUP semua. Apa yang harus dicek urut?
+## Q5: Keepalived VIP tidak mau muncul / stuck di state BACKUP semua. Apa yang harus dicek urut?
 
 **Jawaban:** Cek berurutan dari yang paling umum:
 
@@ -122,7 +127,7 @@ ip a | grep -A 2 "10.0.0.100"
 
 ---
 
-## Q5: Bagaimana jika saya lupa password admin Grafana / ingin reset semua password?
+## Q6: Bagaimana jika saya lupa password admin Grafana / ingin reset semua password?
 
 **Jawaban:** Jalankan `agra genpwd --force` untuk generate ulang SEMUA 6 password di `passwords.yml`. Peringatan: Ini AKAN MENIMPA passwords.yml LAMA. Password admin Grafana dan secret key Grafana AKAN BERUBAH. Setelah itu jalankan re-deploy agar credential baru terinject ke semua service.
 
@@ -145,7 +150,7 @@ agra deploy -i inventory/all-in-one
 
 ---
 
-## Q6: Error "restore manifest not found" saat menjalankan `agra restore -n <nama-backup>`. Kenapa dan solusi?
+## Q7: Error "restore manifest not found" saat menjalankan `agra restore -n <nama-backup>`. Kenapa dan solusi?
 
 **Jawaban:** Error itu terjadi karena:
 1. Nama backup yang Anda panggil dengan `-n` tidak ada di daftar backup, ATAU
@@ -170,7 +175,7 @@ agra restore -f /home/syawal/downloads/agra-backup-exported.tar.gz --yes-i-reall
 
 ---
 
-## Q7: Upgrade gagal di tengah jalan (max_fail_percentage:0 trigger abort) — sebagian node sudah upgrade, sebagian belum. Apa yang harus dilakukan?
+## Q8: Upgrade gagal di tengah jalan (max_fail_percentage:0 trigger abort) — sebagian node sudah upgrade, sebagian belum. Apa yang harus dilakukan?
 
 **Jawaban:** Rolling upgrade agra sengaja didesain `serial:1` + `max_fail_percentage:0` untuk fail-fast (jika satu node gagal, seluruh playbook abort) agar tidak terjadi "split version" yang lebih luas. Berikut urutan recovery:
 
@@ -197,7 +202,7 @@ agra rollback -i inventory/multinode \
 
 ---
 
-## Q8: `agra_deployment_mode` pilih `docker` atau `native`? Apa tradeoff-nya?
+## Q9: `agra_deployment_mode` pilih `docker` atau `native`? Apa tradeoff-nya?
 
 **Jawaban — Tabel perbandingan cepat:**
 
@@ -213,7 +218,7 @@ agra rollback -i inventory/multinode \
 
 ---
 
-## Q9: Restore Prometheus TSDB corrupt / error WAL checksum failure. Apa penyebab dan solusi pencegahan?
+## Q10: Restore Prometheus TSDB corrupt / error WAL checksum failure. Apa penyebab dan solusi pencegahan?
 
 **Jawaban:**
 

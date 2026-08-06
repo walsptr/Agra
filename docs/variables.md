@@ -194,7 +194,7 @@ Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optiona
 | `nginx_worker_connections` | int | `1024` | Max koneksi simultan per worker process |
 | `nginx_keepalive_timeout` | int | `65` | Keepalive timeout dalam detik |
 | `nginx_client_max_body_size` | string | `25m` | Max ukuran request body (untuk upload dashboard, dll) |
-| `tls_self_signed_generate` | bool | `true` | Auto-generate self-signed cert jika custom cert tidak ada (dengan `creates:` guard → idempotent) |
+| `tls_self_signed_generate` | bool | `false` | ⚠️ DO NOT MODIFY. Inline managed-host generate DITONGAK TOTAL. Gunakan CLI `agra certificates generate` atau set tls_cert_path custom di globals. |
 | `tls_self_signed_cn` | string | computed | Common Name cert: `monitoring_vip` jika ada, else `inventory_hostname` |
 | `tls_self_signed_days_valid` | int | `3650` | Masa berlaku self-signed cert (default 10 tahun) |
 | `tls_self_signed_country` | string | `ID` | Subject C (Country) |

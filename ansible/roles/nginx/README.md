@@ -12,7 +12,7 @@ Deploy Nginx sebagai reverse proxy frontend untuk Grafana (path `/` atau `/grafa
 | `enable_https` | `true` | Aktifkan HTTPS port 443; HTTP 80 redirect permanen 301 ke HTTPS |
 | `nginx_tag` | `1.27-alpine` | Docker image tag (hanya jika mode docker; default nginx pakai native) |
 | `expose_prometheus_via_nginx` | `false` | Expose Prometheus UI di `/prometheus/`. Default `false` = return 403 (Prometheus default TANPA auth) |
-| `tls_self_signed_generate` | `true` | Auto-generate self-signed cert jika custom cert tidak ada (creates guard — idempotent) |
+| `tls_self_signed_generate` | `false` | ⚠️ DO NOT MODIFY. Inline generate ditongak. Pakai `agra certificates generate` atau set tls_cert_path. |
 | `tls_self_signed_cn` | computed | Common Name cert: `monitoring_vip` atau `inventory_hostname` |
 | `tls_self_signed_days_valid` | `3650` | Masa berlaku self-signed cert (10 tahun default) |
 | `nginx_http_port` | `80` | Port HTTP listener |
