@@ -17,3 +17,6 @@ sudo chmod 0750 /etc/agra/ssl
 [ -f /etc/agra/globals.yml ]   || sudo cp -n ./etc/agra/globals.yml   /etc/agra/globals.yml
 [ -f /etc/agra/passwords.yml ] || sudo cp -n ./etc/agra/passwords.yml /etc/agra/passwords.yml 2>/dev/null || true
 [ -d /etc/agra/config ]        || sudo cp -rn ./etc/agra/config/*     /etc/agra/config/ 2>/dev/null || true
+
+sudo chown -R $USER:$USER /etc/agra
+echo "Installation done."
