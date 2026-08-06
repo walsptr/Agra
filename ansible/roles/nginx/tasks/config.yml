@@ -39,78 +39,6 @@
   ignore_errors: true
   tags: ['nginx', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
 
-- name: Nginx (SSL) - Build self-signed cert+key
-  block:
-    - name: Nginx (SSL) - Set subject_alt_name list
-      ansible.builtin.set_fact:
-        _nginx_san_list: >-
-          {{
-            ['DNS:' + tls_self_signed_cn,
-              'DNS:localhost',
-              'IP:127.0.0.1']
-            + (['IP:' + monitoring_vip] if (monitoring_vip is defined and monitoring_vip | length > 0 else []))
-            + (['DNS:' + prometheus_domain | trim] if ((prometheus_domain | default('') | trim | length) > 0) else [])
-            + (['DNS:' + grafana_domain | trim] if ((grafana_domain | default('') | trim | length) > 0) else [])
-          }}
-
-    - name: Nginx (SSL) - Generate 2048-bit RSA private key (bare shell openssl genrsa, creates guard)
-      ansible.builtin.shell:
-        cmd: |
-          openssl genrsa -out "{{ tls_key_path }}" 2048 2>/dev/null
-          chmod 0600 "{{ tls_key_path }}"
-          echo "CHANGED: RSA 2048 private key generated"
-      args:
-        creates: "{{ tls_key_path }}"
-        executable: /bin/bash
-      register: _ssl_key
-      changed_when: _ssl_key.rc is defined
-
-    - name: Nginx (SSL) - Generate self-signed certificate (bare shell openssl req x509, creates guard)
-      ansible.builtin.shell:
-        cmd: |
-          set -e
-          KEY_PATH="{{ tls_key_path }}"
-          CRT_PATH="{{ tls_cert_path }}"
-          DAYS="{{ tls_self_signed_days_valid }}"
-          CN="{{ tls_self_signed_cn }}"
-          C="{{ tls_self_signed_country }}"
-          ST="{{ tls_self_signed_state }}"
-          L="{{ tls_self_signed_locality }}"
-          O="{{ tls_self_signed_organization }}"
-          OU="{{ tls_self_signed_organizational_unit }}"
-          SAN="{{ _nginx_san_list | join(',') }}"
-          SUBJ="/C=${C}/ST=${ST}/L=${L}/O=${O}/OU=${OU}/CN=${CN}"
-          openssl req -new -x509 -sha256 -nodes \
-            -days "${DAYS}" \
-            -key "${KEY_PATH}" \
-            -out "${CRT_PATH}" \
-            -subj "${SUBJ}" \
-            -addext "subjectAltName=${SAN}" 2>/dev/null
-          chmod 0644 "${CRT_PATH}"
-          echo "CHANGED: self-signed x509 cert generated, CN=${CN}, days=${DAYS}"
-      args:
-        creates: "{{ tls_cert_path }}"
-        executable: /bin/bash
-      register: _ssl_cert
-      changed_when: _ssl_cert.rc is defined
-  when:
-    - enable_https | default(true) | bool
-    - tls_self_signed_generate | default(true) | bool
-    - "(nginx_config_dir ~ '/ssl/agra.crt' is not exists) or (nginx_config_dir ~ '/ssl/agra.key' is not exists)"
-  tags: ['nginx', 'config', 'ssl']
-
-- name: "Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)"
-  ansible.builtin.command:
-    cmd: "openssl dhparam -out {{ tls_dhparam_path }} {{ tls_dhparam_bits | int }}"
-    creates: "{{ tls_dhparam_path }}"
-  environment:
-    RANDFILE: /tmp/.rnd
-  async: 300
-  poll: 10
-  when: enable_https | default(true) | bool
-  ignore_errors: true
-  tags: ['nginx', 'config', 'ssl']
-
 - name: Nginx (SSL Default Source) - Copy default output cert CONTROL-NODE /etc/agra/ssl/ KE managed-host /etc/nginx/ssl/ (PRIMARY OUTPUT `agra certificates generate`)
   block:
     - name: Nginx (SSL Default Source) - Stat default source cert files di CONTROL NODE /etc/agra/ssl/
@@ -250,32 +178,55 @@
       ansible.builtin.fail:
         msg: |
           ┌─────────────────────────────────────────────────────────────────────────────────┐
-          │ ✗ CRITICAL: SSL Certificate + Private key TIDAK DITEMUKAN di managed-host.        │
-          │   Path target yang harus ada:                                                     │
-          │     {{ nginx_config_dir }}/ssl/agra.crt  ← cert PEM (public)                      │
-          │     {{ nginx_config_dir }}/ssl/agra.key  ← private key PEM (secret, 0600)         │
-          │                                                                                   │
-          │   KENAPA TERJADI? 3 Kemungkinan:                                                  │
-          │   1. `agra certificates generate` BELUM dijalankan di control node               │
-          │   2. Custom cert user BELUM dicopy ke /etc/agra/config/nginx/ssl/                 │
-          │   3. `tls_self_signed_generate: false` di globals tapi tidak ada cert apa pun     │
-          │                                                                                   │
-          │   SOLUSI (PILIH SALAH SATU):                                                      │
-          │   ┌─────────────────────────────────────────────────────────────────────────────┐ │
-          │   │ SOLUSI 1 (DIREKOMENDASIKAN): Pre-generate SSL control node sebelum deploy   │ │
-          │   │   $ sudo mkdir -p /etc/agra/ssl && sudo chmod 0750 /etc/agra/ssl            │ │
-          │   │   $ agra certificates generate --include-dhparam                             │ │
-          │   │   # Jalankan ulang deploy: $ agra deploy -i inventory.ini                   │ │
-          │   ├─────────────────────────────────────────────────────────────────────────────┤ │
-          │   │ SOLUSI 2 (Custom CA-signed / LetsEncrypt): Copy custom cert ke folder       │ │
-          │   │   override /etc/agra/config/nginx/ssl/ (nama file WAJIB agra.crt/agra.key)  │ │
-          │   │   $ sudo cp fullchain.pem /etc/agra/config/nginx/ssl/agra.crt               │ │
-          │   │   $ sudo cp privkey.pem   /etc/agra/config/nginx/ssl/agra.key               │ │
-          │   │   $ sudo chmod 0600 /etc/agra/config/nginx/ssl/agra.key                     │ │
-          │   ├─────────────────────────────────────────────────────────────────────────────┤ │
-          │   │ SOLUSI 3 (Auto self-signed inline managed-host): Pastikan variabel          │ │
-          │   │   `tls_self_signed_generate: true` di globals.yml (DEFAULT true, biarkan).  │ │
-          │   └─────────────────────────────────────────────────────────────────────────────┘ │
+          │ ✗ SSL cert TIDAK DIAUTO-GENERATE saat deploy (new default workflow).             │
+          │   CRITICAL: SSL Certificate + Private key TIDAK DITEMUKAN di managed-host.       │
+          │   Path target yang harus ada:                                                    │
+          │     {{ nginx_config_dir }}/ssl/agra.crt  ← cert PEM (public)                     │
+          │     {{ nginx_config_dir }}/ssl/agra.key  ← private key PEM (secret, 0600)        │
+          │                                                                                  │
+          │   KENAPA TERJADI? 2 Penyebab:                                                    │
+          │   1. LUPA generate self-signed via PRE-DEPLOY CLI `agra certificates generate`   │
+          │      di control node (belum ada file di /etc/agra/ssl/ → tidak ke-copy).         │
+          │   2. LUPA set `tls_cert_path` di globals.yml untuk custom CA-signed /            │
+          │      LetsEncrypt (cert user di path lain tapi tidak diberitahu ke role).         │
+          │                                                                                  │
+          │   SOLUSI (PILIH SALAH SATU, URUTAN SESUAI PRIORITAS):                            │
+          │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+          │   │ SOLUSI 1 [SELF-SIGNED, DIREKOMENDASIKAN UNTUK INTERNAL]:                   │ │
+          │   │   Jalankan PRE-DEPLOY di CONTROL NODE:                                     │ │
+          │   │     $ agra certificates generate --include-dhparam                         │ │
+          │   │   Cert disimpan di /etc/agra/ssl/ → otomatis di-copy ke semua managed-host│ │
+          │   │   oleh task Default Source copy. Setelah itu re-deploy:                   │ │
+          │   │     $ agra deploy -i inventory.ini                                         │ │
+          │   ├────────────────────────────────────────────────────────────────────────────┤ │
+          │   │ SOLUSI 2 [CUSTOM CA-SIGNED / LETSENCRYPT]:                                 │ │
+          │   │   2a. Dapatkan fullchain.pem + privkey.pem dari CA (mis. certbot certonly).│ │
+          │   │   2b. SET PATH di /etc/agra/globals.yml (DILARANG hardcode inline managed-│ │
+          │   │       host!):                                                              │ │
+          │   │         tls_cert_path: "/etc/letsencrypt/live/monitor.example.com/fullchain.pem"│ │
+          │   │         tls_key_path:  "/etc/letsencrypt/live/monitor.example.com/privkey.pem"  │ │
+          │   │         # Opsional CA chain (ssl_stapling):                                │ │
+          │   │         tls_ca_path:   "/etc/letsencrypt/live/monitor.example.com/chain.pem"    │ │
+          │   │   2c. JIKA ingin dedicated cert berbeda PER DOMAIN (prometheus_domain     │ │
+          │   │       berbeda dari grafana_domain):                                        │ │
+          │   │         tls_grafana_cert_path:     "/etc/letsencrypt/live/monitor.example.com/fullchain.pem"│ │
+          │   │         tls_grafana_key_path:      "/etc/letsencrypt/live/monitor.example.com/privkey.pem"  │ │
+          │   │         tls_prometheus_cert_path:  "/etc/letsencrypt/live/prom.example.com/fullchain.pem"   │ │
+          │   │         tls_prometheus_key_path:   "/etc/letsencrypt/live/prom.example.com/privkey.pem"     │ │
+          │   │   2d. Re-deploy: agra deploy -i inventory.ini → custom cert di-copy       │ │
+          │   │       otomatis via block copy custom / dedicated.                          │ │
+          │   ├────────────────────────────────────────────────────────────────────────────┤ │
+          │   │ SOLUSI 3 [ADVANCED, INLINE MANAGED-HOST (TIDAK DIREKOMENDASIKAN UNTUK      │ │
+          │   │            MULTI-NODE)]:                                                   │ │
+          │   │   JIKA user BENAR-BENAR ingin mengembalikan OLD BEHAVIOR generate inline  │ │
+          │   │   managed-host per-node (self-signed per-node, CN/SAN TIDAK konsisten di  │ │
+          │   │   HA), jalankan deploy dengan EXTRA VARS TEMPORER (JANGAN set permanen di │ │
+          │   │   globals.yml agar tidak diwariskan ke node lain tanpa sengaja):           │ │
+          │   │     $ agra deploy -i inventory.ini --extra-vars tls_self_signed_generate=true│ │
+          │   │   Catatan: dhparam TIDAK DI-generate inline. Untuk dhparam tetap via       │ │
+          │   │   `agra certificates generate --include-dhparam` pre-deploy ATAU user      │ │
+          │   │   generate secara manual dan copy ke tls_dhparam_path.                     │ │
+          │   └────────────────────────────────────────────────────────────────────────────┘ │
           └─────────────────────────────────────────────────────────────────────────────────┘
       when: _final_ssl_stat.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
   when: enable_https | default(true) | bool
