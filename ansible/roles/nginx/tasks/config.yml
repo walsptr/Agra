@@ -96,7 +96,7 @@
   when:
     - enable_https | default(true) | bool
     - tls_self_signed_generate | default(true) | bool
-    - tls_cert_path == nginx_config_dir + '/ssl/agra.crt' or (tls_cert_path | dirname == nginx_config_dir + '/ssl' and (tls_cert_path is not exists or ansible_check_mode is true))
+    - "(nginx_config_dir ~ '/ssl/agra.crt' is not exists) or (nginx_config_dir ~ '/ssl/agra.key' is not exists)"
   tags: ['nginx', 'config', 'ssl']
 
 - name: "Nginx (SSL) - Generate Diffie-Hellman params (guard creates: sangat lama, 2048bit ~ 10-60s)"
@@ -109,6 +109,45 @@
   poll: 10
   when: enable_https | default(true) | bool
   ignore_errors: true
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL Default Source) - Copy default output cert CONTROL-NODE /etc/agra/ssl/ KE managed-host /etc/nginx/ssl/ (PRIMARY OUTPUT `agra certificates generate`)
+  block:
+    - name: Nginx (SSL Default Source) - Stat default source cert files di CONTROL NODE /etc/agra/ssl/
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+        get_checksum: false
+      register: _defssl_src_stat
+      loop:
+        - src: /etc/agra/ssl/agra.crt
+          dst: "{{ nginx_config_dir }}/ssl/agra.crt"
+          mode: '0644'
+        - src: /etc/agra/ssl/agra.key
+          dst: "{{ nginx_config_dir }}/ssl/agra.key"
+          mode: '0600'
+        - src: /etc/agra/ssl/agra-ca.crt
+          dst: "{{ nginx_config_dir }}/ssl/agra-ca.crt"
+          mode: '0644'
+        - src: /etc/agra/ssl/dhparam.pem
+          dst: "{{ tls_dhparam_path }}"
+          mode: '0644'
+      become: true
+      delegate_to: localhost
+      run_once: true
+
+    - name: Nginx (SSL Default Source) - Copy cert control-node ke managed-host jika source exist
+      ansible.builtin.copy:
+        src: "{{ item.item.src }}"
+        dest: "{{ item.item.dst }}"
+        owner: root
+        group: root
+        mode: "{{ item.item.mode }}"
+        force: "{{ overwrite_ssl_certs | default(false) | bool }}"
+        backup: true
+      loop: "{{ _defssl_src_stat.results }}"
+      when: _defssl_src_stat is defined and item is defined and item.item is defined and item.stat is defined and item.stat.exists
+      notify: ['reload nginx']
+  when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
 
 - name: Nginx (SSL Custom) - Copy custom cert user dari /etc/agra/config/nginx/ssl/
@@ -192,6 +231,53 @@
       loop: "{{ _ded_stat_p.results }}"
       when: _ded_stat_p is defined and item is defined and item.stat is defined and item.stat.exists
       notify: ['reload nginx']
+  when: enable_https | default(true) | bool
+  tags: ['nginx', 'config', 'ssl']
+
+- name: Nginx (SSL FINAL GUARD) - PASTIKAN Cert + Key ADA di managed-host SEBELUM render template nginx (cegah emerg crash start)
+  block:
+    - name: Nginx (SSL FINAL GUARD) - Stat target cert + key managed-host final
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+      register: _final_ssl_stat
+      loop:
+        - "{{ nginx_config_dir }}/ssl/agra.crt"
+        - "{{ nginx_config_dir }}/ssl/agra.key"
+      become: true
+
+    - name: Nginx (SSL FINAL GUARD) - FAIL USER-FRIENDLY BOX JIKA cert+key MASIH TIDAK ADA
+      ansible.builtin.fail:
+        msg: |
+          ┌─────────────────────────────────────────────────────────────────────────────────┐
+          │ ✗ CRITICAL: SSL Certificate + Private key TIDAK DITEMUKAN di managed-host.        │
+          │   Path target yang harus ada:                                                     │
+          │     {{ nginx_config_dir }}/ssl/agra.crt  ← cert PEM (public)                      │
+          │     {{ nginx_config_dir }}/ssl/agra.key  ← private key PEM (secret, 0600)         │
+          │                                                                                   │
+          │   KENAPA TERJADI? 3 Kemungkinan:                                                  │
+          │   1. `agra certificates generate` BELUM dijalankan di control node               │
+          │   2. Custom cert user BELUM dicopy ke /etc/agra/config/nginx/ssl/                 │
+          │   3. `tls_self_signed_generate: false` di globals tapi tidak ada cert apa pun     │
+          │                                                                                   │
+          │   SOLUSI (PILIH SALAH SATU):                                                      │
+          │   ┌─────────────────────────────────────────────────────────────────────────────┐ │
+          │   │ SOLUSI 1 (DIREKOMENDASIKAN): Pre-generate SSL control node sebelum deploy   │ │
+          │   │   $ sudo mkdir -p /etc/agra/ssl && sudo chmod 0750 /etc/agra/ssl            │ │
+          │   │   $ agra certificates generate --include-dhparam                             │ │
+          │   │   # Jalankan ulang deploy: $ agra deploy -i inventory.ini                   │ │
+          │   ├─────────────────────────────────────────────────────────────────────────────┤ │
+          │   │ SOLUSI 2 (Custom CA-signed / LetsEncrypt): Copy custom cert ke folder       │ │
+          │   │   override /etc/agra/config/nginx/ssl/ (nama file WAJIB agra.crt/agra.key)  │ │
+          │   │   $ sudo cp fullchain.pem /etc/agra/config/nginx/ssl/agra.crt               │ │
+          │   │   $ sudo cp privkey.pem   /etc/agra/config/nginx/ssl/agra.key               │ │
+          │   │   $ sudo chmod 0600 /etc/agra/config/nginx/ssl/agra.key                     │ │
+          │   ├─────────────────────────────────────────────────────────────────────────────┤ │
+          │   │ SOLUSI 3 (Auto self-signed inline managed-host): Pastikan variabel          │ │
+          │   │   `tls_self_signed_generate: true` di globals.yml (DEFAULT true, biarkan).  │ │
+          │   └─────────────────────────────────────────────────────────────────────────────┘ │
+          └─────────────────────────────────────────────────────────────────────────────────┘
+      when: _final_ssl_stat.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
   when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
 
