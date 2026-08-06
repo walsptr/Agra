@@ -80,7 +80,12 @@ prometheus_backend_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"
 grafana_domain: ""
 prometheus_domain: ""
 _prometheus_expose_effective: "{{ (expose_prometheus_via_nginx | default(false) | bool) or ((prometheus_domain | default('') | trim | length) > 0) }}"
-_grafana_effective_server_names: "{{ ([grafana_domain] if ((grafana_domain | default('') | trim | length) > 0) else []) + ([monitoring_vip] if ((monitoring_vip | default('') | trim | length) > 0) else []) + [inventory_hostname] + ['_'] | unique | join(' ') }}"
+_grafana_effective_server_names: "{{ (
+  (([grafana_domain] if ((grafana_domain | default('') | trim | length) > 0) else [])
+   + ([monitoring_vip] if ((monitoring_vip | default('') | trim | length) > 0) else [])
+   + [inventory_hostname]
+   + ['_']
+  ) | unique | join(' ')) }}"
 server_name: "{{ monitoring_vip | default(inventory_hostname) }} _"
 nginx_http_port: 80
 nginx_https_port: 443
