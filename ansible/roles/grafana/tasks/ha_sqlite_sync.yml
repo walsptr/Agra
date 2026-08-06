@@ -148,16 +148,24 @@
         mode: '0644'
       ignore_errors: true
 
+    - name: Grafana (HA SQLite) - SANITIZE interval: cast ke STRING (hindari int split error)
+      ansible.builtin.set_fact:
+        _g_sync_interval_str: "{{ (grafana_sqlite_sync_interval | default('*/5 * * * *') | string | trim) }}"
+
+    - name: Grafana (HA SQLite) - SPLIT interval cron 5 kolom SEKALI (deduplicate split call)
+      ansible.builtin.set_fact:
+        _g_sync_parts: "{{ _g_sync_interval_str.split() }}"
+
     - name: Grafana (HA SQLite / STANDBY) - Setup cron job rsync sync interval grafana_sqlite_sync_interval
       ansible.builtin.cron:
         name: "agra-grafana-sqlite-rsync-sync"
         user: "root"
         job: "/usr/local/bin/agra_grafana_rsync.sh >> /var/log/agra-grafana-sync.log 2>&1"
-        minute: "{{ grafana_sqlite_sync_interval.split()[0] if '*' in grafana_sqlite_sync_interval else '*' }}"
-        hour: "{{ grafana_sqlite_sync_interval.split()[1] if grafana_sqlite_sync_interval.split() | length > 1 else '*' }}"
-        day: "{{ grafana_sqlite_sync_interval.split()[2] if grafana_sqlite_sync_interval.split() | length > 2 else '*' }}"
-        month: "{{ grafana_sqlite_sync_interval.split()[3] if grafana_sqlite_sync_interval.split() | length > 3 else '*' }}"
-        weekday: "{{ grafana_sqlite_sync_interval.split()[4] if grafana_sqlite_sync_interval.split() | length > 4 else '*' }}"
+        minute:  "{{ _g_sync_parts[0] if (_g_sync_parts | length >= 1 and (_g_sync_parts[0] == '*' or (_g_sync_parts[0] | string).startswith('*/') or (_g_sync_parts[0] | string | regex_search('^[0-9,/-]+$')))) else '*' }}"
+        hour:    "{{ _g_sync_parts[1] if (_g_sync_parts | length >= 2) else '*' }}"
+        day:     "{{ _g_sync_parts[2] if (_g_sync_parts | length >= 3) else '*' }}"
+        month:   "{{ _g_sync_parts[3] if (_g_sync_parts | length >= 4) else '*' }}"
+        weekday: "{{ _g_sync_parts[4] if (_g_sync_parts | length >= 5) else '*' }}"
         cron_file: agra-grafana-sync
         state: present
       tags: ['grafana', 'ha', 'sync', 'standby', 'cron']

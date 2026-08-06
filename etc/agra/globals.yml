@@ -7,7 +7,14 @@ enable_grafana: true
 enable_ha_grafana: false
 grafana_database: sqlite
 grafana_sqlite_sync_method: rsync
-grafana_sqlite_sync_interval: 60
+# Interval sync Grafana SQLite HA (jika enable_ha_grafana=true & grafana_database=sqlite).
+# WAJIB BERUPA STRING cron expression 5 kolom standard: <minute> <hour> <day> <month> <weekday>
+# Contoh valid:
+#   "*/1 * * * *" = setiap 1 menit
+#   "*/5 * * * *" = setiap 5 menit (default role)
+#   "0 */6 * * *" = tiap 6 jam sekali (minute 0, hour tiap kelipatan 6)
+# ⚠️ JANGAN diisi INTEGER (mis. 60) → tidak bisa di-split, ERROR cron task.
+grafana_sqlite_sync_interval: "*/1 * * * *"
 grafana_database_host: ""
 grafana_database_port: 3306
 grafana_database_name: grafana
