@@ -27,15 +27,9 @@ DEFAULT_CA = str(AGRA_SSL_DIR / "agra-ca.crt")
 
 
 def _run_openssl(args_list: List[str], check_stderr: bool = False) -> Tuple[int, str, str]:
-    import shutil
-    if shutil.which("openssl") is None:
-        error("openssl CLI TIDAK TERSEDIA di PATH. Install openssl terlebih dahulu.")
-        return (127, "", "openssl not found")
-    try:
-        proc = subprocess.run(["openssl"] + args_list, capture_output=True, text=True, check=False)
-        return (proc.returncode, proc.stdout or "", proc.stderr or "")
-    except Exception as e:
-        return (1, "", str(e))
+    """[DEPRECATED - USE _run_cmd DENGAN use_root=True untuk write].
+    Lama: plain openssl. Baru: pakai _run_cmd auto-sudo untuk write (use_root=True default)."""
+    return _run_cmd(["openssl"] + list(args_list), use_root=True, check_stderr=check_stderr)
 
 
 def _parse_openssl_date(s: str) -> Optional[datetime]:
@@ -61,6 +55,88 @@ def _parse_openssl_date(s: str) -> Optional[datetime]:
 
 def _sanitize(s: str) -> str:
     return s.replace("\x00", "").strip()
+
+
+def _is_root() -> bool:
+    """Return True JIKA current EUID = 0 (root)."""
+    try:
+        return os.geteuid() == 0
+    except Exception:
+        return False
+
+
+def _detect_sudo_capable() -> Tuple[bool, str]:
+    """Cek apakah environment BISA menjalankan sudo NON-INTERACTIVE (tanpa prompt password).
+    Return (capable: bool, reason_fail: str)
+    capable=True BISA pakai sudo tanpa prompt (passwordless / sudoreplay cached).
+    capable=False TIDAK BISA (reason_fail berisi deskripsi: tidak ada sudo binary,
+    user tidak punya sudoers, but password prompt, dsb)."""
+    import shutil
+    if shutil.which("sudo") is None:
+        return False, "sudo binary TIDAK DITEMUKAN di PATH. Install sudo package terlebih dahulu."
+    try:
+        proc = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, check=False, timeout=15)
+        if proc.returncode == 0:
+            return True, ""
+        stderr = (proc.stderr or "").strip()
+        if "password is required" in stderr.lower():
+            return False, ("Sudo MEMBUTUHKAN password, tapi command dijalankan non-interactive."
+                           " Jalankan PAKAI SUDO eksplisit: sudo agra certificates generate ...")
+        if "not allowed" in stderr.lower() or "not in the sudoers" in stderr.lower():
+            return False, ("User saat ini TIDAK ADA di grup sudo / tidak punya sudoers privilege."
+                           " Hubungi admin atau jalankan sebagai root: su -c 'agra certificates ...'")
+        if stderr:
+            return False, f"Sudo gagal non-interactive: {stderr[:200]}"
+        return False, "Sudo non-interactive gagal (RC != 0, stderr kosong)."
+    except subprocess.TimeoutExpired:
+        return False, "Sudo timeout (>15s) menunggu response credential."
+    except Exception as e:
+        return False, f"Kesalahan detect sudo: {str(e)[:200]}"
+
+
+def _run_cmd(args_list: List[str], *, use_root: bool = True,
+             check_stderr: bool = False, timeout_s: int = 180) -> Tuple[int, str, str]:
+    """Menjalankan shell command, OTOMATIS PREFIX SUDO jika use_root=True DAN user BUKAN root.
+    use_root=True: SELALU tulis ke system-wide path (default untuk semua write file).
+    use_root=False: plain command tanpa sudo (untuk read-only, mis. openssl x509 -text read cert).
+    Return (rc, stdout, stderr)."""
+    final_args: List[str] = list(args_list)
+    is_root_now = _is_root()
+    if use_root and not is_root_now:
+        capable, fail_reason = _detect_sudo_capable()
+        if not capable:
+            box_w = 78
+            print()
+            print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+            print(f"{RED}{BOLD}✗ CRITICAL: Butuh PRIVILEGE ROOT / SUDO untuk WRITE FILE ke /etc/agra/ssl (root-owned).{RESET}")
+            print()
+            print(f"{YELLOW}{BOLD}  Alasan Sudo tidak bisa dipakai otomatis:{RESET}")
+            print(f"    {GRAY}- {fail_reason}{RESET}")
+            print()
+            print(f"{GREEN}{BOLD}  SOLUSI (PILIH SALAH SATU):{RESET}")
+            print(f"    {BOLD}SOLUSI 1 (PALING MUDAH): Jalankan command DENGAN SUDO EKSPLISIT:{RESET}")
+            print(f"      $ sudo agra certificates generate"
+                  f"{' --include-dhparam' if 'dhparam' in ' '.join(args_list) else ''} [--force]")
+            print(f"    {BOLD}SOLUSI 2 (Passwordless sudo untuk user sekarang, permanent):{RESET}")
+            print(f"      Tambahkan line ini ke /etc/sudoers.d/agra (root):")
+            print(f"        {GRAY}{os.environ.get('USER','<your-user>')} ALL=(ALL) NOPASSWD: "
+                  f"/usr/bin/openssl, /bin/mkdir, /bin/chmod, /bin/chown{RESET}")
+            print(f"    {BOLD}SOLUSI 3 (Jalankan sebagai root via su):{RESET}")
+            print(f"      $ su -c \"agra certificates generate ...\"")
+            print()
+            print(f"{GRAY}  Catatan: /etc/agra dan /etc/agra/ssl sengaja dimiliki root:root"
+                  f" untuk melindungi private key SSL (mode 0600).{RESET}")
+            print(f"{RED}{BOLD}{'─' * box_w}{RESET}")
+            print()
+            return (3, "", "sudo_not_capable")
+        final_args = ["sudo", "-n"] + list(args_list)
+    try:
+        proc = subprocess.run(final_args, capture_output=True, text=True, check=False, timeout=timeout_s)
+        return (proc.returncode, proc.stdout or "", proc.stderr or "")
+    except subprocess.TimeoutExpired:
+        return (124, "", f"timeout ({timeout_s}s)")
+    except Exception as e:
+        return (1, "", str(e))
 
 
 def _require_globals_yml() -> int:
@@ -199,13 +275,24 @@ def cmd_generate(args: argparse.Namespace) -> int:
         info("Already exists. Nothing to do. Use --force to regenerate.")
         return 0
     ssl_dir = Path(cert).parent
-    ssl_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        if os.geteuid() == 0:
+    if _is_root():
+        ssl_dir.mkdir(parents=True, exist_ok=True)
+        try:
             os.chmod(str(ssl_dir), 0o750)
             os.chown(str(ssl_dir), 0, 0)
-    except Exception as e:
-        debug(f"chmod/chown ssl dir skipped: {e}")
+        except Exception as e:
+            debug(f"chmod/chown ssl dir skipped: {e}")
+    else:
+        info(f"Ensure ssl dir exists: mkdir -p {ssl_dir} (using sudo if available)")
+        rc_mk, _, err_mk = _run_cmd(["mkdir", "-p", str(ssl_dir)], use_root=True)
+        if rc_mk != 0:
+            error(f"Gagal mkdir ssl dir '{ssl_dir}' (rc={rc_mk}).")
+            if err_mk.strip() and "sudo_not_capable" not in err_mk:
+                print(f"{RED}{err_mk.strip()}{RESET}")
+            return rc_mk
+        rc_chm, _, _ = _run_cmd(["chmod", "0750", str(ssl_dir)], use_root=True)
+        if rc_chm == 0:
+            _run_cmd(["chown", "root:root", str(ssl_dir)], use_root=True)
     cn = _resolve_cn(args, g)
     san: List[str] = [f"DNS:{cn}", "DNS:localhost", "IP:127.0.0.1"]
     vip = (g.get("monitoring_vip") or "").strip()
@@ -228,8 +315,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         error(f"Gagal generate private key (rc={rc_k}).")
         if err_k.strip(): print(f"{RED}{err_k.strip()}{RESET}")
         return rc_k
-    try: os.chmod(key, 0o600)
-    except Exception as e: debug(f"chmod key 0600 skipped: {e}")
+    if _is_root():
+        try: os.chmod(key, 0o600)
+        except Exception as e: debug(f"chmod key 0600 skipped: {e}")
+    else:
+        _run_cmd(["chmod", "0600", key], use_root=True)
+        _run_cmd(["chown", "root:root", key], use_root=True)
     info("Private key OK — chmod 0600.")
     days_int = getattr(args, "days", DEFAULT_DAYS)
     if not isinstance(days_int, int) or days_int <= 0: days_int = DEFAULT_DAYS
@@ -245,8 +336,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
         error(f"Gagal generate self-signed cert (rc={rc_c}).")
         if err_c.strip(): print(f"{RED}{err_c.strip()}{RESET}")
         return rc_c
-    try: os.chmod(cert, 0o644)
-    except Exception as e: debug(f"chmod cert 0644 skipped: {e}")
+    if _is_root():
+        try: os.chmod(cert, 0o644)
+        except Exception as e: debug(f"chmod cert 0644 skipped: {e}")
+    else:
+        _run_cmd(["chmod", "0644", cert], use_root=True)
+        _run_cmd(["chown", "root:root", cert], use_root=True)
     info("Self-signed cert OK — chmod 0644.")
     include_dh = getattr(args, "include_dhparam", False)
     if include_dh:
@@ -257,8 +352,12 @@ def cmd_generate(args: argparse.Namespace) -> int:
             warn(f"Gagal generate dhparam (rc={rc_d}). Lanjut tanpa dhparam.")
             if err_d.strip(): print(f"{YELLOW}{err_d.strip()}{RESET}")
         else:
-            try: os.chmod(dh, 0o644)
-            except Exception as e: debug(f"chmod dh 0644 skipped: {e}")
+            if _is_root():
+                try: os.chmod(dh, 0o644)
+                except Exception as e: debug(f"chmod dh 0644 skipped: {e}")
+            else:
+                _run_cmd(["chmod", "0644", dh], use_root=True)
+                _run_cmd(["chown", "root:root", dh], use_root=True)
             info("DH param OK — chmod 0644.")
     section("Ringkasan Hasil Generate Self-Signed Certificate")
     print(f"  {BOLD}Cert Path   :{RESET} {GREEN}{cert}{RESET}")
@@ -292,7 +391,7 @@ def cmd_info(args: argparse.Namespace) -> int:
         print(f"{GRAY}Tips: Gunakan {BOLD}agra certificates generate{RESET}{GRAY} untuk membuat self-signed cert default.{RESET}")
         print(f"{GRAY}Tips: Gunakan --cert-path /path/custom.crt untuk cek cert di lokasi lain.{RESET}")
         return 1
-    rc, out, err = _run_openssl(["x509", "-in", str(p), "-noout", "-issuer", "-subject", "-dates", "-ext", "subjectAltName"])
+    rc, out, err = _run_cmd(["openssl", "x509", "-in", str(p), "-noout", "-issuer", "-subject", "-dates", "-ext", "subjectAltName"], use_root=False)
     if rc != 0:
         error(f"Gagal baca cert via openssl x509 (rc={rc}).")
         if err.strip(): print(f"{RED}{err.strip()}{RESET}")
@@ -307,7 +406,7 @@ def cmd_info(args: argparse.Namespace) -> int:
         elif "Subject Alternative Name" in line or line.startswith(("DNS:", "IP Address:", "IP:")):
             san_str += (" " if san_str else "") + line
     if not san_str:
-        rc2, out2, _ = _run_openssl(["x509", "-in", str(p), "-noout", "-text"])
+        rc2, out2, _ = _run_cmd(["openssl", "x509", "-in", str(p), "-noout", "-text"], use_root=False)
         if rc2 == 0:
             in_san = False
             for raw_line in out2.splitlines():
