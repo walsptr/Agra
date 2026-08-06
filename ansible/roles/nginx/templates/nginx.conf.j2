@@ -48,46 +48,14 @@ http {
     resolver_timeout 5s;
 
     # ══════════════════════════════════════════════════════════════════════════
-    # GLOBAL SSL CERTIFICATES di http {} CONTEXT (BUKAN di server block site config!)
-    # Standard Nginx best practice: SSL cert pair didefinisikan SATU KALI di level
-    # http {}, maka di-inherit OTOMATIS ke SEMUA server block listen 443 ssl.
-    #
-    # 🔥 SAFETY GUARD (FIX empty string ssl_certificate "" yang menyebabkan
-    #    emerg "invalid number of arguments"):
-    #    - Jika user override tls_*_path di globals.yml = EMPTY STRING / TANPA
-    #      VALUE (mis: `tls_cert_path:` YAML tanpa isi), MAKA FALLBACK OTOMATIS
-    #      ke DEFAULT PATH self-signed cert: `/etc/nginx/ssl/agra.crt` / agra.key
-    #    - Nuclear sanitizer pattern SHA ec49dfe: split()|join('') hapus SEMUA
-    #      embedded newline/spasi + double quotes wrap force 1 token parser Nginx.
-    #    - HANYA RENDER DIRECTIVE JIKA HASIL AKHIR BUKAN EMPTY STRING.
+    # SSL CERTIFICATES DITENTUKAN PER SERVER BLOCK DI sites-available/agra-monitoring.conf.j2
+    # (Scalable multi-domain (Grafana + Prometheus dedicated, each cert DAPAT ssl berbeda)
     # ══════════════════════════════════════════════════════════════════════════
-    {% set _fallback_cert = nginx_config_dir ~ '/ssl/agra.crt' %}
-    {% set _fallback_key = nginx_config_dir ~ '/ssl/agra.key' %}
-    {% set _fallback_ca = nginx_config_dir ~ '/ssl/agra-ca.crt' %}
-    {% set _fallback_dh = nginx_config_dir ~ '/ssl/dhparam.pem' %}
-    {% set _cert_clean = ((tls_cert_path | default('')).split() | join('') or _fallback_cert).split() | join('') %}
-    {% set _key_clean = ((tls_key_path | default('')).split() | join('') or _fallback_key).split() | join('') %}
-    {% set _user_ca_raw = ((tls_ca_path | default('')).split() | join('')) if (tls_ca_path | default('') and (tls_ca_path | default('')).split() | join('')) else '' %}
-    {% set _ca_clean = _user_ca_raw %}
-    {% set _dh_clean = ((tls_dhparam_path | default('')).split() | join('') or _fallback_dh).split() | join('') %}
-    {% set _is_self_signed_default = (_cert_clean == _fallback_cert) and (_user_ca_raw | length == 0) %}
-    {% if _cert_clean | length > 0 %}
-    ssl_certificate "{{ _cert_clean }}";
-    {% endif %}
-    {% if _key_clean | length > 0 %}
-    ssl_certificate_key "{{ _key_clean }}";
-    {% endif %}
-    {% if _ca_clean | length > 0 %}
-    ssl_trusted_certificate "{{ _ca_clean }}";
-    {% endif %}
-    {% if _dh_clean | length > 0 %}
-    ssl_dhparam "{{ _dh_clean }}";
-    {% endif %}
 
     # ══════════════════════════════════════════════════════════════════════════
     # SSL STAPLING CONDITIONAL (FIX nginx warn "issuer certificate not found"):
     # OCSP Stapling HANYA BERMANFAAT dan VALID untuk SERTIFIKAT CA-SIGNED PUBLIC
-    # yang memiliki Intermediate/Root CA Chain (ssl_trusted_certificate terisi).
+    # yang memiliki Intermediate/Root CA Chain.
     # Default self-signed cert (issuer = dirinya sendiri) TIDAK PUNYA OCSP URL
     # sehingga ssl_stapling on → nginx WARN "issuer certificate not found".
     #
@@ -95,14 +63,19 @@ http {
     #   1. JIKA user set enable_ssl_stapling=true  di globals.yml → PAKSA ON
     #   2. JIKA user set enable_ssl_stapling=false di globals.yml → PAKSA OFF
     #   3. JIKA user TIDAK SET variabel (undefined) → AUTO DETECT:
-    #        ON  JIKA (CA chain tersedia DAN cert BUKAN self-signed default)
-    #        OFF JIKA (self-signed ATAU tls_ca_path kosong)
+    #        ON  JIKA tls_ca_path TERISI (CA chain tersedia = CA-signed cert)
+    #        OFF JIKA tls_ca_path KOSONG (default self-signed)
+    #
+    # CATATAN: SSL certificates SEKARANG didefinisikan PER SERVER BLOCK di
+    # sites-available/*.conf (bukan global), jadi stapling detect hanya berdasarkan
+    # ada/tidaknya CA chain path global (tls_ca_path).
     # ══════════════════════════════════════════════════════════════════════════
     {% set _stapling_user_set = (enable_ssl_stapling is defined and enable_ssl_stapling is not none and (enable_ssl_stapling | string | length > 0)) %}
+    {% set _ca_clean_global = ((tls_ca_path | default('')).split() | join('')) if (tls_ca_path | default('') and (tls_ca_path | default('')).split() | join('')) else '' %}
     {% if _stapling_user_set %}
     {% set _stapling = (enable_ssl_stapling | bool) %}
     {% else %}
-    {% set _stapling = (_ca_clean | length > 0 and not _is_self_signed_default) %}
+    {% set _stapling = (_ca_clean_global | length > 0) %}
     {% endif %}
     {% if _stapling %}
     ssl_stapling on;

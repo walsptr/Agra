@@ -61,11 +61,11 @@
         -v {{ nginx_config_dir }}/ssl:/etc/nginx/ssl:ro \
         -v {{ nginx_log_dir }}:/var/log/nginx:rw \
         -v {{ nginx_cache_dir }}:/var/cache/nginx:rw \
-        --health-cmd="wget -qO- http://127.0.0.1:{{ nginx_http_port }}/ -O /dev/null || exit 1" \
+        --health-cmd="nginx -t -q >/dev/null 2>&1 && (curl -fsSL --max-time 3 http://127.0.0.1:{{ nginx_http_port }}/ -o /dev/null 2>/dev/null || curl -kfsSL --max-time 3 https://127.0.0.1:{{ nginx_https_port }}/ -o /dev/null 2>/dev/null || exit 1)" \
         --health-interval=30s \
-        --health-timeout=5s \
+        --health-timeout=7s \
         --health-retries=3 \
-        --health-start-period=30s \
+        --health-start-period=45s \
         {{ nginx_image }}:{{ nginx_tag }}
   when: _ngx_container_running.rc != 0 or _ngx_container_match.stdout == "MISMATCH"
   changed_when: true
