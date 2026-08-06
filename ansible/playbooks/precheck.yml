@@ -83,6 +83,18 @@
           - 'date_time'
       changed_when: false
 
+    - name: 'Precheck (LOAD) — STAT /etc/agra/globals.yml & passwords.yml exists di control node (localhost)'
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      register: _precheck_etcagra_stat
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
     - name: 'Precheck — Load globals.yml + passwords.yml'
       ansible.builtin.include_vars:
         file: "{{ item }}"
@@ -92,6 +104,28 @@
       ignore_errors: true
       run_once: true
       delegate_to: localhost
+
+    - name: 'Precheck (LOAD) — WARNING jika globals.yml ADA tapi YAML invalid / include_vars GAGAL (monitoring_vip/grafana_domain empty padahal file non-empty)'
+      ansible.builtin.debug:
+        msg: |-
+          ⚠️  WARNING: File /etc/agra/globals.yml ADA (size={{ _precheck_etcagra_stat.results[0].stat.size | default(0) }} bytes)
+              tapi VARIABLE UTAMA `monitoring_vip` / `grafana_domain` MASIH KOSONG / UNDEFINED.
+              
+              KEMUNGKINAN BESAR: include_vars GAGAL (YAML SYNTAX ERROR di globals.yml, atau permission 0640
+              user non-root tidak bisa baca). 
+              
+              PERIKSA:
+                1. Validasi YAML syntax /etc/agra/globals.yml:
+                   $ python3 -c "import yaml,sys; yaml.safe_load(open('/etc/agra/globals.yml')); print('OK')"
+                2. Permission file: harus 0644 atau user ansible bisa baca (sudo chmod 0644 /etc/agra/globals.yml)
+      when:
+        - _precheck_etcagra_stat.results[0].stat.exists | default(false) | bool
+        - _precheck_etcagra_stat.results[0].stat.size | default(0) | int > 20
+        - (monitoring_vip | default('') | length == 0) and (grafana_domain | default('') | length == 0)
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      tags: ['always']
 
     - name: 'Precheck (Kategori — TOPOLOGI) — Minimal ada 1 node group monitoring'
       ansible.builtin.assert:
@@ -118,16 +152,75 @@
       run_once: true
       delegate_to: localhost
 
-    - name: 'Precheck (TOPOLOGI) — Multi-node WAJIB monitoring_vip'
+    - name: 'Precheck (TOPOLOGI) — AGGREGATE monitoring_vip dari 4 SUMBER (first found non-empty) untuk hindari scoping delegate ambigu'
+      ansible.builtin.set_fact:
+        _precheck_monitoring_vip: >-
+          {%- set found = namespace(v='') -%}
+          {%- set ns = namespace(vipped='') -%}
+          {%- set ns_global_mon = monitoring_vip | default('') | trim -%}
+          {%- if ns_global_mon | length > 0 and found.v | length == 0 -%}
+            {%- set found.v = ns_global_mon -%}
+          {%- endif -%}
+          {%- set hv_first = hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | trim -%}
+          {%- if hv_first | length > 0 and found.v | length == 0 -%}
+            {%- set found.v = hv_first -%}
+          {%- endif -%}
+          {%- for h in groups['monitoring'] | default([]) -%}
+            {%- set hv_mon = hostvars[h]['monitoring_vip'] | default('') | trim -%}
+            {%- if hv_mon | length > 0 and found.v | length == 0 -%}
+              {%- set found.v = hv_mon -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ found.v | trim }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: 'Precheck (TOPOLOGI) — FALLBACK DIRECT PARSE /etc/agra/globals.yml (slurp + from_yaml) jika aggregate masih kosong'
+      block:
+        - name: 'Precheck — slurp globals.yml di localhost'
+          ansible.builtin.slurp:
+            src: "/etc/agra/globals.yml"
+          register: _precheck_globals_slurp
+          delegate_to: localhost
+
+        - name: 'Precheck — extract monitoring_vip dari parsed YAML globals jika fact diatas masih kosong'
+          ansible.builtin.set_fact:
+            _precheck_monitoring_vip: >-
+              {%- set parsed = (_precheck_globals_slurp.content | b64decode | from_yaml) or {} -%}
+              {%- set from_file = parsed.get('monitoring_vip', '') | default('') | trim -%}
+              {%- if from_file | length > 0 and (_precheck_monitoring_vip | default('') | length == 0) -%}
+                {{ from_file }}
+              {%- else -%}
+                {{ _precheck_monitoring_vip | default('') | trim }}
+              {%- endif -%}
+          delegate_to: localhost
+      when:
+        - _precheck_etcagra_stat.results[0].stat.exists | default(false) | bool
+        - _precheck_monitoring_vip | default('') | length == 0
+      run_once: true
+      tags: ['always']
+
+    - name: 'Precheck (TOPOLOGI) — Multi-node WAJIB monitoring_vip (validasi via aggregate 4-sumber fact)'
       ansible.builtin.assert:
         that:
-          - (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0)
-            or
-            (monitoring_vip | default('') | length > 0)
+          - _precheck_monitoring_vip | default('') | length > 0
         fail_msg: >-
           Multi-node HA: groups['monitoring']={{ groups['monitoring'] | length }} node TAPI monitoring_vip KOSONG.
-          Keepalived HA butuh Virtual IP. Perbaiki:
-          set `monitoring_vip: "x.x.x.x"` di inventory vars atau /etc/agra/globals.yml.
+          Keepalived HA butuh Virtual IP.
+          
+          Lokasi config yang dicari (4 SUMBER, first found non-empty):
+            1. Variable `monitoring_vip` di Ansible context (include_vars globals.yml / extra vars)
+            2. hostvars[groups['monitoring'][0]].monitoring_vip — inventory_host var first node monitoring
+            3. SEMUA node group monitoring hostvars.*.monitoring_vip — any host var non-empty
+            4. DIRECT PARSE /etc/agra/globals.yml di control node → key monitoring_vip
+          
+          Perbaiki: set `monitoring_vip: "x.x.x.x"` di INVENTORY vars
+          (group_vars/monitoring.yml atau group_vars/all.yml)
+          ATAU di /etc/agra/globals.yml:
+            monitoring_vip: "192.168.1.100"
+          
+          Setelah di-set: pastikan YAML syntax valid:
+            $ python3 -c "import yaml; yaml.safe_load(open('/etc/agra/globals.yml')); print('YAML OK')"
       when:
         - groups['monitoring'] is defined
         - groups['monitoring'] | length > 1
