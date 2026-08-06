@@ -127,6 +127,51 @@
       changed_when: false
       tags: ['always']
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # LAYER DEFAULT GUARD: JIKA include_vars globals GAGAL (YAML invalid / permission),
+    # set FALLBACK DEFAULT UNTUK SEMUA VARS KRITIS SESUAI contexts/SCHEMA.md,
+    # sehingga TIDAK ADA task crash "var is undefined".
+    # Jika include_vars BERHASIL → var sudah terdefinisi, jadi | default() NO-OP (tidak overwrite).
+    # ══════════════════════════════════════════════════════════════════════════
+    - name: 'Precheck (DEFAULT GUARD) — FALLBACK set default ALL critical vars jika include_vars globals gagal (YAML invalid / permission)'
+      ansible.builtin.set_fact:
+        # === Deployment & Infrastructure ===
+        agra_deployment_mode: "{{ agra_deployment_mode | default('docker') }}"
+        enable_https: "{{ enable_https | default(true) | bool }}"
+        tls_enabled: "{{ tls_enabled | default(true) | bool }}"
+        enable_ha_grafana: "{{ enable_ha_grafana | default(false) | bool }}"
+        overwrite_ssl_certs: "{{ overwrite_ssl_certs | default(false) | bool }}"
+        monitoring_vip: "{{ monitoring_vip | default('') }}"
+
+        # === Grafana Core ===
+        grafana_domain: "{{ grafana_domain | default('') }}"
+        grafana_database: "{{ grafana_database | default('sqlite') }}"
+        grafana_database_host: "{{ grafana_database_host | default('') }}"
+        grafana_database_port: "{{ grafana_database_port | default(3306) | int }}"
+        grafana_tag: "{{ grafana_tag | default('') }}"
+        grafana_native_version: "{{ grafana_native_version | default('') }}"
+
+        # === Prometheus Core ===
+        prometheus_domain: "{{ prometheus_domain | default('') }}"
+        prometheus_tag: "{{ prometheus_tag | default('') }}"
+        prometheus_native_version: "{{ prometheus_native_version | default('') }}"
+
+        # === Node Exporter ===
+        node_exporter_tag: "{{ node_exporter_tag | default('') }}"
+        node_exporter_native_version: "{{ node_exporter_native_version | default('') }}"
+
+        # === TLS Paths ===
+        tls_cert_path: "{{ tls_cert_path | default('') }}"
+        tls_key_path: "{{ tls_key_path | default('') }}"
+        tls_grafana_cert_path: "{{ tls_grafana_cert_path | default('') }}"
+        tls_grafana_key_path: "{{ tls_grafana_key_path | default('') }}"
+        tls_prometheus_cert_path: "{{ tls_prometheus_cert_path | default('') }}"
+        tls_prometheus_key_path: "{{ tls_prometheus_key_path | default('') }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      tags: ['always']
+
     - name: 'Precheck (Kategori — TOPOLOGI) — Minimal ada 1 node group monitoring'
       ansible.builtin.assert:
         that:
@@ -253,8 +298,8 @@
 
     - name: 'Precheck (GRAFANA DB) — Connectivity check ke external DB host port'
       ansible.builtin.wait_for:
-        host: "{{ grafana_database_host }}"
-        port: "{{ grafana_database_port | int }}"
+        host: "{{ grafana_database_host | default('') }}"
+        port: "{{ grafana_database_port | default(3306) | int }}"
         state: started
         timeout: 5
       when:
@@ -269,7 +314,7 @@
         that:
           - _db_check is not failed
         fail_msg: >-
-          External DB {{ grafana_database }} di {{ grafana_database_host }}:{{ grafana_database_port }}
+          External DB {{ grafana_database | default('') }} di {{ grafana_database_host | default('') }}:{{ grafana_database_port | default(3306) }}
           TIDAK TERCAPAI dalam 5 detik. Grafana tidak akan bisa connect saat deploy.
           Checklist perbaikan: (a) host/port benar, (b) firewall open, (c) service DB hidup.
       when:
@@ -290,7 +335,7 @@
         - { name: 'grafana', tag: "{{ grafana_tag | default('') }}" }
         - { name: 'node_exporter', tag: "{{ node_exporter_tag | default('') }}" }
       when:
-        - agra_deployment_mode == 'docker'
+        - (agra_deployment_mode | default('docker')) == 'docker'
       run_once: true
       delegate_to: localhost
 
@@ -307,7 +352,7 @@
         - { name: 'grafana', ver: "{{ grafana_native_version | default('') }}" }
         - { name: 'node_exporter', ver: "{{ node_exporter_native_version | default('') }}" }
       when:
-        - agra_deployment_mode == 'native'
+        - (agra_deployment_mode | default('')) == 'native'
       run_once: true
       delegate_to: localhost
 
@@ -315,11 +360,11 @@
       block:
         - name: 'Precheck TLS — Stat cert file'
           ansible.builtin.stat:
-            path: "{{ tls_cert_path }}"
+            path: "{{ tls_cert_path | default('') }}"
           register: _cert_stat
         - name: 'Precheck TLS — Hitung days remaining via openssl x509'
           ansible.builtin.command: >-
-            openssl x509 -in {{ tls_cert_path }} -noout -enddate
+            openssl x509 -in {{ tls_cert_path | default('') }} -noout -enddate
           register: _cert_end
           changed_when: false
           failed_when: false
@@ -327,7 +372,7 @@
         - name: 'Precheck TLS — WARNING kalau remaining < 30 hari'
           ansible.builtin.debug:
             msg: >-
-              ⚠️ PERINGATAN: TLS cert {{ tls_cert_path }} akan EXPIRED DALAM < 30 HARI
+              ⚠️ PERINGATAN: TLS cert {{ tls_cert_path | default('') }} akan EXPIRED DALAM < 30 HARI
               (enddate={{ _cert_end.stdout | default('N/A') }}). Jalankan `agra tls regenerate` untuk
               generate cert self-signed baru (DESIGN §6, Task 13).
           when:
@@ -343,9 +388,9 @@
     - name: 'Precheck (DEPLOYMENT MODE) — Mode docker/native valid'
       ansible.builtin.assert:
         that:
-          - agra_deployment_mode in ['docker', 'native']
+          - (agra_deployment_mode | default('__unset__')) in ['docker', 'native']
         fail_msg: >-
-          agra_deployment_mode='{{ agra_deployment_mode }}' INVALID.
+          agra_deployment_mode='{{ agra_deployment_mode | default('') }}' INVALID.
           Hanya support: 'docker' (default) atau 'native' (systemd).
           Perbaiki globals.yml atau set via CLI env AGRA_DEPLOYMENT_MODE.
       run_once: true
@@ -356,7 +401,7 @@
         msg:
           - "✅ AGRA PRECHECK PASSED"
           - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | default([]) | length }} node_exporter target(s)"
-          - "Deployment mode: {{ agra_deployment_mode }}"
+          - "Deployment mode: {{ agra_deployment_mode | default('docker') }}"
           - "Grafana database: {{ grafana_database | default('sqlite') }}"
           - "HA: enable_ha_grafana={{ enable_ha_grafana | default(false) }}; keepalived={{ groups['monitoring'] | length > 1 }}"
       run_once: true
