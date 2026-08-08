@@ -5,9 +5,25 @@
   become: true
   serial: 1
   tags: ['backup']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
+
+    - name: 'Backup — Run hanya MASTER node = groups monitoring[0]'
+      ansible.builtin.meta: end_host
+      when:
+        - inventory_hostname != groups['monitoring'][0]
+      tags: ['always']
 
   vars:
     backup_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
@@ -20,13 +36,6 @@
     backup_s3_bucket: "{{ backup_s3_bucket | default('') }}"
     backup_s3_prefix: "{{ backup_s3_prefix | default('agra-backups') }}"
     backup_retention_count: "{{ backup_retention_count | default(7) }}"
-
-  pre_tasks:
-    - name: 'Backup — Run hanya MASTER node = groups monitoring[0]'
-      ansible.builtin.meta: end_host
-      when:
-        - inventory_hostname != groups['monitoring'][0]
-      tags: ['always']
 
   tasks:
     - name: 'Backup — Ensure root backup dir exists'

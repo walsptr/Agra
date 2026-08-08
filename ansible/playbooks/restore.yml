@@ -4,9 +4,6 @@
   gather_facts: true
   become: false
   tags: ['restore']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
 
   vars:
     restore_confirm: "{{ restore_confirm | default(false) }}"
@@ -14,6 +11,19 @@
     restore_backup_tarball: "{{ restore_backup_tarball | default('') }}"
 
   pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
+
     - name: 'Restore (SAFETY LAYER 1) — Assert restore_backup_name atau tarball TERISI'
       ansible.builtin.assert:
         that:
@@ -54,9 +64,6 @@
   become: true
   serial: 1
   tags: ['restore']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
 
   vars:
     restore_confirm: "{{ restore_confirm | default(false) }}"
@@ -65,6 +72,19 @@
     backup_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
 
   pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
+
     - name: 'Restore — Run hanya MASTER node = groups monitoring[0]'
       ansible.builtin.meta: end_host
       when:

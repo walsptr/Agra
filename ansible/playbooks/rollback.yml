@@ -4,9 +4,19 @@
   gather_facts: true
   become: false
   tags: ['rollback']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
   tasks:
     - name: 'Rollback — Info'
       ansible.builtin.debug:
@@ -22,9 +32,19 @@
   become: true
   serial: 1
   tags: ['rollback']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
   roles:
     - role: common
     - role: node_exporter
@@ -46,9 +66,19 @@
   become: true
   serial: 1
   tags: ['rollback']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
   roles:
     - role: common
     - role: node_exporter

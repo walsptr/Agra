@@ -95,13 +95,16 @@
       delegate_to: localhost
       changed_when: false
 
-    - name: 'Precheck — Load globals.yml + passwords.yml'
+    - name: 'Precheck — Load globals.yml + passwords.yml (with become: true untuk handle root-owned 0600 passwords.yml RULES §7)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
         - "/etc/agra/globals.yml"
         - "/etc/agra/passwords.yml"
-      ignore_errors: true
+      become: true
+      become_user: root
+      failed_when: false
+      changed_when: false
       run_once: true
       delegate_to: localhost
 

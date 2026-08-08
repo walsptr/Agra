@@ -6,9 +6,19 @@
   serial: 1
   max_fail_percentage: 0
   tags: ['upgrade']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
   roles:
     - role: common
     - role: node_exporter
@@ -31,9 +41,19 @@
   serial: 1
   max_fail_percentage: 0
   tags: ['upgrade']
-  vars_files:
-    - "/etc/agra/globals.yml"
-    - "/etc/agra/passwords.yml"
+  pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
   roles:
     - role: common
     - role: node_exporter
@@ -55,6 +75,19 @@
   connection: local
   tags: ['upgrade']
   pre_tasks:
+    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop:
+        - "/etc/agra/globals.yml"
+        - "/etc/agra/passwords.yml"
+      become: true
+      become_user: root
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      failed_when: false
+
     - name: 'Upgrade — Compute rollback order (DESIGN §7 standby first = groups[1:] + groups[0] last)'
       ansible.builtin.set_fact:
         monitoring_upgrade_order: "{{ (groups['monitoring'][1:] | default([])) + ([groups['monitoring'][0]] | default([])) }}"

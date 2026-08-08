@@ -71,8 +71,16 @@ def load_globals_yaml() -> Dict[str, Any]:
                     d = yaml.safe_load(fh) or {}
                 if isinstance(d, dict):
                     merged.update(d)
-            except Exception:
-                pass
+            except PermissionError as e:
+                warn(
+                    f"⚠️  Permission denied membaca {f.name} (Errno 13). "
+                    "File ini owner=root permission=0600 (design keamanan RULES §7). "
+                    "Solusi (PILIH 1): (a) Jalankan via sudo `sudo agra ...`; "
+                    "(b) chown file ke user anda, atau add user ke grup agra dengan 0640 group-read permission (RULES §14 pattern). "
+                    "CLI wrapper akan LANJUT (playbook Ansible akan auto-load file ini via become: true include_vars task jika menggunakan playbook terbaru)."
+                )
+            except Exception as e:
+                warn(f"⚠️  Gagal load file {f.name}: {type(e).__name__}: {str(e)[:120]}")
     return merged
 
 
