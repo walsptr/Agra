@@ -3,8 +3,7 @@
 Referensi lengkap seluruh variabel konfigurasi agra. Setiap penambahan
 variabel baru WAJIB langsung diupdate di sini (lihat RULES.md §12).
 
-Lokasi utama: `etc/agra/globals.yml` (non-secret) dan `etc/agra/passwords.yml`
-(secret, wajib di-vault).
+Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-SATUNYA SUMBER (single source of truth) vars konfigurasi fitur/versi untuk precheck assertion. JANGAN set vars konfigurasi (selain vars koneksi SSH murni seperti ansible_host/ansible_user/ansible_port) di file inventory `[group:vars]` atau Ansible host_vars; perubahan hanya akan dibaca oleh playbook precheck & deploy jika ada di `/etc/agra/globals.yml`. Lihat RULES.md §14 untuk kategori vars koneksi vs vars konfigurasi. Template default source untuk di-copy user saat install ada di repo: `./etc/agra/globals.yml`. Passwords di `/etc/agra/passwords.yml` (secret, wajib di-vault).
 
 ---
 
@@ -129,7 +128,7 @@ Catatan: Tidak ada konsep HA untuk Node Exporter.
 | Variabel | Tipe | Default | Deskripsi |
 |---|---|---|---|
 | `enable_keepalived` | bool (computed) | `groups['monitoring']\|length > 1` | **Hanya untuk force-disable manual**. Normalnya otomatis dari inventory multi-node. Set `false` di globals.yml untuk men-disable meskipun multi-node. (ARCHITECTURE §5.1, DESIGN §4) |
-| `monitoring_vip` | string | `""` | VIP untuk akses Grafana+Prometheus+Nginx, wajib diisi jika `groups['monitoring'] > 1` |
+| `monitoring_vip` | string | `""` | VIP untuk akses Grafana+Prometheus+Nginx, wajib diisi jika `groups['monitoring'] > 1` (HANYA di-set di **`/etc/agra/globals.yml` absolute path control node**; jika multi-node HA wajib isi variable di file ini. DILARANG set via inventory `[monitoring:vars]` atau host_vars/* — precheck assertion tidak akan membaca value dari sumber apapun selain direct parse globals.yml). Lihat RULES.md §14. |
 | `monitoring_vip_interface` | string | `ansible_default_ipv4.interface` | Interface network untuk VIP (default=interface utama host, fallback `eth0`) |
 | `keepalived_router_id` | int | `51` | VRRP virtual router ID (0-255, UNIK antar VRRP cluster di segmen yang sama) |
 | `keepalived_vrrp_instance` | string | `VI_MONITORING_01` | Nama VRRP instance di keepalived.conf |

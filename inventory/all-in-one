@@ -1,3 +1,9 @@
+# ── CATATAN SINGLE SOURCE OF TRUTH (AGRA) ──
+# KONFIGURASI HANYA DI: /etc/agra/globals.yml (control node localhost)
+# File inventory INI HANYA untuk daftar host, group membership, dan vars KONEKSI SSH
+# (ansible_host, ansible_connection, ansible_user, ansible_port, ansible_ssh_*)
+# ⛔ JANGAN SET VARS FITUR disini!
+
 [monitoring]
 localhost ansible_connection=local ansible_host=127.0.0.1
 

@@ -55,7 +55,7 @@ monitoring stack, dengan:
 
 1. **Topology-driven, bukan flag-driven** — perilaku (all-in-one, multi-node,
    VIP aktif/tidak) ditentukan oleh isi inventory, seminimal mungkin flag
-   eksplisit yang bisa out-of-sync dengan kondisi nyata.
+   eksplisit yang bisa out-of-sync dengan kondisi nyata; vars konfigurasi non-topologi (semua fitur flag, versi service tag/image, path TLS, mode deployment, grafana_database backend, dll) HANYA di single source of truth **`/etc/agra/globals.yml` absolute path control node** — inventory hanya menentukan topology via group membership (daftar host), DILARANG menyimpan vars konfigurasi fitur di dalam inventory [group:vars]. Lihat RULES.md §14.
 2. **Config override tanpa fork kode** — custom config user selalu didahulukan
    dari default template, lewat mekanisme `first_found` di folder
    `/etc/agra/config/<service>/`.

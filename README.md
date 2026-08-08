@@ -23,14 +23,36 @@ python3 -m venv .venv && source .venv/bin/activate
    agra genpwd
    ```
 
-2. **Edit Konfigurasi & Inventory**:
-   Edit `$EDITOR /etc/agra/globals.yml` — setidaknya 3 variabel berikut:
+2a. **Edit KONFIGURASI GLOBALS (satu-satunya sumber vars konfigurasi)**:
+   Edit `$EDITOR /etc/agra/globals.yml` — setidaknya 4 variabel berikut:
    ```yaml
-   agra_deployment_mode: docker     # docker | native
-   enable_ha_grafana: false         # set true jika 2+ node monitoring
-   monitoring_vip: 10.0.0.100       # isi jika enable_ha_grafana: true
+   agra_deployment_mode: docker     # docker | native (systemd)
+   enable_ha_grafana: false         # set true jika 2+ node monitoring (multi-node HA)
+   monitoring_vip: 10.0.0.100       # WAJIB diisi jika enable_ha_grafana: true (Virtual IP Keepalived)
+   grafana_database: sqlite         # sqlite | mysql | postgresql (eksternal)
    ```
-   Kemudian edit inventory: pilih `inventory/all-in-one` (single node) atau `inventory/multinode` (multi-node HA).
+   ⚠️ **PENTING**: Semua konfigurasi fitur/versi (grafana_tag, prometheus_tag, enable_https, tls_cert_path, dsb) **HANYA diset di file ini**. JANGAN set vars konfigurasi di file inventory (mis. `[monitoring:vars]`) atau host_vars/*. Lihat RULES.md §14.
+
+2b. **Edit INVENTORY TOPOLOGI (hanya daftar host + IP koneksi)**:
+   Pilih file inventory yang sesuai (topologi ditentukan oleh group membership):
+   - `inventory/all-in-one` → single node (1 host menjalankan semua stack: Grafana, Prometheus, Nginx)
+   - `inventory/multinode` → multi-node HA (2+ host monitoring group + app node untuk node_exporter)
+   Edit hanya baris IP `ansible_host=` per host sesuai environment.
+
+> ⚠️  **PERINGATAN SINGLE SOURCE OF TRUTH (WAJIB DIBACA SEBELUM LANJUT):**
+>
+> Semua vars konfigurasi fitur & versi (monitoring_vip, enable_ha_grafana, grafana_database, grafana_tag, prometheus_tag, node_exporter_tag, enable_https, tls_cert_path, agra_deployment_mode, dan 100+ vars lain di SCHEMA.md) **HANYA DIBACA PRECHECK DARI file**:
+>
+> ```
+> ✅  /etc/agra/globals.yml   (control node localhost — SATU-SATUNYA SUMBER)
+> ```
+>
+> ❌ **DILARANG KERAS** set vars konfigurasi di file inventory (misal block `[monitoring:vars]`) atau di folder `host_vars/<hostname>.yml`!
+>    Precheck assertion **TIDAK AKAN MEMBACA value dari sana**, dan kamu akan mendapatkan error "kosong padahal sudah diset" (ini bukan bug, ini sengaja didesain untuk determinisme single source of truth, menghindari false negative non-deterministik hostvars + include_vars silent fail).
+>
+> Yang BOLEH diset di inventory/host_vars: **HANYA vars KONEKSI SSH**: `ansible_host`, `ansible_connection`, `ansible_user`, `ansible_port`, `ansible_ssh_private_key_file`, `ansible_become_pass`, dsb.
+>
+> Lihat **RULES.md §14** untuk penjelasan lengkap & daftar kategori vars.
 
 3. **Pre-generate SSL (Opsional tapi Disarankan)**:
    ```bash

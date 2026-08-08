@@ -1,3 +1,11 @@
+# ── CATATAN SINGLE SOURCE OF TRUTH (AGRA) ──
+# KONFIGURASI HANYA DI: /etc/agra/globals.yml (control node localhost)
+# File inventory INI HANYA untuk daftar host, group membership, dan vars KONEKSI SSH
+# (ansible_host, ansible_connection, ansible_user, ansible_port, ansible_ssh_*)
+# ⛔ JANGAN SET VARS FITUR disini! (monitoring_vip, enable_ha_grafana, grafana_database, dll)
+#    Setting vars fitur disini = PRECHECK TIDAK AKAN MEMBACANYA → assertion FAIL!
+#    Lihat RULES.md §14 untuk penjelasan lengkap.
+
 [monitoring]
 mon1 ansible_host=10.0.0.11
 mon2 ansible_host=10.0.0.12
@@ -15,8 +23,3 @@ monitoring
 
 [prometheus:children]
 monitoring
-
-[monitoring:vars]
-monitoring_vip=10.0.0.100
-monitoring_vip_interface=eth0
-enable_ha_grafana=true

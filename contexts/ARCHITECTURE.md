@@ -12,7 +12,7 @@ bukan OpenStack:
 - Layered config: default config di-generate dari template role, bisa di-override
   penuh oleh custom config user tanpa mengubah kode role.
 - Single source of truth: `globals.yml` untuk feature flag & versi, `passwords.yml`
-  (ter-vault) untuk semua secret.
+  (ter-vault) untuk semua secret. PRECHECK ASSERTION secara eksplisit **HANYA membaca direct parse file `/etc/agra/globals.yml`** (tidak melewati mekanisme include_vars merge namespace), untuk menghindari (a) silent fail include_vars saat YAML globals syntax error / permission 0640 non-root, dan (b) scoping ambigu inventory `hostvars[*]` + `delegate_to: localhost run_once` yang menyebabkan false negative assertion non-deterministik. Lihat RULES.md §14.
 - CLI wrapper (`agra`) sebagai satu-satunya entry point operasional — user tidak
   disarankan menjalankan `ansible-playbook` langsung.
 - Topology-driven: perilaku all-in-one vs multi-node vs HA ditentukan murni dari
@@ -207,6 +207,7 @@ mengikuti ketahanan Prometheus yang men-scrape dia.
 
 ## 9. Pre-flight Check
 
+Validasi assertion precheck menggunakan **direct parse `/etc/agra/globals.yml` sebagai single source of truth untuk semua vars konfigurasi fitur & versi**; precheck tidak membaca vars konfigurasi dari inventory [group:vars] / Ansible `hostvars` per-node (inventory hanya menentukan topologi via group membership). Lihat RULES.md §14 untuk daftar vars yang termasuk konfigurasi vs koneksi.
 Seluruh validasi (`assert`) yang berkaitan dengan syarat HA, jumlah node,
 backend database, dsb, dikumpulkan di `playbooks/precheck.yml`, dijalankan
 otomatis di awal `agra deploy`/`agra upgrade`, dan bisa dipanggil standalone
