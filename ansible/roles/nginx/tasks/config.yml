@@ -60,12 +60,37 @@
           dst: "{{ tls_dhparam_path }}"
           mode: '0644'
       become: true
+      become_user: root
       delegate_to: localhost
       run_once: true
+      changed_when: false
 
-    - name: Nginx (SSL Default Source) - Copy cert control-node ke managed-host jika source exist
-      ansible.builtin.copy:
+    - name: Nginx (SSL Default Source) - SLURP cert default di CONTROL NODE (become root, handle root-owned 0600 key RULES §7 security)
+      ansible.builtin.slurp:
         src: "{{ item.item.src }}"
+      register: _defssl_slurp
+      loop: "{{ _defssl_src_stat.results }}"
+      when:
+        - _defssl_src_stat is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+      become: true
+      become_user: root
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: Nginx (SSL Default Source) - COPY CONTENT via slurp (bukan copy src= path) ke managed-host (hindari control-node user non-root read permission Errno 13 cert 0600)
+      ansible.builtin.copy:
+        content: "{{ _defssl_slurp.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | map(attribute='content')
+          | first
+          | b64decode }}"
         dest: "{{ item.item.dst }}"
         owner: root
         group: root
@@ -73,7 +98,18 @@
         force: "{{ overwrite_ssl_certs | default(false) | bool }}"
         backup: true
       loop: "{{ _defssl_src_stat.results }}"
-      when: _defssl_src_stat is defined and item is defined and item.item is defined and item.stat is defined and item.stat.exists
+      when:
+        - _defssl_src_stat is defined
+        - _defssl_slurp is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+        - (_defssl_slurp.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | selectattr('content', 'defined')
+          | list | length) > 0
       notify: ['reload nginx']
   when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
@@ -104,7 +140,7 @@
 
 - name: Nginx (SSL Per-Service Dedicated) - Copy dedicated grafana cert ke managed-host
   block:
-    - name: Stat dedicated grafana cert di control node source
+    - name: Stat dedicated grafana cert di CONTROL NODE source (delegate_to localhost + become root, handle root-owned 0600 RULES §7)
       ansible.builtin.stat:
         path: "{{ item.src }}"
         get_checksum: false
@@ -117,24 +153,64 @@
           dst: "{{ nginx_config_dir }}/ssl/grafana.key"
           mode: '0600'
       when: (tls_grafana_cert_path | default('') | trim | length > 0) and (tls_grafana_key_path | default('') | trim | length > 0)
+      become: true
+      become_user: root
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
 
-    - name: Copy dedicated grafana cert & key jika source ada
-      ansible.builtin.copy:
+    - name: SLURP dedicated grafana cert di CONTROL NODE (become root read 0600)
+      ansible.builtin.slurp:
         src: "{{ item.item.src }}"
+      register: _ded_slurp_g
+      loop: "{{ _ded_stat_g.results }}"
+      when:
+        - _ded_stat_g is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+      become: true
+      become_user: root
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: COPY CONTENT dedicated grafana cert & key via slurp ke managed-host (hindari Errno 13 permission non-root read control node cert)
+      ansible.builtin.copy:
+        content: "{{ _ded_slurp_g.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | map(attribute='content')
+          | first
+          | b64decode }}"
         dest: "{{ item.item.dst }}"
         owner: root
         group: root
         mode: "{{ item.item.mode }}"
-        remote_src: true
+        force: "{{ overwrite_ssl_certs | default(false) | bool }}"
+        backup: true
       loop: "{{ _ded_stat_g.results }}"
-      when: _ded_stat_g is defined and item is defined and item.stat is defined and item.stat.exists
+      when:
+        - _ded_stat_g is defined
+        - _ded_slurp_g is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+        - (_ded_slurp_g.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | selectattr('content', 'defined')
+          | list | length) > 0
       notify: ['reload nginx']
   when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
 
 - name: Nginx (SSL Per-Service Dedicated) - Copy dedicated prometheus cert ke managed-host
   block:
-    - name: Stat dedicated prometheus cert di control node source
+    - name: Stat dedicated prometheus cert di CONTROL NODE source (delegate_to localhost + become root, handle root-owned 0600 RULES §7)
       ansible.builtin.stat:
         path: "{{ item.src }}"
         get_checksum: false
@@ -147,17 +223,57 @@
           dst: "{{ nginx_config_dir }}/ssl/prometheus.key"
           mode: '0600'
       when: ((tls_prometheus_cert_path | default('') | trim | length > 0) and (tls_prometheus_key_path | default('') | trim | length > 0)) or ((prometheus_domain | default('') | trim | length) > 0)
+      become: true
+      become_user: root
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
 
-    - name: Copy dedicated prometheus cert & key jika source ada
-      ansible.builtin.copy:
+    - name: SLURP dedicated prometheus cert di CONTROL NODE (become root read 0600)
+      ansible.builtin.slurp:
         src: "{{ item.item.src }}"
+      register: _ded_slurp_p
+      loop: "{{ _ded_stat_p.results }}"
+      when:
+        - _ded_stat_p is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+      become: true
+      become_user: root
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+      failed_when: false
+
+    - name: COPY CONTENT dedicated prometheus cert & key via slurp ke managed-host (hindari Errno 13 permission non-root read control node cert)
+      ansible.builtin.copy:
+        content: "{{ _ded_slurp_p.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | map(attribute='content')
+          | first
+          | b64decode }}"
         dest: "{{ item.item.dst }}"
         owner: root
         group: root
         mode: "{{ item.item.mode }}"
-        remote_src: true
+        force: "{{ overwrite_ssl_certs | default(false) | bool }}"
+        backup: true
       loop: "{{ _ded_stat_p.results }}"
-      when: _ded_stat_p is defined and item is defined and item.stat is defined and item.stat.exists
+      when:
+        - _ded_stat_p is defined
+        - _ded_slurp_p is defined
+        - item is defined
+        - item.item is defined
+        - item.stat is defined
+        - item.stat.exists | bool
+        - (_ded_slurp_p.results
+          | selectattr('item.item.src', 'defined')
+          | selectattr('item.item.src', 'equalto', item.item.src)
+          | selectattr('content', 'defined')
+          | list | length) > 0
       notify: ['reload nginx']
   when: enable_https | default(true) | bool
   tags: ['nginx', 'config', 'ssl']
