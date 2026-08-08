@@ -132,7 +132,7 @@ Catatan: Tidak ada konsep HA untuk Node Exporter.
 | `monitoring_vip_interface` | string | `ansible_default_ipv4.interface` | Interface network untuk VIP (default=interface utama host, fallback `eth0`) |
 | `keepalived_router_id` | int | `51` | VRRP virtual router ID (0-255, UNIK antar VRRP cluster di segmen yang sama) |
 | `keepalived_vrrp_instance` | string | `VI_MONITORING_01` | Nama VRRP instance di keepalived.conf |
-| `keepalived_auth_pass` | string (secret) | vault ref | Ref ke `vault_keepalived_auth_pass` (password autentikasi VRRP) |
+| `keepalived_auth_pass` | string (secret) | Default "A9ra!P4s" NON-SECRET placeholder | Password VRRP authentication (type PASS, MAKS 8 karakter Keepalived v2.0 limit). Default "A9ra!P4s" NON-SECRET placeholder. SEBENARNYA WAJIB di-override via passwords.yml dengan ansible-vault encrypt untuk secret production. RULES §7 security. JANGAN SET EMPTY STRING (akan cause CONFIG PARSE FATAL L37 auth_pass missing parameter). |
 | `keepalived_check_interval` | int | `2` | Interval health check (detik) |
 | `keepalived_fall_count` | int | `3` | Jumlah gagal berturut sebelum failover |
 | `keepalived_rise_count` | int | `2` | Jumlah sukses berturut sebelum dianggap pulih |

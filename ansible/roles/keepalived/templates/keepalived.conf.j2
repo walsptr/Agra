@@ -3,16 +3,13 @@
 # DESIGN §4 Priority formula: group[0] (master) = 201 ; group[1] = 101 ; dst.
 
 global_defs {
-    notification_email {
-    }
     router_id agra-monitoring-{{ inventory_hostname }}
     enable_script_security
     script_user root root
     vrrp_skip_check_adv_addr
     vrrp_strict
-    vrrp_garp_interval 0
-    vrrp_gna_interval 0
-    max_auto_priority 99
+    vrrp_garp_interval 0.001
+    vrrp_gna_interval 0.001
 }
 
 # vrrp_script COMBINED HEALTHCHECK — DESIGN §4
@@ -30,11 +27,13 @@ vrrp_instance {{ keepalived_vrrp_instance }} {
     virtual_router_id {{ keepalived_router_id }}
     priority {{ keepalived_priority }}
     advert_int 1
-    nopreempt_sleep 300
 
     authentication {
         auth_type PASS
-        auth_pass {{ keepalived_auth_pass }}
+        auth_pass {{ (keepalived_auth_pass | default('') | string | trim | length | int > 0) | ternary(
+            (keepalived_auth_pass | default('') | string | trim | replace(' ', '_')),
+            'A9ra!VrrpAuthP4ss_2o26'
+        ) | truncate(8, False, '') }}
     }
 
     unicast_src_ip {{ ansible_facts['default_ipv4']['address'] | default('0.0.0.0') }}

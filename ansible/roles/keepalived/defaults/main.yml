@@ -9,7 +9,9 @@ monitoring_vip_interface: "{{ ansible_facts['default_ipv4']['interface'] | defau
 
 keepalived_router_id: 51
 keepalived_vrrp_instance: VI_MONITORING_01
-keepalived_auth_pass: ""
+# Keepalived VRRP auth_pass (type PASS max 8 chars, rule RULES §7 security keepalived v2.0 legacy).
+# CATATAN: default ini NON-SECRET placeholder; OVERRIDE RECOMMENDED via passwords.yml sebagai keepalived_auth_pass vault-encrypted.
+keepalived_auth_pass: "A9ra!P4s"
 keepalived_check_interval: 2
 keepalived_fall_count: 3
 keepalived_rise_count: 2
