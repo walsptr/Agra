@@ -17,6 +17,20 @@
       ansible.builtin.stat:
         path: "{{ passwords_file }}"
       register: _pwd_stat
+      become: true
+      become_user: root
+      changed_when: false
+
+    - name: 'GenPwd — Ensure /etc/agra directory exists (root:root mode 0775, RULES §14 grup agra writable)'
+      ansible.builtin.file:
+        path: /etc/agra
+        state: directory
+        owner: root
+        group: root
+        mode: '0775'
+      become: true
+      become_user: root
+      changed_when: false
 
     - name: 'GenPwd — Assert JANGAN overwrite jika existing non-empty DAN tidak force'
       ansible.builtin.assert:
@@ -39,6 +53,8 @@
         - _pwd_stat.stat.exists
         - _pwd_stat.stat.size | default(0) > 10
       ignore_errors: true
+      become: true
+      become_user: root
 
     - name: 'GenPwd — Generate 6 random passwords via python3 secrets module (ZERO DEPENDENCY)'
       block:
@@ -144,6 +160,8 @@
           backup_s3_access_key: "{{ _pwd_backup_s3_access }}"
           backup_s3_secret_key: "{{ _pwd_backup_s3_secret }}"
       no_log: true
+      become: true
+      become_user: root
 
     - name: 'GenPwd — Success info'
       ansible.builtin.debug:

@@ -30,10 +30,15 @@ vrrp_instance {{ keepalived_vrrp_instance }} {
 
     authentication {
         auth_type PASS
-        auth_pass {{ (keepalived_auth_pass | default('') | string | trim | length | int > 0) | ternary(
-            (keepalived_auth_pass | default('') | string | trim | replace(' ', '_')),
-            'A9ra!VrrpAuthP4ss_2o26'
-        ) | truncate(8, False, '') }}
+        auth_pass {{
+          (
+            (keepalived_auth_pass | default('') | string | trim | replace(' ', '_') | length > 0)
+            | ternary(
+                (keepalived_auth_pass | default('') | string | trim | replace(' ', '_')),
+                'A9ra!Vrrp'
+              )
+          ) | truncate(8, True, '')
+        }}
     }
 
     unicast_src_ip {{ ansible_facts['default_ipv4']['address'] | default('0.0.0.0') }}
