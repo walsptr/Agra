@@ -654,11 +654,17 @@
             _precheck_pwd_dict_keys_count:    "{{ (_precheck_pwd_dict.keys() | default([], true) | list | length) }}"
             _precheck_pwd_field_admin_exists: "{{ (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_admin_password']) | length > 0) }}"
             _precheck_pwd_field_secret_exists: "{{ (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_secret_key']) | length > 0) }}"
+
+            _precheck_pwd_raw_text: >-
+              {{ ( (not _precheck_pwd_slurp.skipped | default(false)) | ternary( (_precheck_pwd_slurp.content | default('') | b64decode | default('', true)), '' ) ) }}
+            _precheck_pwd_raw_first50:     "{{ _precheck_pwd_raw_text[:50] | default('', true) | string | replace('\n', ' ') }}"
+            _precheck_pwd_raw_line_count:  "{{ ( _precheck_pwd_raw_text.split('\n') | list | length | default(0) | int ) }}"
+            _precheck_pwd_is_vault:        "{{ ((_precheck_pwd_raw_first50 | string | trim | regex_search('^[$]ANSIBLE_VAULT', ignorecase=true) | default('', true) | length) > 0) | bool }}"
           run_once: true
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — DEBUG SELALU PRINT: Status file, hasil parse dict, value field SEBELUM assertion (tidak ada no_log = SELALU muncul, user TIDAK bingung lagi)'
+        - name: 'Precheck Secret Grafana — DEBUG SELALU PRINT: [1]STAT [2]PARSE [3]FIELD [5]RAW CONTENT detect VAULT [4]ROOT CAUSE granular'
           ansible.builtin.debug:
             msg: |
               🔍 PRECHECK GRAFANA SECRET — TROUBLESHOOT INFO (DIAGNOSTIC):
@@ -671,7 +677,7 @@
               │     · Owner              : {{ _precheck_pwd_stat.stat.pw_name | default('?') }}:{{ _precheck_pwd_stat.stat.gr_name | default('?') }}  (harus = root:root)
               {% endif %}
               ├─────────────────────────────────────────────────────────────────┤
-              │ [2] HASIL PARSE DICT passwords.yml (slurp + b64decode + from_yaml)
+              │ [2] HASIL PARSE DICT passwords.yml (slurp + b64decode + from_yaml)│
               │     · Jumlah total keys  : {{ _precheck_pwd_dict_keys_count }} keys
               │     · List keys yang ADA : [{% for k in _precheck_pwd_dict_keys %}'{{ k }}'{% if not loop.last %}, {% endif %}{% endfor %}]
               ├─────────────────────────────────────────────────────────────────┤
@@ -686,27 +692,47 @@
               │       → VALUE (truncate 20) : "{{ _precheck_pwd_grafana_secret[:20] }}{% if _precheck_pwd_grafana_secret | length > 20 %}...{% endif %}"
               │       → PANJANG VALUE      : {{ _precheck_pwd_grafana_secret | length }}
               ├─────────────────────────────────────────────────────────────────┤
-              │ [4] ROOT CAUSE KEMUNGKINAN (Berdasarkan 3 panel di atas):        │
+              │ [5] RAW CONTENT FILE (SLURP b64decode TANPA from_yaml)          │
+              │     · First 50 chars file  : "{{ _precheck_pwd_raw_first50 }}"
+              │     · Total baris file     : {{ _precheck_pwd_raw_line_count }} lines
+              │     · FILE TER-ENKRIPSI VAULT? : {{ _precheck_pwd_is_vault }}   (jika True = file DITULIS SECARA BUKAN PLAINTEXT!)
+              ├─────────────────────────────────────────────────────────────────┤
+              │ [4] ROOT CAUSE KEMUNGKINAN (Berdasarkan panel [1]+[2]+[3]+[5]): │
               {% if not _precheck_pwd_file_exists | bool %}
               │   ⚠️ FILE TIDAK ADA → Solusi: Jalankan `agra genpwd`               │
               {% elif _precheck_pwd_stat.stat.mode is defined and _precheck_pwd_stat.stat.mode != '0600' %}
               │   ⚠️ MODE FILE BUKAN 0600 → Fix: sudo chmod 0600 /etc/agra/passwords.yml │
               {% elif _precheck_pwd_stat.stat.pw_name is defined and _precheck_pwd_stat.stat.pw_name != 'root' %}
               │   ⚠️ OWNER BUKAN root → Fix: sudo chown root:root /etc/agra/passwords.yml │
+              {% elif _precheck_pwd_file_exists | bool and ( _precheck_pwd_stat.stat.size | default(0) | int > 50 ) and ( _precheck_pwd_dict_keys_count | int == 0 ) and _precheck_pwd_is_vault | bool %}
+              │   🚨 KASUS KHUSUS: FILE = VAULT ENCRYPTED!                        │
+              │      → Size file BESAR ({{ _precheck_pwd_stat.stat.size }} bytes) tapi keys=0!
+              │      → First chars = $ANSIBLE_VAULT (encrypted, BUKAN YAML plaintext!)
+              │      → KENAPA: User PERNAH `ansible-vault encrypt` / CLI SEBELUMNYA tulis encrypted tanpa decrypt.
+              │   ✅ CARA FIX 1 MENIT: JALANKAN `agra genpwd --force`             │
+              │      (genpwd OVERWRITE semua isi FILE DENGAN PLAINTEXT YANG VALID + random baru semua field)
+              │      ATAU jika ingin DECRYPT file existing yang punya nilai rahasia penting:
+              │          $ sudo ansible-vault decrypt /etc/agra/passwords.yml
+              {% elif _precheck_pwd_file_exists | bool and ( _precheck_pwd_stat.stat.size | default(0) | int > 50 ) and ( _precheck_pwd_dict_keys_count | int == 0 ) and not _precheck_pwd_is_vault | bool %}
+              │   ⚠️ FILE BESAR tapi PARSE YAML RETURN DICT KOSONG (0 keys)!      │
+              │      → BUKAN VAULT tapi YAML TIDAK VALID. Kemungkinan:
+              │        · Hanya comment TANPA key:value apapun.
+              │        · Syntax YAML rusak total (tab / colon / quote salah).
+              │   ✅ FIX: Jalankan `agra genpwd --force` (overwrite file dgn YANG VALID!)
               {% elif (not _precheck_pwd_field_admin_exists | bool) or (not _precheck_pwd_field_secret_exists | bool) %}
-              │   ⚠️ FIELD TIDAK ADA DI FILE! (field grafana_admin_password / grafana_secret_key TIDAK muncul di list keys panel 2)
-              │   ✅ CARA FIX PALING MUDAH: Jalankan → `agra genpwd`  (TANPA --force!)
-              │      → Commit terbaru da2b4bf: genpwd SEKARANG IDEMPOTENT field-by-field.
-              │      → HANYA field KOSONG yang DIISI random baru.
-              │      → Field existing (keepalived/s3) TIDAK di-OVERWRITE. 100% AMAN.
+              │   ⚠️ FIELD TIDAK ADA DI FILE! (grafana_admin_password / grafana_secret_key TIDAK di list keys panel 2)
+              │   ✅ CARA FIX MUDAH: Jalankan → `agra genpwd`  (TANPA --force!)    │
+              │      → Commit da2b4bf: genpwd IDEMPOTENT field-by-field.         │
+              │      → HANYA field KOSONG yang DIISI random baru.                │
+              │      → Field existing (keepalived/s3) RETAIN 100% AMAN.          │
               {% elif _precheck_pwd_grafana_admin | length == 0 %}
-              │   ⚠️ FIELD ADA TAPI VALUE KOSONG → Jalankan `agra genpwd` (field akan diisi random) │
+              │   ⚠️ FIELD ADA tapi VALUE KOSONG → `agra genpwd` (field diisi random) │
               {% elif _precheck_pwd_grafana_admin == 'admin' %}
-              │   ⚠️ FIELD ADA TAPI VALUE = "admin" (default lemah!) → jalankan `agra genpwd --force` │
+              │   ⚠️ VALUE = "admin" (default lemah!) → `agra genpwd --force`       │
               {% elif _precheck_pwd_grafana_secret | length < 16 %}
-              │   ⚠️ FIELD secret_key PANJANG < 16 KARAKTER → Jalankan `agra genpwd` (atau --force jika mau regenerate) │
+              │   ⚠️ secret_key PANJANG < 16 → `agra genpwd` (atau --force regenerate) │
               {% else %}
-              │   ✅ SEMUA FIELD TERISI DAN SESUAI STANDARD → assertion SELANJUTNYA diharapkan PASS ✔ │
+              │   ✅ SEMUA SESUAI STANDARD → assertion PASS ✔                     │
               {% endif %}
               └─────────────────────────────────────────────────────────────────┘
           run_once: true
@@ -740,54 +766,61 @@
         - name: 'Precheck Secret Grafana — FAIL-FAST ASSERT: grafana_admin_password TIDAK BOLEH = "admin" (default) dan minimal 8 karakter'
           ansible.builtin.assert:
             that:
-              - _precheck_pwd_grafana_admin | length > 0
-              - _precheck_pwd_grafana_admin != 'admin'
-              - _precheck_pwd_grafana_admin | length >= 8
+              - _precheck_pwd_field_admin_exists | bool
+              - _precheck_pwd_grafana_admin | string | length > 0
+              - _precheck_pwd_grafana_admin | string != 'admin'
+              - _precheck_pwd_grafana_admin | string | length >= 8
             fail_msg: >-
-                ❌ SECURITY: grafana_admin_password di /etc/agra/passwords.yml NILAI DEFAULT/BURUK!
+                ❌ SECURITY: grafana_admin_password di /etc/agra/passwords.yml TIDAK SESUAI STANDARD!
                 
-                === DIAGNOSTIC DARI DEBUG PANEL DI ATAS (task sebelum assertion ini): ===
-                · Field ADA di passwords.yml?    : {{ _precheck_pwd_field_admin_exists }}
-                · Nilai saat ini (truncate 16)   : "{{ _precheck_pwd_grafana_admin[:16] }}{% if _precheck_pwd_grafana_admin | length > 16 %}...{% endif %}"
-                · Panjang karakter               : {{ _precheck_pwd_grafana_admin | length }} (harus >= 8)
-                · Sama dengan "admin"?           : {{ _precheck_pwd_grafana_admin == 'admin' }}
+                === [DIAGNOSTIC] DATA DARI DEBUG PANEL [1]-[5] DI ATAS ===
+                · FILE TER-ENKRIPSI VAULT?      : {{ _precheck_pwd_is_vault }}
+                · Field ADA di passwords.yml?   : {{ _precheck_pwd_field_admin_exists }}
+                · Nilai saat ini (truncate 16)  : "{{ _precheck_pwd_grafana_admin[:16] }}{% if _precheck_pwd_grafana_admin | length > 16 %}...{% endif %}"
+                · Panjang karakter              : {{ _precheck_pwd_grafana_admin | length }} (minimal 8)
+                · Sama dengan default "admin"?  : {{ _precheck_pwd_grafana_admin == 'admin' }}
                 
-                === ROOT CAUSE BERDASARKAN DIAGNOSTIC: ===
-                {% if not _precheck_pwd_field_admin_exists | bool %}
+                === [ROOT CAUSE BERDASARKAN DIAGNOSTIC (auto Jinja if/elif)] ===
+                {% if _precheck_pwd_is_vault | bool %}
+                🔴 FILE = VAULT ENCRYPTED (bukan plaintext YAML). Slurp baca ciphertext → from_yaml return {}.
+                   Ini penyebab UTAMA assertion FAIL hari ini! Kenapa bisa: ansible-vault encrypt / CLI sebelumnya write encrypted.
+                {% elif not _precheck_pwd_field_admin_exists | bool %}
                 🔴 FIELD `grafana_admin_password` TIDAK ADA SAMA SEKALI di passwords.yml!
-                   Ini biasanya karena genpwd PERNAH dijalankan SEBELUM commit da2b4bf (versi genpwd
-                   LAMA cek kasar size file >50 bytes → GAGAL tanpa --force, file TIDAK diubah,
-                   field grafana TETAP TIDAK ADA di file).
+                   Biasanya genpwd PERNAH dijalankan SEBELUM commit da2b4bf (versi lama cek size>50 bytes → GAGAL tanpa --force, file TIDAK diubah).
                 {% elif _precheck_pwd_grafana_admin | length == 0 %}
-                🟡 FIELD ADA tapi VALUE KOSONG string.
+                🟡 FIELD ADA TAPI VALUE KOSONG string (empty).
                 {% elif _precheck_pwd_grafana_admin == 'admin' %}
-                🔴 FIELD ADA tapi VALUE = 'admin' DEFAULT TIDAK AMAN.
+                🔴 FIELD ADA TAPI VALUE = 'admin' DEFAULT TIDAK AMAN!
                 {% elif _precheck_pwd_grafana_admin | length < 8 %}
-                🟡 FIELD ADA tapi PANJANG KURANG DARI 8 KARAKTER (min std keamanan).
+                🟡 FIELD ADA TAPI PANJANG KURANG DARI 8 KARAKTER.
                 {% else %}
-                🔴 Lihat panel debug task sebelumnya untuk diagnostic lebih detail.
+                🔴 Lihat panel debug task di atas [1]-[5] untuk diagnostic detail lebih lanjut.
                 {% endif %}
                 
-                === CARA FIX (1 menit, TANPA --force, 100% AMAN existing field dipertahankan): ===
-                  1. (Pastikan SUDAH git pull origin main → commit da2b4bf ADA untuk genpwd idempotent)
-                  2. Jalankan TANPA --force:
-                          $ agra genpwd
-                     → genpwd SEKARANG (da2b4bf) IDEMPOTENT field-by-field:
-                       · Field existing SUDAH terisi (keepalived/s3/grafana_db) → RETAIN TIDAK di-sentuh.
-                       · Field KOSONG / TIDAK ADA (grafana_admin/secret_key) → OTOMATIS DIISI random 14 chars.
-                  3. Jalankan LAGI:
-                          $ agra precheck -i inventory/....yml
-                     (Seharusnya assertion Grafana secret SEKARANG PASS).
-                  4. Deploy ulang:
-                          $ agra deploy   -i inventory/....yml
-                     (grafana container restart DENGAN password BARU dari passwords.yml)
+                === [CARA FIX URUTAN PRIORITAS (1-3 MENIT)] ===
+                  PRIORITAS #1 [JIKA VAULT = True di atas]:
+                     → JALANKAN 👉 $ agra genpwd --force
+                        (OVERWRITE SEMUA field + REGENERATE SEMUA password random secure 14+ chars.
+                         File DITULIS ULANG SEBAGAI PLAINTEXT YANG VALID, TIDAK ENCRYPTED LAGI.)
+                     → ATAU DECRYPT existing file (jika ingin simpan isi lama):
+                        $ sudo ansible-vault decrypt /etc/agra/passwords.yml
+                     → ATAU lihat isi RAW file secara langsung (sudo):
+                        $ sudo head -3 /etc/agra/passwords.yml
                 
-                ⚠ PERHATIAN TAMBAHAN:
-                  · grafana_admin_password HANYA di-apply PERTAMA KALI container start / grafana.db baru.
-                  · Jika DB sudah terlanjur dibuat dengan admin/admin, reset password manual via:
-                      docker exec -it agra-grafana grafana-cli admin reset-admin-password <password-baru>
+                  PRIORITAS #2 [JIKA BUKAN VAULT tapi field TIDAK ADA]:
+                     → 1. Pastikan SUDAH git pull origin main commit da2b4bf ada untuk genpwd idempotent.
+                     → 2. Jalankan TANPA --force (field existing RETAIN 100% AMAN):
+                             $ agra genpwd
+                        → genpwd SEKARANG IDEMPOTENT field-by-field. Hanya field KOSONG / TIDAK ADA yang DIISI.
+                     → 3. Jalankan LAGI precheck: $ agra precheck -i inventory/....yml
+                
+                  PRIORITAS #3 [SEMENTARA ITU, deploy ulang grafana SETELAH password BENAR]:
+                     → $ agra deploy -i inventory/....yml
+                     → ⚠ PERHATIAN: grafana_admin_password HANYA di-apply PERTAMA KALI container start / grafana.db baru.
+                        Jika DB sudah dibuat dengan admin/admin, reset password manual via:
+                          docker exec -it agra-grafana grafana-cli admin reset-admin-password <password-baru>
             success_msg: >-
-                ✅ grafana_admin_password SESUAI STANDARD: length={{ _precheck_pwd_grafana_admin | length }}, bukan default admin.
+              ✅ grafana_admin_password SESUAI STANDARD. Field ADA, length={{ _precheck_pwd_grafana_admin | length }}, BUKAN default admin, BUKAN VAULT encrypted.
           run_once: true
           delegate_to: localhost
 
