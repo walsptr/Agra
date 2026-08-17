@@ -34,6 +34,6 @@ node_exporter_collectors_disabled:
   - mdadm
 ```
 
-Override config custom: taruh `node_exporter.default.j2` di `/etc/agra/config/node_exporter/` (DESIGN.md §2 first_found pattern) untuk mengganti env file.
+Semua konfigurasi Node Exporter Docker-only via variable CLI extra args yang di-build otomatis di dalam role (lihat `tasks/config.yml` section Build extra args string). Untuk override textfile collector path, set `node_exporter_textfile_dir:` di globals.yml.
 
 Lihat contexts/DESIGN.md untuk pola router config+docker.

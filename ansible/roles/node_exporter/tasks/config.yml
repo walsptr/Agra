@@ -53,13 +53,3 @@
       {{ _node_exporter_collectors_args | default([]) | join(' ') }}
   changed_when: false
   tags: ['node_exporter', 'config']
-
-- name: Node Exporter (Config) - Render default env file (native) via first_found
-  ansible.builtin.template:
-    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/node_exporter/node_exporter.default.j2', 'node_exporter.default.j2'], 'paths': [role_path + '/templates']}) }}"
-    dest: "{{ node_exporter_config_dir }}/node_exporter.default"
-    owner: root
-    group: root
-    mode: '0644'
-  notify: ['restart node_exporter']
-  tags: ['node_exporter', 'config']
