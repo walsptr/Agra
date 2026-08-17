@@ -10,7 +10,6 @@ grafana_config_dir: /etc/grafana
 grafana_provisioning_dir: "{{ grafana_config_dir }}/provisioning"
 grafana_dashboards_override_dir: "/etc/agra/config/grafana/dashboards"
 grafana_admin_user: admin
-grafana_admin_password: "admin"
 
 grafana_uid: 472
 grafana_gid: 0
