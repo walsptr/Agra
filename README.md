@@ -71,7 +71,9 @@ python3 -m venv .venv && source .venv/bin/activate
    ```bash
    agra deploy -i inventory/all-in-one
    ```
-   Selesai! Akses dashboard di **https://\<IP\>/grafana** (single-node) atau **https://10.0.0.100/grafana** (HA).
+   Selesai! Akses dashboard **Grafana di path ROOT `/`** (tanpa subpath `/grafana/`, ⚠️ breaking change):
+   - Single-node: **`https://<IP-host>/`**
+   - Multi-node HA: **`https://10.0.0.100/`** (monitoring_vip)
 
 ## Command Reference
 

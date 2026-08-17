@@ -251,8 +251,8 @@ Single-node (akses langsung ke host):
 curl -k https://10.0.0.10/healthz
 # → expected: "OK" atau "healthy"
 
-# Grafana UI
-curl -k https://10.0.0.10/grafana/api/health
+# Grafana UI (root path /, TANPA subpath /grafana/)
+curl -k https://10.0.0.10/api/health
 # → expected: {"database":"ok","version":"11.2.0",...}
 
 # Prometheus internal (di host)
@@ -262,13 +262,13 @@ curl -k https://10.0.0.10/grafana/api/health
 
 HA (akses via VIP `10.0.0.100`):
 ```bash
-curl -k https://10.0.0.100/grafana/api/health
+curl -k https://10.0.0.100/api/health
 # → database ok
 ```
 
 **Step 7B: Login Grafana dashboard**
 
-1. Buka browser ke `https://<IP>/grafana` (single) atau `https://<VIP>/grafana` (HA)
+1. Buka browser ke `https://<IP>/` (single node) atau `https://<VIP>/` (HA). Grafana serve langsung di **path root `/`**, TIDAK lagi di subpath `/grafana/` (old bookmark `/grafana` → 404).
 2. Username: `admin`
 3. Password: lihat field `grafana_admin_password` di `passwords.yml`:
    ```bash

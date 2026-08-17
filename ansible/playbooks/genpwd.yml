@@ -144,7 +144,7 @@
           # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600. JANGAN PERNAH commit PLAINTEXT passwords.yml ke GIT (SUDAH di .gitignore). Jika butuh enkripsi, pakai tool external seperti git-crypt / blackbox / sops.
           # ============================================================
 
-          # Grafana admin password (login ke UI https //vip/grafana/)
+          # Grafana admin password (login ke UI https://vip/ — path root /, TANPA subpath /grafana/)
           grafana_admin_password: "{{ _pwd_grafana_admin }}"
 
           # Grafana external database password (mysql / postgresql)

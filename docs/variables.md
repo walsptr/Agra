@@ -161,7 +161,9 @@ Keepalived untuk Virtual IP (VRRP v2) cluster monitoring multi-node. **Otomatis 
 
 ## 6. Nginx / TLS
 
-Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optional Prometheus (path `/prometheus/`). Docker containerized deployment.
+Reverse proxy Nginx frontend untuk Grafana (serve **langsung di path root `/`**, tanpa subpath) + optional Prometheus (path `/prometheus/`). Docker-only containerized deployment.
+
+⚠️ **Breaking change**: Sebelum v0.5 Grafana serve di subpath `/grafana/`, sekarang semua akses di root path `/` (contoh: `https://10.0.0.100/` bukan lagi `/grafana/`). Bookmark lama `/grafana/` akan 404.
 
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
@@ -209,7 +211,7 @@ Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optiona
 | `tls_hsts_preload` | bool | `false` | HSTS preload (false = tidak otomatis submit ke browser preload list) |
 | `grafana_backend_url` | string | `http://127.0.0.1:{{ grafana_port \| default(3000) }}` | Upstream reverse proxy internal ke Grafana (bind localhost) |
 | `prometheus_backend_url` | string | `http://127.0.0.1:{{ prometheus_port \| default(9090) }}` | Upstream reverse proxy internal ke Prometheus |
-| `server_name` | string | computed | Nginx `server_name` directive. Default = `{{monitoring_vip|default(inventory_hostname)}} _` (catch-all) |
+| `server_name` | string | computed (grafana site template) | Nginx `server_name` directive untuk site Grafana: **HANYA** gabungan `grafana_domain` (jika di-set) + `monitoring_vip` (jika di-set). **TIDAK include hostname/inventory_hostname node** (hostname ubuntu node bukan server alias publik). Catch-all `_` HANYA ditambahkan jika KEDUA value (`grafana_domain` DAN `monitoring_vip`) sama-sama KOSONG (fallback untuk first-time deploy). |
 | `nginx_http_port` | int | `80` | Port HTTP listener (redirect ke HTTPS) |
 | `nginx_https_port` | int | `443` | Port HTTPS listener |
 

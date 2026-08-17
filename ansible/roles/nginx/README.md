@@ -1,6 +1,6 @@
 # Role: nginx
 
-Deploy Nginx sebagai reverse proxy frontend untuk Grafana (path `/` atau `/grafana/`) dan optional Prometheus (path `/prometheus/`). Default pakai native OS package install (lebih stabil untuk reverse proxy production), tapi juga support Docker. Termasuk TLS/HTTPS self-signed auto-generate (default aktif — DESIGN.md §8) dengan Diffie-Hellman params hardening dan HSTS.
+Deploy Nginx sebagai reverse proxy frontend untuk **Grafana di path root `/`** (tanpa subpath `/grafana/` — ⚠️ breaking change v0.5) dan optional Prometheus di path `/prometheus/`. Docker-only containerized deployment (lihat AGENTS.md §Docker-only mode). Termasuk TLS/HTTPS self-signed auto-generate (default aktif — DESIGN.md §8) dengan Diffie-Hellman params hardening dan HSTS security headers.
 
 **HTTPS**: Disarankan pre-generate cert control node via `agra certificates generate --include-dhparam` sebelum deploy. Secara default cert dibaca dari `/etc/agra/ssl/agra.crt` (sesuai default `tls_cert_path` di `/etc/agra/globals.yml`). Untuk regenerate inline managed host post-deploy (emergency): `agra tls regenerate`.
 
