@@ -15,6 +15,28 @@
     - groups['monitoring'] is defined
     - groups['monitoring'] | length > 1
 
+- name: 'Grafana (PRE compute) - set_fact grafana_server_domain + grafana_server_root_url (BREAKDOWN intermediate vars — HINDARI nested ternary parentheses mismatch ERROR: unexpected "}" expected ")")'
+  ansible.builtin.set_fact:
+    _gf_domain_clean:  "{{ (grafana_domain   | default('')) | string | trim | regex_replace('\\s+', '') }}"
+    _gf_vip_clean:     "{{ (monitoring_vip   | default('')) | string | trim | regex_replace('\\s+', '') }}"
+    _gf_host_fallback: "{{ inventory_hostname | string | trim | regex_replace('[^A-Za-z0-9\\.\\-]', '') }}"
+    _gf_port_int:      "{{ grafana_port     | default(3000) | int }}"
+    _gf_nginx_bool:    "{{ enable_nginx     | default(true) | bool }}"
+
+- name: 'Grafana (PRE compute 2/3) - Intermediate step: pilih domain source (grafana_domain > monitoring_vip > inventory_hostname)'
+  ansible.builtin.set_fact:
+    _gf_domain_selected: >-
+      {% if _gf_domain_clean | default('') | length > 0 %}{{ _gf_domain_clean }}{% elif _gf_vip_clean | default('') | length > 0 %}{{ _gf_vip_clean }}{% else %}{{ _gf_host_fallback }}{% endif %}
+
+- name: 'Grafana (PRE compute 3/3) - FINAL: SET grafana_server_domain + grafana_server_root_url TOP LEVEL namespace (digunakan config.yml render grafana.ini.j2 line 14-15 + docker.yml)'
+  ansible.builtin.set_fact:
+    grafana_server_domain: "{{ _gf_domain_selected | trim | regex_replace('[^A-Za-z0-9\\.\\-]', '') }}"
+    grafana_server_root_url: >-
+      {%- set scheme = 'https' if _gf_nginx_bool | bool else 'http' -%}
+      {%- set host_for_url = _gf_vip_clean if (_gf_vip_clean | default('') | length > 0) else _gf_host_fallback -%}
+      {%- set port_suffix = ':' ~ _gf_port_int if (not _gf_nginx_bool | bool) else '' -%}
+      {{ scheme ~ '://' ~ host_for_url ~ port_suffix ~ '/' }}
+
 - name: Grafana - Include shared config tasks
   ansible.builtin.include_tasks: config.yml
 

@@ -42,8 +42,14 @@ grafana_sqlite_sync_method: rsync
 grafana_sqlite_sync_interval: "*/5 * * * *"
 grafana_sqlite_sync_ssh_user: "root"
 
-grafana_server_domain: "{{ (((((grafana_domain | default('')).split() | join('')) | length > 0) | ternary(((grafana_domain | default('')).split() | join('')), ((((monitoring_vip | default('')).split() | join('')) | length > 0) | ternary(((monitoring_vip | default('')).split() | join('')), inventory_hostname)))) | trim | regex_replace('[^A-Za-z0-9\\.\\-]', '')) }}"
-grafana_server_root_url: "{{ (((((((monitoring_vip | default('')).split() | join('')) | length > 0) | ternary('https://' ~ (((monitoring_vip | default('')).split() | join(''))) ~ '/', ((enable_nginx | default(true) | bool) | ternary('https://' ~ inventory_hostname ~ '/', 'http://' ~ inventory_hostname ~ ':' ~ grafana_port ~ '/')))) | trim | regex_replace('`', '') | regex_replace('[^A-Za-z0-9:/\\.\\-?&=_#]', '')) | trim) }}"
+# ⚠️ VARIABEL INI TIDAK BOLEH di-inlin default value Jinja2 TEMPLATE NESTED!
+#    Nested ternary parentheses mismatch -> "unexpected '}' expected ')'" PARSE ERROR FATAL
+#    SEBELUM role task dijalankan (Ansible evaluate SEMUA default inline template AWAL!)
+#
+# COMPUTE REAL VALUE DILAKUKAN DI: roles/grafana/tasks/main.yml set_fact TEPAT SETELAH validate_ha (SEBELUM config.yml + docker.yml)
+grafana_server_domain: ""
+grafana_server_root_url: ""
+
 grafana_server_serve_from_sub_path: "false"
 grafana_server_protocol: http
 grafana_log_level: info
