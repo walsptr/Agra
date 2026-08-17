@@ -606,6 +606,77 @@
       run_once: true
       delegate_to: localhost
 
+    - name: 'Precheck (GRAFANA SECRET) — BLOCK: Cek grafana_admin_password + grafana_secret_key ASLI dari /etc/agra/passwords.yml TIDAK BOLEH default/weak'
+      block:
+        - name: 'Precheck Secret Grafana — Parse direct /etc/agra/passwords.yml via from_yaml file localhost (bukan include_vars untuk hindari precedence override globals)'
+          ansible.builtin.set_fact:
+            _precheck_pwd_dict: >-
+              {{ (lookup('ansible.builtin.file', '/etc/agra/passwords.yml', errors='ignore') | default('---\n', true) | from_yaml) | default({}, true) }}
+          run_once: true
+          delegate_to: localhost
+          become: true
+          become_user: root
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals)'
+          ansible.builtin.set_fact:
+            _precheck_pwd_grafana_admin:     "{{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}"
+            _precheck_pwd_grafana_secret:    "{{ (_precheck_pwd_dict.get('grafana_secret_key',    '') | default('', true) | string | trim) }}"
+            _precheck_pwd_prom_admin:         "{{ (_precheck_pwd_dict.get('prometheus_admin_password', '') | default('', true) | string | trim) }}"
+            _precheck_pwd_grafana_db:         "{{ (_precheck_pwd_dict.get('grafana_database_password', '') | default('', true) | string | trim) }}"
+            _precheck_pwd_backup_s3_secret:   "{{ (_precheck_pwd_dict.get('backup_s3_secret_key',   '') | default('', true) | string | trim) }}"
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — FAIL-FAST ASSERT: grafana_admin_password TIDAK BOLEH = "admin" (default) dan minimal 8 karakter'
+          ansible.builtin.assert:
+            that:
+              - _precheck_pwd_grafana_admin | length > 0
+              - _precheck_pwd_grafana_admin != 'admin'
+              - _precheck_pwd_grafana_admin | length >= 8
+            fail_msg: >-
+              ❌ SECURITY: grafana_admin_password di /etc/agra/passwords.yml NILAI DEFAULT/BURUK!
+              Nilai saat ini (length={{ _precheck_pwd_grafana_admin | length }}): "{{ _precheck_pwd_grafana_admin[:16] }}{% if _precheck_pwd_grafana_admin | length > 16 %}...{% endif %}" (jika empty = passwords.yml belum punya field ini).
+
+              AKAR MASALAH (bug sebelumnya): /etc/agra/globals.yml MEMILIKI grafana_admin_password = "admin"
+              di LINE 26, sedangkan Ansible Variable Precedence: globals.yml vars_files HIGH PRECEDENCE > include_vars passwords.yml.
+              Akibatnya grafana container selalu GF_SECURITY_ADMIN_PASSWORD="admin" meskipun passwords.yml di-load.
+              (Kini globals.yml LINE 26-27 SUDAH DIHAPUS — secret HANYA ada di passwords.yml RULES §7).
+
+              CARA FIX 3 MENIT:
+                1. Jalankan:   $ agra genpwd   (idempotent — TIDAK overwrite password existing yang SUDAH terisi,
+                                              HANYA isi field yang kosong dengan random string 14 chars secure).
+                                   OPSI JIKA ingin regenerate SEMUA password (mis. kebocoran):
+                                               $ agra genpwd --force
+                2. Verifikasi:  $ ls -l /etc/agra/passwords.yml   # chmod 0600 OK
+                                $ grep 'grafana_admin_password:' /etc/agra/passwords.yml  # ada & panjang
+                3. Jalankan:    $ agra precheck -i inventory/....yml   # assertion grafana secret PASS
+                4. Re-deploy:   $ agra deploy   -i inventory/....yml   # grafana container restart pakai password BARU.
+                                   ⚠️ PERHATIAN: grafana_admin_password HANYA di-apply PERTAMA KALI container start / grafana.db baru.
+                                      Jika DB sudah terlanjur dibuat dengan admin/admin, reset password via:
+                                      docker exec -it agra-grafana grafana-cli admin reset-admin-password <password-baru>
+          run_once: true
+          delegate_to: localhost
+
+        - name: 'Precheck Secret Grafana — FAIL-FAST ASSERT: grafana_secret_key TIDAK BOLEH empty / default CHANGE_ME / < 16 karakter'
+          ansible.builtin.assert:
+            that:
+              - _precheck_pwd_grafana_secret | length > 0
+              - _precheck_pwd_grafana_secret | length >= 16
+              - "'CHANGE_ME' not in _precheck_pwd_grafana_secret | upper"
+            fail_msg: >-
+              ❌ SECURITY: grafana_secret_key di /etc/agra/passwords.yml WEAK/DEFAULT/EMPTY!
+              Nilai saat ini (length={{ _precheck_pwd_grafana_secret | length }}): "{{ _precheck_pwd_grafana_secret[:20] }}{% if _precheck_pwd_grafana_secret | length > 20 %}...{% endif %}"
+              (grafana_secret_key minimal 16 karakter, tidak boleh mengandung kata CHANGE_ME placeholder).
+
+              FIX: Jalankan $ agra genpwd  (field grafana_secret_key auto-generate random 32 chars).
+                   Jika isi manual: openssl rand -base64 32 → paste ke /etc/agra/passwords.yml line grafana_secret_key.
+          run_once: true
+          delegate_to: localhost
+      when: enable_grafana | default(true) | bool
+      tags: ['grafana', 'security', 'precheck']
+
     - name: 'Precheck (TLS EXPIRY) — Cek sisa umur cert self-signed jika enable_https'
       block:
         - name: 'Precheck TLS — Stat cert file'
