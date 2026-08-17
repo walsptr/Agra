@@ -5,7 +5,6 @@
   changed_when: true
   notify:
     - restart prometheus docker
-    - restart prometheus native
 
 - name: reload prometheus
   ansible.builtin.debug:
@@ -13,25 +12,13 @@
   changed_when: true
   notify:
     - reload prometheus docker
-    - reload prometheus native
 
 - name: restart prometheus docker
   ansible.builtin.shell:
     cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ prometheus_container_name }} || true
   when:
-    - agra_deployment_mode == 'docker'
     - enable_prometheus | default(true) | bool
   changed_when: true
-  ignore_errors: true
-
-- name: restart prometheus native
-  ansible.builtin.service:
-    name: agra-prometheus
-    state: restarted
-    daemon_reload: true
-  when:
-    - agra_deployment_mode == 'native'
-    - enable_prometheus | default(true) | bool
   ignore_errors: true
 
 - name: reload prometheus docker
@@ -40,16 +27,5 @@
     method: POST
     status_code: [200, 204, 403]
   when:
-    - agra_deployment_mode == 'docker'
-    - enable_prometheus | default(true) | bool
-  ignore_errors: true
-
-- name: reload prometheus native
-  ansible.builtin.uri:
-    url: "http://{{ prometheus_web_listen_address }}/-/reload"
-    method: POST
-    status_code: [200, 204, 403]
-  when:
-    - agra_deployment_mode == 'native'
     - enable_prometheus | default(true) | bool
   ignore_errors: true

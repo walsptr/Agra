@@ -3,8 +3,7 @@
   ansible.builtin.debug:
     msg: >-
       PERINGATAN: Keepalived mode docker MEMBUTUHKAN kernel module ip_vs loaded, cap_add NET_ADMIN,
-      host network mode. Jika bermasalah, gunakan agra_deployment_mode=native untuk keepalived
-      (role keepalived native install OS package, lebih stabil).
+      dan host network mode. Pastikan module ip_vs sudah di-load di host OS.
   tags: ['keepalived', 'docker']
 
 - name: Keepalived (Docker) - Check if image exists locally

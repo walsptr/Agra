@@ -5,7 +5,6 @@
   become: true
   serial: 1
   vars:
-    agra_deployment_mode: docker
     enable_grafana: true
     enable_ha_grafana: true
     grafana_database: sqlite

@@ -65,9 +65,6 @@ $EDITOR /etc/agra/globals.yml
 
 3 variabel wajib perhatikan:
 ```yaml
-# Mode deployment global (pilih salah satu, berlaku untuk semua service)
-agra_deployment_mode: docker     # docker | native
-
 # Aktifkan fitur sinkronisasi data Grafana multi-node
 # (tidak mengaktifkan VIP — VIP otomatis dari inventory len > 1)
 enable_ha_grafana: false          # false | true

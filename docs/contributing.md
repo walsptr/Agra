@@ -227,9 +227,9 @@ Copy-paste checklist berikut ke deskripsi Pull Request kamu. **TIDAK BOLEH** ada
 - [ ] SAFETY GUARD 2-LAYER UNTUK OPERASI DESTRUKTIF: Jika PR menambah command destruktif baru,
       SUDAH ada validasi flag eksplisit `--yes-i-really-mean-it` di CLI (Layer 1)
       DAN `assert` di playbook level (Layer 2) sebelum perubahan benar-benar dijalankan.
-- [ ] TIDAK CAMPUR LOGIC DOCKER/NATIVE DI FILE TASK YANG SAMA: Logic mode deployment
-      SUDAH mengikuti Router Pattern di `tasks/main.yml` (include config.yml → docker.yml/native.yml terpisah).
-      Tidak ada `when: agra_deployment_mode == 'docker'` yang tersebar di dalam `config.yml`.
+- [ ] TIDAK CAMPUR LOGIC CONFIG/DOCKER DI FILE TASK YANG SAMA: Logic deployment
+      SUDAH mengikuti Router Pattern di `tasks/main.yml` (include config.yml → docker.yml terpisah).
+      Semua config ada di `config.yml`, container run logic di `docker.yml`.
 - [ ] TIDAK ADA INSTALL/PROVISIONING DATABASE (MySQL/PostgreSQL): Role/task yang ditambah
       TIDAK MELAKUKAN instalasi, provisioning, setup replication, atau manajemen HA
       terhadap MySQL/MariaDB/PostgreSQL. Hanya koneksi ke database external yang sudah ada.

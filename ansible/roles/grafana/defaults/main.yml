@@ -5,7 +5,6 @@ grafana_port: 3000
 grafana_container_name: agra-grafana
 grafana_image: grafana/grafana-oss
 grafana_tag: 11.2.0
-grafana_native_version: "11.2.0"
 grafana_data_dir: /var/lib/agra/grafana
 grafana_config_dir: /etc/grafana
 grafana_provisioning_dir: "{{ grafana_config_dir }}/provisioning"

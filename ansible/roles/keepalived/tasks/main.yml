@@ -28,10 +28,5 @@
 - name: Keepalived - Include shared config tasks
   ansible.builtin.include_tasks: config.yml
 
-- name: Keepalived - Include docker deployment tasks
+- name: Keepalived - Include docker deployment tasks (Docker-only mode)
   ansible.builtin.include_tasks: docker.yml
-  when: agra_deployment_mode == 'docker'
-
-- name: Keepalived - Include native deployment tasks
-  ansible.builtin.include_tasks: native.yml
-  when: agra_deployment_mode == 'native'

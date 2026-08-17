@@ -1,6 +1,6 @@
 # Role: prometheus
 
-Deploy Prometheus monitoring server (TSDB + scraper engine) dengan hybrid deployment mode: Docker container atau native binary install dari tarball release resmi. Termasuk config override via first_found pattern, scrape target auto-generate dari inventory `groups['node_exporter']` via file_sd, dan Admin API selalu aktif untuk snapshot TSDB backup resmi.
+Deploy Prometheus monitoring server (TSDB + scraper engine) dengan Docker container dari image resmi. Termasuk config override via first_found pattern, scrape target auto-generate dari inventory `groups['node_exporter']` via file_sd, dan Admin API selalu aktif untuk snapshot TSDB backup resmi.
 
 ## Variabel Utama
 
@@ -13,8 +13,7 @@ Deploy Prometheus monitoring server (TSDB + scraper engine) dengan hybrid deploy
 | `prometheus_scrape_interval` | `15s` | Global default scrape interval |
 | `prometheus_evaluation_interval` | `15s` | Evaluasi recording/alerting rules |
 | `prometheus_data_dir` | `/var/lib/agra/prometheus` | Path persist TSDB (tidak di-purge destroy default) |
-| `prometheus_tag` | `v2.53.0` | Docker image tag (mode docker) |
-| `prometheus_native_version` | `2.53.0` | Versi binary (mode native) |
+| `prometheus_tag` | `v2.53.0` | Docker image tag |
 | `expose_prometheus_via_nginx` | `false` | Expose UI publik di `/prometheus/`. Default `false` = return 403 (Prometheus default tanpa auth!) |
 
 ## Contoh Penggunaan
@@ -37,6 +36,6 @@ app1.example.com
 
 Custom config override: taruh template `prometheus.yml.j2` di `/etc/agra/config/prometheus/prometheus.yml.j2` — 100% menggantikan default (DESIGN.md §2, bukan partial merge).
 
-PENTING: `--web.enable-admin-api` SELALU aktif di kedua mode agar endpoint `/api/v1/admin/tsdb/snapshot` tersedia untuk backup TSDB resmi.
+PENTING: `--web.enable-admin-api` SELALU aktif agar endpoint `/api/v1/admin/tsdb/snapshot` tersedia untuk backup TSDB resmi.
 
-Lihat contexts/DESIGN.md untuk pola router config+docker+native.
+Lihat contexts/DESIGN.md untuk pola router config+docker.

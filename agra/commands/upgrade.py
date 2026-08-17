@@ -31,18 +31,6 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         "--node-exporter-tag",
         help="Shortcut set node_exporter tag versi.",
     )
-    p.add_argument(
-        "--prometheus-native-version",
-        help="Shortcut set prometheus native version (mode native).",
-    )
-    p.add_argument(
-        "--grafana-native-version",
-        help="Shortcut set grafana native version (mode native).",
-    )
-    p.add_argument(
-        "--node-exporter-native-version",
-        help="Shortcut set node_exporter native version (mode native).",
-    )
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
     p.add_argument(
@@ -64,9 +52,6 @@ def _shortcut_flags_to_evars(args: argparse.Namespace) -> Dict[str, Any]:
         ("prometheus_tag", "prometheus_tag"),
         ("grafana_tag", "grafana_tag"),
         ("node_exporter_tag", "node_exporter_tag"),
-        ("prometheus_native_version", "prometheus_native_version"),
-        ("grafana_native_version", "grafana_native_version"),
-        ("node_exporter_native_version", "node_exporter_native_version"),
     ]:
         val = getattr(args, attr, None)
         if val:

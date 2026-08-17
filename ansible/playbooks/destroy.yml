@@ -46,71 +46,37 @@
       run_once: true
 
   tasks:
-    - name: 'Destroy — Docker mode: remove all agra containers'
+    - name: 'Destroy — Remove all agra containers'
       block:
-        - name: 'Destroy (Docker) — Remove grafana container'
+        - name: 'Destroy — Remove grafana container'
           ansible.builtin.shell:
             cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ grafana_container_name | default('agra-grafana') }} || true
           changed_when: true
           ignore_errors: true
 
-        - name: 'Destroy (Docker) — Remove prometheus container'
+        - name: 'Destroy — Remove prometheus container'
           ansible.builtin.shell:
             cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ prometheus_container_name | default('agra-prometheus') }} || true
           changed_when: true
           ignore_errors: true
 
-        - name: 'Destroy (Docker) — Remove node_exporter container'
+        - name: 'Destroy — Remove node_exporter container'
           ansible.builtin.shell:
             cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ node_exporter_container_name | default('agra-node-exporter') }} || true
           changed_when: true
           ignore_errors: true
 
-        - name: 'Destroy (Docker) — Remove nginx container'
+        - name: 'Destroy — Remove nginx container'
           ansible.builtin.shell:
             cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ nginx_container_name | default('agra-nginx') }} || true
           changed_when: true
           ignore_errors: true
 
-        - name: 'Destroy (Docker) — Remove keepalived container'
+        - name: 'Destroy — Remove keepalived container'
           ansible.builtin.shell:
             cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME rm -f {{ keepalived_container_name | default('agra-keepalived') }} || true
           changed_when: true
           ignore_errors: true
-      when:
-        - agra_deployment_mode == 'docker'
-
-    - name: 'Destroy — Native mode: stop+disable services, remove systemd units'
-      block:
-        - name: 'Destroy (Native) — Stop & disable agra services'
-          ansible.builtin.service:
-            name: "{{ item }}"
-            state: stopped
-            enabled: false
-          loop:
-            - agra-grafana
-            - agra-prometheus
-            - agra-node-exporter
-            - nginx
-            - keepalived
-          ignore_errors: true
-
-        - name: 'Destroy (Native) — Remove systemd units agra-* dari /etc/systemd/system/'
-          ansible.builtin.file:
-            path: "/etc/systemd/system/{{ item }}"
-            state: absent
-          loop:
-            - agra-grafana.service
-            - agra-prometheus.service
-            - agra-node-exporter.service
-          ignore_errors: true
-
-        - name: 'Destroy (Native) — daemon-reload setelah hapus unit'
-          ansible.builtin.systemd:
-            daemon_reload: true
-          ignore_errors: true
-      when:
-        - agra_deployment_mode == 'native'
 
     - name: 'Destroy (PURGE TIPE 1 DATA) — Delete service data directories JIKA destroy_purge_data=true'
       ansible.builtin.file:

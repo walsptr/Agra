@@ -1,6 +1,6 @@
 # Role: common
 
-Preparasi host umum untuk agra monitoring stack, dijalankan SEBELUM semua role service. Mendukung hybrid deployment mode: `docker` (instal Docker + Python SDK, buat shared network bridge) dan `native` (validasi systemd, prepare package manager). Dijalankan ke seluruh host di inventory (host monitoring dan host yang dimonitor).
+Preparasi host umum untuk agra monitoring stack, dijalankan SEBELUM semua role service. Docker-only deployment: install Docker + Python SDK, buat shared network bridge. Dijalankan ke seluruh host di inventory (host monitoring dan host yang dimonitor).
 
 ## Variabel Utama
 
@@ -16,7 +16,6 @@ Preparasi host umum untuk agra monitoring stack, dijalankan SEBELUM semua role s
 
 Override di `/etc/agra/globals.yml`:
 ```yaml
-agra_deployment_mode: native
 common_firewall_tool: ufw
 common_firewall_ports_tcp:
   - 8080
@@ -34,4 +33,4 @@ Atau apply role di custom playbook:
       tags: [common]
 ```
 
-Lihat contexts/DESIGN.md untuk pola router config+docker+native.
+Lihat contexts/DESIGN.md untuk pola router config+docker.

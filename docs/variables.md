@@ -6,20 +6,18 @@ Referensi lengkap seluruh variabel konfigurasi agra, dikelompokkan per kategori 
 
 Konvensi penamaan:
 - Flag boolean: **prefix `enable_`** (contoh: `enable_grafana`, `enable_https`)
-- Versi Docker: **suffix `_tag`** (contoh: `grafana_tag`, `prometheus_tag`)
-- Versi Native/Binary: **suffix `_native_version`**
+- Versi Docker image: **suffix `_tag`** (contoh: `grafana_tag`, `prometheus_tag`)
 - Path direktori: **suffix `_dir`** (contoh: `grafana_data_dir`)
 - Path file: **suffix `_path`** (contoh: `grafana_sqlite_path`)
 
 ---
 
-## 1. Global / Deployment Mode & Role Common
+## 1. Global / Role Common
 
-Variabel global untuk mode deployment dan preparasi host umum (role `common`).
+Variabel global untuk preparasi host umum (role `common`).
 
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
-| `agra_deployment_mode` | string | `docker` | Mode deployment global: `docker` (container) atau `native` (package/binary systemd) |
 | `common_home_dir` | string | `/var/lib/agra` | Base path persist data seluruh service |
 | `common_etc_dir` | string | `/etc/agra` | Direktori config agra di managed host |
 | `common_os_packages` | list | see defaults | Daftar OS packages umum (rsync, openssl, curl, cron, acl, dll) di-install semua host |
@@ -46,8 +44,7 @@ Semua variabel untuk deployment Grafana (visualisasi dashboard), termasuk 3 opsi
 | `grafana_port` | int | `3000` | Port listen HTTP Grafana (bind ke 127.0.0.1 jika nginx aktif) |
 | `grafana_container_name` | string | `agra-grafana` | Nama container docker Grafana |
 | `grafana_image` | string | `grafana/grafana-oss` | Docker image base untuk mode docker |
-| `grafana_tag` | string | `11.2.0` | Docker image tag (mode docker) |
-| `grafana_native_version` | string | `11.2.0` | Versi package atau binary release (mode native) |
+| `grafana_tag` | string | `11.2.0` | Docker image tag |
 | `grafana_data_dir` | string | `/var/lib/agra/grafana` | Lokasi persist data Grafana (sqlite DB, plugins, uploads) |
 | `grafana_config_dir` | string | `/etc/grafana` | Lokasi config Grafana (`grafana.ini`, provisioning) |
 | `grafana_provisioning_dir` | string | `{{ grafana_config_dir }}/provisioning` | Root provisioning (datasources, dashboards, plugins, notifiers) |
@@ -74,7 +71,6 @@ Semua variabel untuk deployment Grafana (visualisasi dashboard), termasuk 3 opsi
 | `grafana_prometheus_datasource_name` | string | `Prometheus` | Nama display datasource Prometheus di UI Grafana |
 | `grafana_prometheus_datasource_uid` | string | `prometheus-main` | UID datasource stabil (untuk referensi di dashboard JSON via `uid`) |
 | `grafana_prometheus_datasource_url` | string | `http://127.0.0.1:{{ prometheus_port }}` | URL upstream Prometheus untuk datasource (internal via localhost) |
-| `grafana_install_method` | string | `binary` | Fallback metode install native (pakai tar.gz binary resmi) |
 
 ---
 
@@ -98,9 +94,7 @@ Variabel untuk Prometheus server (TSDB + scraper metrics). Admin API selalu akti
 | `prometheus_image` | string | `prom/prometheus` | Docker image Prometheus |
 | `prometheus_tag` | string | `v2.53.0` | Docker image tag |
 | `prometheus_container_name` | string | `agra-prometheus` | Nama container docker |
-| `prometheus_native_version` | string | `2.53.0` | Versi binary release Prometheus |
-| `prometheus_native_binary_path` | string | `/usr/local/bin/prometheus` | Path absolute binary Prometheus (mode native) |
-| `prometheus_native_binary_url` | string | URL github | Template URL download tarball release (mengandung `{{version}}`) |
+| `prometheus_native_binary_path` | string | `/usr/local/bin/prometheus` | Path absolute binary Prometheus (reserved) |
 | `prometheus_native_tools_path` | string | `/usr/local/bin/promtool` | Path binary promtool (untuk validasi config/rules offline) |
 | `prometheus_web_external_url` | string | `""` | Opsional external URL untuk link generation di alert dan UI |
 | `prometheus_web_listen_address` | string (computed) | conditional | Bind: `127.0.0.1:9090` jika nginx aktif tanpa expose, else `0.0.0.0:9090` |
@@ -121,15 +115,14 @@ Variabel untuk Prometheus Node Exporter — mengekspor OS & hardware metrics ke 
 | `node_exporter_port` | int | `9100` | Port listen HTTP endpoint `/metrics` |
 | `node_exporter_image` | string | `prom/node-exporter` | Docker image Node Exporter |
 | `node_exporter_tag` | string | `v1.8.2` | Docker image tag |
-| `node_exporter_native_version` | string | `1.8.2` | Versi binary release (mode native) |
 | `node_exporter_collectors_enabled` | list | `[]` | Collector tambahan diaktifkan (contoh: `['systemd','interrupts','tcpstat']`) → `--collector.<nama>` |
 | `node_exporter_collectors_disabled` | list | `[]` | Collector default dimatikan (contoh: `['arp','mdadm']`) → `--no-collector.<nama>` |
 | `node_exporter_textfile_dir` | string | `""` | Direktori custom untuk textfile collector (opsional; isi suffix `_key="*.prom"` flag) |
 | `node_exporter_config_dir` | string | `/etc/node_exporter` | Direktori config Node Exporter di managed host |
 | `node_exporter_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
 | `node_exporter_container_name` | string | `agra-node-exporter` | Nama container docker |
-| `node_exporter_native_binary_path` | string | `/usr/local/bin/node_exporter` | Path absolute binary (mode native) |
-| `node_exporter_native_binary_url` | string | URL github | Template URL download tarball release (mengandung `{{version}}`) |
+| `node_exporter_native_binary_path` | string | `/usr/local/bin/node_exporter` | Path absolute binary (reserved) |
+| `node_exporter_native_binary_url` | string | URL github | Template URL download tarball release (reserved) |
 | `node_exporter_web_listen_address` | string | `0.0.0.0:{{ node_exporter_port }}` | Bind address — default semua interface (karena di-scrape internal oleh Prometheus) |
 
 > Catatan: Tidak ada konsep HA untuk Node Exporter (exporter pasif). Ketahanan mengikuti Prometheus yang men-scrape dia.
@@ -154,23 +147,21 @@ Keepalived untuk Virtual IP (VRRP v2) cluster monitoring multi-node. **Otomatis 
 | `keepalived_weight` | int | `-20` | Pengurangan priority bila `track_script` gagal |
 | `keepalived_script_name` | string | `chk_agra_monitoring` | Nama `vrrp_script` di keepalived.conf |
 | `keepalived_log_file` | string | `/var/log/agra-keepalived.log` | File log healthcheck + notify script keepalived |
-| `keepalived_config_dir` | string | `/etc/keepalived` | Direktori config keepalived (mode native) |
+| `keepalived_config_dir` | string | `/etc/keepalived` | Direktori config keepalived |
 | `keepalived_container_name` | string | `agra-keepalived` | Nama container docker keepalived |
 | `keepalived_priority` | int (computed) | formula | Priority VRRP per host: `groups['monitoring'][0]` = 201 (MASTER), `idx=1` = 101 (BACKUP), dst. Formula: `201 - idx*100` |
 | `keepalived_state` | string (computed) | MASTER/BACKUP | `MASTER` jika host == `groups['monitoring'][0]`, else `BACKUP`. Deterministik dari inventory order. |
 | `grafana_health_url` | string | `http://127.0.0.1:{{grafana_port}}/api/health` | Endpoint health check Grafana untuk combined vrrp_script |
 | `prometheus_health_url` | string | `http://127.0.0.1:{{prometheus_port}}/-/healthy` | Endpoint health check Prometheus untuk combined vrrp_script |
 | `nginx_health_url` | string | `http://127.0.0.1/healthz` | Endpoint health check Nginx (reserved, future use) |
-| `keepalived_native_package_name` | string | `keepalived` | Nama OS package keepalived (native mode) |
-| `keepalived_service_name` | string | `keepalived` | Nama systemd service keepalived (native mode) |
-| `keepalived_image` | string | `osixia/keepalived` | Docker image keepalived (docker mode) |
+| `keepalived_image` | string | `osixia/keepalived` | Docker image keepalived |
 | `keepalived_tag` | string | `"2.0.20"` | Docker image tag keepalived |
 
 ---
 
 ## 6. Nginx / TLS
 
-Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optional Prometheus (path `/prometheus/`). Default native OS package install.
+Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optional Prometheus (path `/prometheus/`). Docker containerized deployment.
 
 | NAMA VARIABEL | TIPE | DEFAULT VALUE | DESKRIPSI |
 |---|---|---|---|
@@ -179,9 +170,7 @@ Reverse proxy Nginx frontend untuk Grafana (path `/grafana/` atau `/`) + optiona
 | `expose_prometheus_via_nginx` | bool | `false` | Expose Prometheus UI via `/prometheus/`. Default `false` = return 403 (Prometheus default tanpa auth) |
 | `nginx_container_name` | string | `agra-nginx` | Nama container docker nginx |
 | `nginx_image` | string | `nginx` | Docker image Nginx |
-| `nginx_tag` | string | `1.27-alpine` | Docker image tag (hanya mode docker — default nginx pakai native) |
-| `nginx_native_version` | string | `""` | Versi package native. `""` = latest dari repo OS |
-| `nginx_install_method` | string | `native` | Default install method (native preferred untuk reverse proxy production) |
+| `nginx_tag` | string | `1.27-alpine` | Docker image tag |
 | `nginx_config_dir` | string | `/etc/nginx` | Root config Nginx |
 | `nginx_sites_available_dir` | string | `{{ nginx_config_dir }}/sites-available` | Debian-style sites-available directory |
 | `nginx_sites_enabled_dir` | string | `{{ nginx_config_dir }}/sites-enabled` | Debian-style sites-enabled (symlink ke sites-available) |

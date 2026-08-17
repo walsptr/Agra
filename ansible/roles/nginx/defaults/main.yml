@@ -6,8 +6,6 @@ expose_prometheus_via_nginx: false
 nginx_container_name: agra-nginx
 nginx_image: nginx
 nginx_tag: "1.27-alpine"
-nginx_native_version: ""
-nginx_install_method: native
 
 nginx_config_dir: /etc/nginx
 nginx_sites_available_dir: "{{ nginx_config_dir }}/sites-available"
@@ -23,15 +21,14 @@ nginx_pid_path: /var/run/nginx.pid
 #  - docker: nginx:nginx (default user di dalam image alpine nginx official)
 #  - native: www-data:www-data (default Ubuntu/Debian nginx package)
 nginx_container_user: "nginx"
-nginx_native_user: "www-data"
 
 # UID / GID NUMERIC for chown task config.yml L17-27 (runtime dirs log cache):
 # Docker nginx:1.27-alpine official image: nginx user/group = UID 101 / GID 101
 #   (verify: docker run --rm nginx:1.27-alpine id nginx → uid=101 gid=101 groups=101)
 # Native Ubuntu/Debian www-data user = UID 33 / GID 33
 # Advanced user bisa override via globals.yml jika UID host beda.
-nginx_uid: "{{ 101 if ((agra_deployment_mode | default('native')) == 'docker') else 33 }}"
-nginx_gid: "{{ 101 if ((agra_deployment_mode | default('native')) == 'docker') else 33 }}"
+nginx_uid: 101
+nginx_gid: 101
 
 # Default mode UNTUK RUNTIME WRITABLE dirs (log/cache). 0755 = rwxr-xr-x (user write, group+other read-only). Bisa override 0750 jika paranoid.
 nginx_dir_mode: "0755"
@@ -87,6 +84,8 @@ grafana_backend_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}"
 prometheus_backend_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"
 grafana_domain: ""
 prometheus_domain: ""
+grafana_nginx_port: 30080
+prometheus_nginx_port: 30090
 _prometheus_expose_effective: "{{ (expose_prometheus_via_nginx | default(false) | bool) or ((prometheus_domain | default('') | trim | length) > 0) }}"
 _grafana_effective_server_names: "{{ (
   (([grafana_domain] if ((grafana_domain | default('') | trim | length) > 0) else [])

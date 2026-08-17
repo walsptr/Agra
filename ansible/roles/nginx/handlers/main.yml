@@ -3,11 +3,7 @@
   ansible.builtin.shell:
     cmd: |
       RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
-      if [ "{{ agra_deployment_mode }}" = "native" ]; then
-        nginx -t
-      else
-        $RUNTIME exec {{ nginx_container_name }} nginx -t 2>/dev/null || echo "docker nginx skip syntax check (container not running)"
-      fi
+      $RUNTIME exec {{ nginx_container_name }} nginx -t 2>/dev/null || echo "docker nginx skip syntax check (container not running)"
   register: _syntax_check
   changed_when: false
   failed_when: _syntax_check.rc is defined and _syntax_check.rc > 0 and 'skip' not in _syntax_check.stdout
@@ -19,7 +15,6 @@
     msg: "Restart nginx triggered"
   changed_when: true
   notify:
-    - restart nginx native
     - restart nginx docker
 
 - name: reload nginx
@@ -27,41 +22,20 @@
     msg: "Reload nginx triggered"
   changed_when: true
   notify:
-    - reload nginx native
     - reload nginx docker
-
-- name: restart nginx native
-  ansible.builtin.service:
-    name: nginx
-    state: restarted
-  when:
-    - agra_deployment_mode == 'native'
-    - enable_nginx | default(true) | bool
-  ignore_errors: true
 
 - name: restart nginx docker
   ansible.builtin.shell:
     cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME restart {{ nginx_container_name }} || true
   when:
-    - agra_deployment_mode == 'docker'
     - enable_nginx | default(true) | bool
   changed_when: true
-  ignore_errors: true
-
-- name: reload nginx native
-  ansible.builtin.service:
-    name: nginx
-    state: reloaded
-  when:
-    - agra_deployment_mode == 'native'
-    - enable_nginx | default(true) | bool
   ignore_errors: true
 
 - name: reload nginx docker
   ansible.builtin.shell:
     cmd: RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker); $RUNTIME exec {{ nginx_container_name }} nginx -s reload || true
   when:
-    - agra_deployment_mode == 'docker'
     - enable_nginx | default(true) | bool
   changed_when: true
   ignore_errors: true

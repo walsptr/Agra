@@ -202,23 +202,7 @@ agra rollback -i inventory/multinode \
 
 ---
 
-## Q9: `agra_deployment_mode` pilih `docker` atau `native`? Apa tradeoff-nya?
-
-**Jawaban — Tabel perbandingan cepat:**
-
-| Faktor | Docker mode | Native mode |
-|---|---|---|
-| **Kemudahan upgrade** | Sangat mudah — ganti `_tag` → pull image terbaru → restart container 5 detik. | Lebih lambat — download tar.gz, extract binary, systemd restart. Risiko conflict dependency OS library. |
-| **Resource footprint** | Lebih berat — butuh Docker daemon + image layer overhead (~100-300MB per node). | Sangat ringan — hanya single static binary Go (Grafana/Prometheus) + systemd unit. Tanpa container runtime. |
-| **Isolasi** | Bagus — filesystem / network / process diisolasi cgroup + namespace kernel. | Kurang — shared OS filesystem (chown parent root:root 2775 group writable; child service sesuai UID runner). |
-| **Rollback** | Super cepat — kembalikan `_tag` ke versi lama, pull image. | Sedikit lambat — hapus binary baru, download binary lama via get_url. |
-| **Use case cocok** | General production — yang butuh agility upgrade & konsistensi lintas OS distro. | All-in-one edge node / IoT / environment dengan batasan policy "tidak boleh ada container daemon". |
-
-**Rekomendasi default:** Gunakan **docker mode** kecuali ada policy eksplisit melarang container runtime di server Anda. Mode global bisa di-set per inventory / host_vars (override per host untuk hybrid edge case).
-
----
-
-## Q10: Restore Prometheus TSDB corrupt / error WAL checksum failure. Apa penyebab dan solusi pencegahan?
+## Q9: Restore Prometheus TSDB corrupt / error WAL checksum failure. Apa penyebab dan solusi pencegahan?
 
 **Jawaban:**
 

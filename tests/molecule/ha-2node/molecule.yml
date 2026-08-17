@@ -85,7 +85,6 @@ provisioner:
     group_vars:
       all:
         ansible_python_interpreter: /usr/bin/python3
-        agra_deployment_mode: docker
         enable_ha_grafana: true
         grafana_database: sqlite
         monitoring_vip: "172.28.0.100"

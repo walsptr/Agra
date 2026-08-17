@@ -21,8 +21,8 @@ mkdir -p ansible/roles/alertmanager/{defaults,handlers,tasks,templates,meta,test
 # Buat placeholder file (nanti kita isi satu per satu)
 touch ansible/roles/alertmanager/defaults/main.yml
 touch ansible/roles/alertmanager/handlers/main.yml
-touch ansible/roles/alertmanager/tasks/{main,validate_ha,config,docker,native}.yml
-touch ansible/roles/alertmanager/templates/{alertmanager.yml.j2,agra-alertmanager.service.j2,alertmanager.env.j2}
+touch ansible/roles/alertmanager/tasks/{main,validate_ha,config,docker}.yml
+touch ansible/roles/alertmanager/templates/{alertmanager.yml.j2,alertmanager.env.j2}
 touch ansible/roles/alertmanager/README.md
 touch ansible/roles/alertmanager/meta/main.yml
 ```
@@ -31,17 +31,15 @@ Hasil akhir:
 ```
 ansible/roles/alertmanager/
 ├── defaults/main.yml          # SEMUA variabel default + naming convention
-├── handlers/main.yml          # 2 handler cross-mode restart (docker + native)
+├── handlers/main.yml          # Handler restart container
 ├── tasks/
-│   ├── main.yml               # ROUTER HANYA: assert → include config → docker|native
+│   ├── main.yml               # ROUTER HANYA: assert → include config → docker
 │   ├── validate_ha.yml        # (opsional) assert khusus HA cluster Alertmanager
-│   ├── config.yml             # SHARED KEDUA MODE: render config, mkdir, chown
-│   ├── docker.yml             # ISOLASI DOCKER: container image, mount, port
-│   └── native.yml             # ISOLASI NATIVE: binary, systemd unit
+│   ├── config.yml             # SHARED: render config, mkdir, chown
+│   └── docker.yml             # DEPLOY DOCKER: container image, mount, port
 ├── templates/
 │   ├── alertmanager.yml.j2        # config template (dipakai first_found)
-│   ├── agra-alertmanager.service.j2  # systemd unit (HANYA mode native)
-│   └── alertmanager.env.j2      # env file native (opsional)
+│   └── alertmanager.env.j2      # env file (opsional)
 ├── meta/main.yml              # dependency role (mis: butuh common)
 └── README.md                  # dokumentasi role untuk user
 ```
@@ -52,7 +50,7 @@ Folder `tests/` untuk molecule test — dibuat Step 11.
 
 ## Step 2: `tasks/main.yml` — ROUTER HANYA (TIDAK BOLEH ADA TASK LAIN)
 
-`tasks/main.yml` HANYA BERISI: (1) assert validasi 3-komponen, (2) meta end_host jika enable=false, (3) include config.yml → conditional include docker.yml ATAU native.yml.
+`tasks/main.yml` HANYA BERISI: (1) assert validasi 3-komponen, (2) meta end_host jika enable=false, (3) include config.yml → include docker.yml.
 
 ```yaml
 ---
@@ -66,11 +64,9 @@ Folder `tests/` untuk molecule test — dibuat Step 11.
       - enable_alertmanager is defined
       - alertmanager_data_dir is defined
       - alertmanager_port is defined
-      - agra_deployment_mode in ['docker', 'native']
     fail_msg: >-
       Role alertmanager butuh variabel dasar enable_alertmanager,
-      alertmanager_data_dir, alertmanager_port. Pastikan
-      agra_deployment_mode adalah 'docker' ATAU 'native'.
+      alertmanager_data_dir, alertmanager_port.
       Jika menggunakan mysql/postgresql untuk apapun di role ini,
       INGAT KEMBALI: agra TIDAK BOLEH install/provisioning DB.
 
@@ -82,19 +78,15 @@ Folder `tests/` untuk molecule test — dibuat Step 11.
 - include_tasks: validate_ha.yml
   when: enable_ha_alertmanager | default(false) | bool
 
-# 2D. SHARED CONFIG — DIPAKAI KEDUA MODE (WAJIB ADA, SEBELUM mode-specific)
+# 2D. SHARED CONFIG — semua deployment Docker (WAJIB ADA, SEBELUM docker-specific)
 - include_tasks: config.yml
 
-# 2E. MODE-SPECIFIC ISOLASI — HANYA SALAH SATU YANG EKSEKUSI
+# 2E. DOCKER DEPLOYMENT
 - include_tasks: docker.yml
-  when: agra_deployment_mode == 'docker'
-
-- include_tasks: native.yml
-  when: agra_deployment_mode == 'native'
 ```
 
 Poin penting Step 2:
-- TIDAK ADA task `template:`, `file:`, `docker_container:` atau task operasional lainnya di `main.yml` — itu semua harus di `config.yml`/`docker.yml`/`native.yml`.
+- TIDAK ADA task `template:`, `file:`, `docker_container:` atau task operasional lainnya di `main.yml` — itu semua harus di `config.yml`/`docker.yml`.
 - `meta: end_host` menjamin TIDAK ADA satupun task yang jalan jika `enable_alertmanager=false` (bahkan `gather_facts` untuk role ini pun tidak jalan).
 
 ---
@@ -109,7 +101,6 @@ Daftarkan SEMUA variabel yang dipakai role ini beserta default aman. **WAJIB IKU
 # NAMING CONVENTION — WAJIB IKUTI:
 #  - Flag boolean: PREFIX enable_*  (contoh: enable_alertmanager)
 #  - Versi docker: SUFFIX _tag       (contoh: alertmanager_tag)
-#  - Versi native: SUFFIX _native_version (contoh: alertmanager_native_version)
 #  - Path direktori: SUFFIX _dir     (contoh: alertmanager_data_dir)
 #  - Path file: SUFFIX _path         (contoh: alertmanager_config_path)
 
@@ -120,8 +111,7 @@ enable_ha_alertmanager: false     # cluster gossip mode (opsional)
 # --- Versi & deploy ---
 alertmanager_port: 9093
 alertmanager_image: prom/alertmanager
-alertmanager_tag: "v0.27.0"              # <<< NATIVE: _tag untuk DOCKER
-alertmanager_native_version: "0.27.0"     # <<< WAJIB _native_version untuk NATIVE
+alertmanager_tag: "v0.27.0"
 
 # --- Path (WAJIB ada suffix _dir/_path, JANGAN hardcode di task file) ---
 alertmanager_data_dir: /var/lib/agra/alertmanager    # persist data (silences, notifications log)
@@ -131,17 +121,14 @@ alertmanager_config_path: "{{ alertmanager_config_dir }}/alertmanager.yml"
 # --- Peran lain ---
 alertmanager_container_name: "agra-alertmanager"
 alertmanager_native_binary_path: /usr/local/bin/alertmanager
-alertmanager_native_binary_url: >-
-  https://github.com/prometheus/alertmanager/releases/download/v{{ alertmanager_native_version }}/alertmanager-{{ alertmanager_native_version }}.linux-amd64.tar.gz
 alertmanager_web_listen_address: "0.0.0.0:{{ alertmanager_port }}"
 alertmanager_cluster_port: 9094
 alertmanager_log_level: info
-# dst... (sesuaikan dengan semua variabel yang dipakai task config/docker/native)
+# dst... (sesuaikan dengan semua variabel yang dipakai task config/docker)
 ```
 
 Pengecekan Step 3:
 - ✅ Flag boolean: `enable_*` prefix? (YA: `enable_alertmanager`, `enable_ha_alertmanager`)
-- ✅ Versi dipisah docker vs native? (YA: `alertmanager_tag` XOR `alertmanager_native_version`)
 - ✅ Semua path punya `_dir` / `_path` suffix? (YA)
 - ✅ Tidak ada secret plaintext disini? (YA — secret kalau ada masuk `passwords.yml` sebagai plaintext, tidak perlu prefix. Pastikan passwords.yml sudah di .gitignore + chmod 0600)
 
@@ -149,12 +136,12 @@ Pengecekan Step 3:
 
 ## Step 4: `tasks/config.yml` — SHARED Config Render first_found
 
-`config.yml` dipakai **kedua mode (docker + native)**. Isinya: (1) mkdir + chown/chmod untuk direktori, (2) render config WAJIB pakai lookup `first_found` formula (lihat [design.md §2](./design.md)), (3) `notify: restart alertmanager` ke handler.
+`config.yml` dipakai bersama Docker deployment. Isinya: (1) mkdir + chown/chmod untuk direktori, (2) render config WAJIB pakai lookup `first_found` formula (lihat [design.md §2](./design.md)), (3) `notify: restart alertmanager` ke handler.
 
 ```yaml
 ---
 # ansible/roles/alertmanager/tasks/config.yml
-# SHARED DIPAKAI KEDUA MODE. DILARANG ada conditional `when: agra_deployment_mode` disini.
+# SHARED CONFIG untuk Docker deployment. DILARANG ada conditional mode-specific disini.
 
 # 4A. Pastikan direktori ada — ownership UID 65534 (nobody) untuk security, sesuai role lain
 - name: "Alertmanager: create data + config dirs"
@@ -230,111 +217,30 @@ Isi HANYA docker-specific. Jangan ada task yang menginstall binary systemd disin
   notify: "restart alertmanager"
 ```
 
-Handler untuk docker sudah didefinisikan bersama native di Step 7.
+Handler untuk docker didefinisikan di Step 7.
 
 ---
 
-## Step 6: `tasks/native.yml` — ISOLASI NATIVE (JANGAN ada docker logic)
+## Step 6: (DITAMBAHKAN — Docker-only sekarang)
 
-PENTING: **Pre-check idempotency guard** — jika binary sudah ada dan versinya match, SKIP download dan extract (tanpa ini: task download akan `changed=true` SETIAP run).
-
-```yaml
----
-# ansible/roles/alertmanager/tasks/native.yml
-# ISOLASI NATIVE. DILARANG ada docker_container / docker module apapun disini.
-
-# 6A. IDEMPOTENCY PRE-CHECK: Cek binary sudah ada dan version match
-- name: "Alertmanager native: check installed version"
-  command: "{{ alertmanager_native_binary_path }} --version"
-  register: am_installed_version_check
-  changed_when: false
-  failed_when: false   # jika binary belum ada → RC !=0, kita cek dibawah
-
-- name: "Alertmanager native: set version match fact"
-  set_fact:
-    _am_version_match: >-
-      {{
-        am_installed_version_check.rc == 0 and
-        ('alertmanager, version ' + alertmanager_native_version) in am_installed_version_check.stdout
-      }}
-
-# 6B. Skip SELURUH block install jika version match (IDEMPOTENCY)
-- block:
-    - name: "Alertmanager native: download tarball release"
-      get_url:
-        url: "{{ alertmanager_native_binary_url }}"
-        dest: /tmp/alertmanager.tar.gz
-        mode: "0644"
-        force: true
-
-    - name: "Alertmanager native: extract binary to /usr/local/bin"
-      unarchive:
-        src: /tmp/alertmanager.tar.gz
-        dest: /usr/local/bin
-        remote_src: true
-        extra_opts:
-          - "--strip-components=1"
-          - "alertmanager"
-        creates: "{{ alertmanager_native_binary_path }}"   # guard idempotent tambahan
-
-    - name: "Alertmanager native: deploy systemd unit file"
-      template:
-        src: "{{ lookup('first_found', am_systemd_templates) }}"
-        dest: /etc/systemd/system/agra-alertmanager.service
-        mode: "0644"
-        owner: root
-        group: root
-      notify: "restart alertmanager"
-      vars:
-        am_systemd_templates:
-          files:
-            - "/etc/agra/config/alertmanager/agra-alertmanager.service.j2"
-            - "agra-alertmanager.service.j2"
-          paths:
-            - "{{ role_path }}/templates"
-
-    - name: "Alertmanager native: systemd daemon reload + enable"
-      systemd:
-        name: agra-alertmanager.service
-        daemon_reload: true
-        enabled: true
-        state: started
-
-  when: not _am_version_match   # <<< BLok INI hanya jalan jika versi TIDAK MATCH
-```
+Sekarang agra **hanya mendukung Docker deployment**, jadi tidak ada `tasks/native.yml`. Semua service dijalankan sebagai container. Step docker.yml (Step 5) adalah satu-satunya mode-specific yang dibutuhkan.
 
 ---
 
-## Step 7: `handlers/main.yml` — Cross-mode Restart (2 Handler, Ignore Errors Satu Sama Lain)
+## Step 7: `handlers/main.yml` — Restart Container Docker
 
-Handler **harus** menangani kedua mode. Strategi: buat 2 task restart dalam satu handler bernama SAMA (`restart alertmanager`), masing-masing dengan conditional mode, dan `ignore_errors: true` supaya jika mode docker gagal (karena memang native mode), native task tetap bisa jalan (dan sebaliknya).
+Handler cukup satu task untuk restart container Docker.
 
 ```yaml
 ---
 # ansible/roles/alertmanager/handlers/main.yml
 
 - name: "restart alertmanager"
-  block:
-    # Handler Docker (ignore_errors: supaya jika mode=native, task ini tidak fail seluruh run)
-    - name: "restart alertmanager [docker mode]"
-      docker_container:
-        name: "{{ alertmanager_container_name }}"
-        state: started
-        restart: true
-      when: agra_deployment_mode == 'docker'
-      ignore_errors: true
-
-    # Handler Native Systemd (ignore_errors: supaya mode=docker tidak fail)
-    - name: "restart alertmanager [native mode]"
-      systemd:
-        name: agra-alertmanager.service
-        state: restarted
-        daemon_reload: true
-      when: agra_deployment_mode == 'native'
-      ignore_errors: true
+  docker_container:
+    name: "{{ alertmanager_container_name }}"
+    state: started
+    restart: true
 ```
-
-Strategi `ignore_errors` per task ini penting karena handler listener hanya satu nama tapi harus support dua mode. Task yang `when: false` tidak error — `ignore_errors` disini untuk antisipasi edge case module error minor (bukan untuk ignore actual error).
 
 ---
 
@@ -406,8 +312,7 @@ Contoh table yang harus ditambah:
 | `enable_alertmanager` | bool | `true` | Aktifkan deployment Alertmanager |
 | `enable_ha_alertmanager` | bool | `false` | Aktifkan cluster gossip multi-node Alertmanager |
 | `alertmanager_port` | int | `9093` | Port listen web UI + API Alertmanager |
-| `alertmanager_tag` | string | `"v0.27.0"` | Docker image tag (mode docker) |
-| `alertmanager_native_version` | string | `"0.27.0"` | Versi binary release (mode native) |
+| `alertmanager_tag` | string | `"v0.27.0"` | Docker image tag |
 | `alertmanager_data_dir` | string | `/var/lib/agra/alertmanager` | Path persist data (silences, notification log) |
 | `alertmanager_config_dir` | string | `/etc/alertmanager` | Path config file |
 | ... (dsb SEMUA variabel dari defaults/main.yml) |
@@ -503,7 +408,7 @@ Langkah final sebelum submit PR:
    - [ ] Linter clean
    - [ ] Conventional commits format
 
-3. **Submit PR** dengan format title `feat(roles): add alertmanager hybrid docker/native role` sesuai conventional commits.
+3. **Submit PR** dengan format title `feat(roles): add alertmanager docker role` sesuai conventional commits.
 
 ---
 

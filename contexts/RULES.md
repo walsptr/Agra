@@ -7,9 +7,8 @@ konsisten supaya project tetap maintainable saat berkembang.
 ## 1. Struktur Role
 
 - Setiap role service WAJIB mengikuti pola router (`main.yml` →
-  `config.yml` + `docker.yml`/`native.yml`) sesuai DESIGN.md §1. Dilarang
-  menaruh kondisi `when: agra_deployment_mode == '...'` tersebar di banyak
-  task file kecil — semua percabangan mode ada di `main.yml` saja.
+  `config.yml` + `docker.yml`) sesuai DESIGN.md §1. Role hanya mengandung
+  logic docker, tidak ada logic native binary.
 - Setiap role WAJIB punya `defaults/main.yml` berisi seluruh variabel yang
   dipakai role tersebut dengan nilai default yang aman. Tidak boleh ada
   variabel "tak terdokumentasi" yang cuma diketahui dari isi task.
@@ -23,9 +22,9 @@ konsisten supaya project tetap maintainable saat berkembang.
 - Flag boolean SELALU diawali `enable_`: `enable_grafana`, `enable_https`,
   `enable_ha_grafana`. Dilarang pakai `_enabled` sebagai suffix atau variasi
   lain agar konsisten dan predictable saat grep.
-- Variabel versi dipisah eksplisit per mode: `<service>_tag` (docker) vs
-  `<service>_native_version` (native) — tidak digabung jadi satu variabel
-  generik.
+- Semua service menggunakan variabel `<service>_image` dan `<service>_tag`
+  untuk menentukan versi docker image (single versioning via docker image
+  tag). Tidak ada variabel terpisah untuk native package version.
 - Path selalu variabel eksplisit dengan suffix `_path` atau `_dir`, tidak
   pernah di-hardcode di dalam task/template.
 - Semua secret WAJIB berada di `passwords.yml`, direferensikan dengan prefix
@@ -138,12 +137,12 @@ konsisten supaya project tetap maintainable saat berkembang.
 
 ## 14. Single Source of Truth Konfigurasi Vars
 
-14.1 **SATU-SATUNYA SUMBER** untuk semua variabel konfigurasi fitur & versi (fitur flag, versi service tag/image, mode deployment, path config, dll) adalah file **`/etc/agra/globals.yml`** di control node localhost yang di-direct-parse oleh precheck.
+14.1 **SATU-SATUNYA SUMBER** untuk semua variabel konfigurasi fitur & versi (fitur flag, versi service tag/image, path config, dll) adalah file **`/etc/agra/globals.yml`** di control node localhost yang di-direct-parse oleh precheck.
 14.2 File **inventory** (inventory/all-in-one, inventory/multinode, custom inventory user) HANYA BOLEH berisi:
   - Daftar host dan `ansible_host` untuk koneksi SSH
   - Group membership (`[group:children]` hierarchi)
   - Variabel **koneksi** saja: `ansible_connection`, `ansible_user`, `ansible_port`, `ansible_ssh_private_key_file`, `ansible_become`, dan var koneksi SSH lainnya.
-14.3 `[group:vars]` dan `host_vars/<hostname>.yml` HANYA boleh berisi **variabel koneksi group/per-host. DILARANG KERAS memasukkan vars konfigurasi fitur (monitoring_vip, enable_ha_grafana, grafana_database, grafana_tag, prometheus_tag, node_exporter_tag, enable_https, tls_*_path, agra_deployment_mode, dll) ke dalam inventory [group:vars] atau host_vars/* — precheck assertion TIDAK AKAN membacanya (intentional single source design), sehingga user akan mendapatkan assertion FAIL "kosong padahal sudah diset" (bukan bug, ini enforcing rule ini).
+14.3 `[group:vars]` dan `host_vars/<hostname>.yml` HANYA boleh berisi **variabel koneksi group/per-host. DILARANG KERAS memasukkan vars konfigurasi fitur (monitoring_vip, enable_ha_grafana, grafana_database, grafana_tag, prometheus_tag, node_exporter_tag, enable_https, tls_*_path, dll) ke dalam inventory [group:vars] atau host_vars/* — precheck assertion TIDAK AKAN membacanya (intentional single source design), sehingga user akan mendapatkan assertion FAIL "kosong padahal sudah diset" (bukan bug, ini enforcing rule ini).
 14.4 Playbook `ansible/playbooks/precheck.yml` untuk SEMUA assertion vars konfigurasi HANYA membaca via **direct parse `/etc/agra/globals.yml` python yaml.safe_load try/except** (bukan melalui `include_vars` merge namespace, bukan dari inventory hostvars, bukan dari extra_vars CLI). Mekanisme ini untuk menghindari: (a) silent fail include_vars ketika YAML syntax error atau permission file 0640, (b) scoping ambigu hostvars + delegate_to localhost run_once menyebabkan false negative non-deterministik.
 14.5 Konsekuensi 14.4: Jika user upgrade dari versi agra lama (yang mengizinkan vars konfigurasi di inventory [group:vars]) dan user PINDAH TERLAMBAT (masih set vars di inventory), precheck akan FAIL dengan pesan yang user-friendly meminta user memindahkan setting tersebut ke `/etc/globals.yml`. Ini adalah expected behavior (intentional breaking change demi determinisme jangka panjang).
 14.6 Pengecualian: Variabel yang *tidak di-assert* di precheck dan secara spesifik per-host (contoh niche: monitoring_vip_interface tiap node beda interface eth0 vs ens3, atau keepalived_native_package_name override distro RedHat vs Debian) — BOLEH di-set via host_vars/<hostname>.yml, KARENA tidak termasuk assertion precheck. Rule ini FOKUS ke assertion precheck vars global konfigurasi yang seharusnya seragam di semua node.

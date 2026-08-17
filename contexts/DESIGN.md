@@ -4,23 +4,21 @@ Dokumen ini menjelaskan pola desain teknis yang harus diikuti konsisten di
 seluruh role dan komponen agra. Ini adalah rujukan "bagaimana" — untuk
 "apa" dan "kenapa" lihat ARCHITECTURE.md dan PRD.md.
 
-## 1. Pola Role: Router per Deployment Mode
+## 1. Pola Role: Docker-only dengan shared config layer
 
 Setiap role service (prometheus, node_exporter, grafana) WAJIB mengikuti pola
-berikut, tidak boleh mencampur logic docker/native dalam satu file task:
+berikut — role hanya mengimplementasi docker, tidak ada native binary logic:
 
 ```
 roles/<service>/
 ├── defaults/main.yml       # semua default value (versi, port, path, dst)
 ├── tasks/
-│   ├── main.yml             # router: include config.yml lalu docker.yml/native.yml
+│   ├── main.yml             # router: include config.yml lalu docker.yml
 │   ├── validate_ha.yml      # (opsional) assert khusus HA, di-include jika relevan
-│   ├── config.yml           # render config, SHARED untuk kedua mode
-│   ├── docker.yml
-│   └── native.yml
+│   ├── config.yml           # render config, SHARED
+│   └── docker.yml           # container deployment logic
 ├── templates/
-│   ├── <service>.yml.j2           # default config template
-│   └── <service>.service.j2       # systemd unit, hanya dipakai mode native
+│   └── <service>.yml.j2     # default config template
 ```
 
 `tasks/main.yml`:
@@ -31,10 +29,6 @@ roles/<service>/
 - include_tasks: config.yml
 
 - include_tasks: docker.yml
-  when: agra_deployment_mode == 'docker'
-
-- include_tasks: native.yml
-  when: agra_deployment_mode == 'native'
 ```
 
 §1A. Absolute ETC_DIR Path Loading (Kolla-Ansible Pattern)
@@ -147,14 +141,11 @@ enable_ha_grafana: false
 
 ## 7. Desain Versioning & Upgrade
 
-Variabel versi dipisah per deployment mode (bukan 1 variabel generik):
+Variabel versi menggunakan single versioning via docker image tag:
 
 ```yaml
-# docker
 <service>_image: ...
 <service>_tag: ...
-# native
-<service>_native_version: ...
 ```
 
 Alur `agra upgrade`:

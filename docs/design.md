@@ -34,23 +34,19 @@ roles/<service>/
 - include_tasks: validate_ha.yml
   when: enable_ha_<service> | default(false) | bool
 
-# Shared config — dipakai KEDUA mode (WAJIB, di-include SEBELUM mode-specific)
+# Shared config — dipakai SEMUA deployment (WAJIB, di-include SEBELUM docker)
 - include_tasks: config.yml
 
-# Mode-specific — ISOLASI, HANYA SALAH SATU yang jalan
+# Docker deployment
 - include_tasks: docker.yml
-  when: agra_deployment_mode == 'docker'
-
-- include_tasks: native.yml
-  when: agra_deployment_mode == 'native'
 ```
 
 Prinsip:
 - `tasks/main.yml` = router saja. Tidak boleh ada task yang benar-benar melakukan sesuatu.
-- `tasks/config.yml` = shared 100%. Jika perlu conditional mode di dalamnya, itu menandakan desain salah → pindahkan ke docker.yml/native.yml.
-- `tasks/docker.yml` dan `tasks/native.yml` = 100% isolasi. Satu file tidak boleh tahu tentang keberadaan file yang lain.
+- `tasks/config.yml` = shared 100%. Semua logic config rendering, mkdir, chown disini.
+- `tasks/docker.yml` = deployment container. Satu-satunya mode-specific file.
 
-Ini menjamin: bug di mode docker tidak bocor ke native, dan sebaliknya.
+Ini menjamin: logic config terisolasi dari logic deployment container, mudah testing dan maintenance.
 
 ---
 

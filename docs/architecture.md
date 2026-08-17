@@ -114,20 +114,17 @@ Penjelasan folder kunci:
 
 ---
 
-## 3. Deployment Mode — Hybrid (Docker / Native)
+## 3. Deployment Model — Docker-Only Container
 
-agra mendukung **2 mode deployment global** yang dipilih via `agra_deployment_mode: docker|native` di `globals.yml`:
+agra **hanya mendukung Docker (atau Podman) container** sebagai model deployment. Semua service dijalankan sebagai container via module `docker_container`:
 
-| Mode Docker | Mode Native |
+| Komponen | Cara Deployment |
 |---|---|
-| Service dijalankan sebagai Docker container via module `docker_container` | Service dijalankan sebagai binary/package + systemd unit (`agra-grafana.service`, dst) |
-| Versi via `<service>_tag` (contoh: `grafana_tag: 11.2.0`) | Versi via `<service>_native_version` (contoh: `grafana_native_version: 11.2.0`) |
-| Mudah upgrade: ganti tag → pull image baru | Ringan: tanpa Docker daemon overhead, cocok untuk minimal host |
-| Isolasi filesystem via bind mount | Install langsung ke `/usr/local/bin/` atau package manager |
-
-Kedua mode **share 100% logic config** (`config.yml`) — yang berbeda hanya cara install dan start service. Ini dijamin oleh **Router Pattern** di setiap role (lihat [design.md §1](./design.md)): `main.yml` include `config.yml` (SHARED) lalu conditional `docker.yml` XOR `native.yml` (ISOLATED per mode).
-
-Penting: `agra_deployment_mode` berlaku **global** untuk seluruh service di fase ini. Override per-host/per-group adalah roadmap.
+| Grafana, Prometheus, Node Exporter, Nginx, Keepalived | Docker container (image official / image terbukti) |
+| Versi service | Via `<service>_tag` (contoh: `grafana_tag: 11.2.0`) |
+| Upgrade service | Ganti tag → pull image baru → restart container (detik) |
+| Data persist | Bind mount `grafana_data_dir`, `prometheus_data_dir`, dll ke host |
+| Shared config | Semua role share 100% logic config (`config.yml`) — render template, mkdir, chown, first_found override formula (lihat [design.md §2](./design.md)) |
 
 ---
 

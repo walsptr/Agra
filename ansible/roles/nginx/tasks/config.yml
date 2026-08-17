@@ -351,26 +351,61 @@
   notify: ['reload nginx', 'nginx syntax check']
   tags: ['nginx', 'config', 'conf']
 
-- name: Nginx (Config) - Render agra-monitoring site available via first_found
+- name: Nginx (Config) - Render grafana site available via first_found
   ansible.builtin.template:
-    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/agra-monitoring.conf.j2', 'sites-available/agra-monitoring.conf.j2'], 'paths': [role_path + '/templates']}) }}"
-    dest: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/grafana.conf.j2', 'sites-available/grafana.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_sites_available_dir }}/grafana.conf"
     owner: root
     group: root
     mode: '0644'
     backup: true
   notify: ['reload nginx', 'nginx syntax check']
-  tags: ['nginx', 'config', 'site']
+  tags: ['nginx', 'config', 'site', 'grafana']
 
-- name: Nginx (Config) - Enable agra-monitoring site (symlink to sites-enabled)
+- name: Nginx (Config) - Render prometheus site available via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/prometheus.conf.j2', 'sites-available/prometheus.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_sites_available_dir }}/prometheus.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'site', 'prometheus']
+
+- name: Nginx (Config) - Enable grafana site (symlink to sites-enabled)
   ansible.builtin.file:
-    src: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
-    dest: "{{ nginx_sites_enabled_dir }}/agra-monitoring.conf"
+    src: "{{ nginx_sites_available_dir }}/grafana.conf"
+    dest: "{{ nginx_sites_enabled_dir }}/grafana.conf"
     state: link
     force: true
   notify: ['reload nginx']
   ignore_errors: true
-  tags: ['nginx', 'config', 'site']
+  tags: ['nginx', 'config', 'site', 'grafana']
+
+- name: Nginx (Config) - Enable prometheus site (symlink to sites-enabled)
+  ansible.builtin.file:
+    src: "{{ nginx_sites_available_dir }}/prometheus.conf"
+    dest: "{{ nginx_sites_enabled_dir }}/prometheus.conf"
+    state: link
+    force: true
+  notify: ['reload nginx']
+  ignore_errors: true
+  tags: ['nginx', 'config', 'site', 'prometheus']
+
+- name: Nginx (Config) - Remove deprecated agra-monitoring.conf from sites-available
+  ansible.builtin.file:
+    path: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
+    state: absent
+  ignore_errors: true
+  tags: ['nginx', 'config', 'site', 'cleanup']
+
+- name: Nginx (Config) - Remove deprecated agra-monitoring.conf symlink from sites-enabled
+  ansible.builtin.file:
+    path: "{{ nginx_sites_enabled_dir }}/agra-monitoring.conf"
+    state: absent
+  ignore_errors: true
+  tags: ['nginx', 'config', 'site', 'cleanup']
 
 - name: Nginx (Config) - Disable default.conf from conf.d jika ada
   ansible.builtin.file:

@@ -31,7 +31,6 @@ grafana_health_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/hea
 prometheus_health_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/-/healthy"
 nginx_health_url: "http://127.0.0.1/healthz"
 
-keepalived_native_package_name: keepalived
 keepalived_service_name: keepalived
 keepalived_image: osixia/keepalived
 keepalived_tag: "2.0.20"

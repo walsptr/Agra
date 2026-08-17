@@ -4,7 +4,6 @@
   gather_facts: true
   become: true
   vars:
-    agra_deployment_mode: docker
     enable_grafana: true
     enable_prometheus: true
     enable_node_exporter: true

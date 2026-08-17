@@ -9,21 +9,13 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p: argparse.ArgumentParser = subparsers.add_parser(
         "deploy", aliases=["apply", "install"],
         help="Deploy / re-deploy monitoring stack (idempotent) — playbook deploy.yml",
-        description="Full deploy common, node_exporter, prometheus, grafana, nginx, keepalived (auto jika multi-node). Idempotent: run berulang OK.",
+        description="Deploy monitoring stack (Grafana/Prometheus/Node Exporter/Nginx/Keepalived) via Ansible playbooks. Jalankan validasi config terlebih dahulu dengan command terpisah jika diperlukan.",
     )
     p.add_argument("-i", "--inventory", help="Inventory file (default: inventory/all-in-one)")
     p.add_argument("-t", "--tags", action="append", default=[], help="Run only tagged tasks. Repeatable: -t grafana -t nginx.")
     p.add_argument("--skip-tags", action="append", default=[], help="Skip tagged tasks.")
     p.add_argument("-l", "--limit", help="Limit run to subset inventory hosts (ansible --limit).")
     p.add_argument("-e", "--extra-vars", action="append", default=[], help="Extra vars ansible: KEY=VALUE or JSON string. Repeatable.")
-    p.add_argument(
-        "--precheck",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        dest="precheck",
-        help="Jalankan precheck SEBELUM deploy (default: TRUE / precheck aktif). "
-             "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
-    )
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=run_deploy)
     return p
@@ -42,22 +34,6 @@ def run_deploy(args: argparse.Namespace) -> int:
     skip_flat: List[str] = []
     for t in args.skip_tags or []:
         skip_flat.extend([x.strip() for x in t.split(",") if x.strip()])
-
-    # Dapatkan nilai boolean precheck. Gunakan getattr dengan default True untuk defensive programming
-    # (hindari AttributeError jika parser config berubah di masa depan).
-    precheck_enabled = getattr(args, "precheck", True)
-    rc_check = 0
-    if precheck_enabled:
-        # --- Jalankan precheck terlebih dahulu via command check wrapper ---
-        # HATI-HATI: args.inventory diserahkan langsung ke run_check(). run_check()
-        # sudah memvalidasi wajib -i / AGRA_INVENTORY env.
-        from agra.commands.check import run_check
-        rc_check = run_check(args)
-        if rc_check != 0:
-            from agra.utils.colors import error, warn
-            error(f"Precheck FAILED (rc={rc_check}). Deploy DIBATALKAN untuk mencegah bad state.")
-            warn("Untuk bypass precheck: `agra deploy --no-precheck` (TIDAK DISARANKAN production).")
-            return rc_check
 
     user_evar = args.extra_vars or []
     if isinstance(user_evar, str):

@@ -6,7 +6,7 @@
 
 Ansible project untuk otomasi deployment dan lifecycle management monitoring stack production-grade. Grafana sebagai pusat visualisasi dashboard, Prometheus sebagai Time Series Database dan scraper engine metrics, serta Node Exporter untuk export OS & hardware metrics.
 
-Mendukung **hybrid deployment mode**: seluruh service bisa di-deploy sebagai Docker container atau native binary/systemd package, tanpa mencampur logic kedua mode dalam satu task file. Setiap operasional (deploy, upgrade, rollback, destroy, restore, backup, restore) dilindungi safety guard berlapis. Licensed under MIT License (see end of file).
+Project ini **Docker-only** — seluruh monitoring components (Grafana, Prometheus, Node Exporter, Nginx, Keepalived) di-deploy sebagai Docker container, tidak ada opsi native/systemd. Setiap operasional (deploy, upgrade, rollback, destroy, restore, backup, restore) dilindungi safety guard berlapis. Licensed under MIT License (see end of file).
 
 ## Install
 
@@ -24,12 +24,14 @@ python3 -m venv .venv && source .venv/bin/activate
    ```
 
 2a. **Edit KONFIGURASI GLOBALS (satu-satunya sumber vars konfigurasi)**:
-   Edit `$EDITOR /etc/agra/globals.yml` — setidaknya 4 variabel berikut:
+   Edit `$EDITOR /etc/agra/globals.yml` — setidaknya variabel berikut:
    ```yaml
-   agra_deployment_mode: docker     # docker | native (systemd)
    enable_ha_grafana: false         # set true jika 2+ node monitoring (multi-node HA)
    monitoring_vip: 10.0.0.100       # WAJIB diisi jika enable_ha_grafana: true (Virtual IP Keepalived)
    grafana_database: sqlite         # sqlite | mysql | postgresql (eksternal)
+   grafana_domain: monitoring.example.com  # domain untuk akses Grafana via HTTPS
+   grafana_nginx_port: 30080        # port expose Nginx untuk Grafana (hindari konflik port internal container 3000)
+   prometheus_nginx_port: 30090     # port expose Nginx untuk Prometheus (hindari konflik port internal container 9090)
    ```
    ⚠️ **PENTING**: Semua konfigurasi fitur/versi (grafana_tag, prometheus_tag, enable_https, tls_cert_path, dsb) **HANYA diset di file ini**. JANGAN set vars konfigurasi di file inventory (mis. `[monitoring:vars]`) atau host_vars/*. Lihat RULES.md §14.
 
@@ -41,7 +43,7 @@ python3 -m venv .venv && source .venv/bin/activate
 
 > ⚠️  **PERINGATAN SINGLE SOURCE OF TRUTH (WAJIB DIBACA SEBELUM LANJUT):**
 >
-> Semua vars konfigurasi fitur & versi (monitoring_vip, enable_ha_grafana, grafana_database, grafana_tag, prometheus_tag, node_exporter_tag, enable_https, tls_cert_path, agra_deployment_mode, dan 100+ vars lain di SCHEMA.md) **HANYA DIBACA PRECHECK DARI file**:
+> Semua vars konfigurasi fitur & versi (monitoring_vip, enable_ha_grafana, grafana_database, grafana_tag, prometheus_tag, node_exporter_tag, enable_https, tls_cert_path, dan 100+ vars lain di SCHEMA.md) **HANYA DIBACA PRECHECK DARI file**:
 >
 > ```
 > ✅  /etc/agra/globals.yml   (control node localhost — SATU-SATUNYA SUMBER)
@@ -77,7 +79,7 @@ python3 -m venv .venv && source .venv/bin/activate
 |---|---|---|
 | `agra check` | Jalankan preflight validation (topologi, TLS expiry, konektivitas DB). Read-only, tidak modifikasi host. | `agra check -i inventory/multinode -v` |
 | `agra genpwd` | Generate 6 random passwords 14 karakter ke `passwords.yml` (plaintext chmod 0600). Idempotent, tidak overwrite existing kecuali --force. | `agra genpwd --force` |
-| `agra deploy` | Deploy/reconfigure monitoring stack (idempotent, run berulang OK). Precheck otomatis jalan duluan. | `agra deploy -i inventory/all-in-one -t grafana` |
+| `agra deploy` | Jalankan playbooks deploy monitoring stack. **Precheck tidak otomatis jalan** — jalankan `agra precheck` / `agra check` terlebih dahulu sebelum deploy untuk validasi config. | `agra deploy -i inventory/all-in-one -t grafana` |
 | `agra upgrade` | Rolling upgrade serial:1 (standby dulu, master terakhir), max_fail 0. Backup otomatis sebelum upgrade. | `agra upgrade --grafana-tag 11.3.0 --prometheus-tag v2.54.1` |
 | `agra rollback` | Rollback ke versi sebelumnya via `--*-tag` atau `-e extra_vars`. Warning eksplisit untuk downgrade major. | `agra rollback --prometheus-tag v2.53.0 --yes` |
 | `agra destroy` | Uninstall seluruh service. Safety 2-layer: `--yes-i-really-mean-it` + playbook assert. Default tidak purge data. | `agra destroy --yes-i-really-mean-it --purge-data` |

@@ -16,7 +16,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p = subparsers.add_parser(
         "rollback", aliases=["revert", "downgrade"],
         help="Rollback ke versi sebelumnya (sediakan versi via --prometheus-tag atau -e flag).",
-        description="Rollback: pin versi ke tag/native_version yang diinginkan. Playbook rollback.yml serial 1 standby-first master-last untuk keamanan.",
+        description="Rollback: pin versi ke tag yang diinginkan. Playbook rollback.yml serial 1 standby-first master-last untuk keamanan.",
     )
     p.add_argument("-i", "--inventory")
     p.add_argument("-l", "--limit")
@@ -24,9 +24,6 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p.add_argument("--prometheus-tag")
     p.add_argument("--grafana-tag")
     p.add_argument("--node-exporter-tag")
-    p.add_argument("--prometheus-native-version")
-    p.add_argument("--grafana-native-version")
-    p.add_argument("--node-exporter-native-version")
     p.add_argument("-t", "--tags", action="append", default=[])
     p.add_argument("--skip-tags", action="append", default=[])
     p.add_argument(
@@ -49,9 +46,6 @@ def _shortcut_flags_to_evars(args: argparse.Namespace) -> Dict[str, Any]:
         ("prometheus_tag", "prometheus_tag"),
         ("grafana_tag", "grafana_tag"),
         ("node_exporter_tag", "node_exporter_tag"),
-        ("prometheus_native_version", "prometheus_native_version"),
-        ("grafana_native_version", "grafana_native_version"),
-        ("node_exporter_native_version", "node_exporter_native_version"),
     ]:
         val = getattr(args, attr, None)
         if val:

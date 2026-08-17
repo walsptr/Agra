@@ -50,12 +50,13 @@ monitoring stack, dengan:
 - Tidak menyediakan UI/dashboard manajemen sendiri — operasional murni via
   CLI (`agra`) dan Ansible.
 - ❌ **Non-Goal BARU**: `agra certificates generate` HANYA untuk self-signed cert ke `/etc/agra/ssl/agra.*`. Fitur request CSR ke CA eksternal (mis. ACME LetsEncrypt, Certbot, internal CA signing) **di luar scope** — user menyediakan cert sendiri di tls_*_path jika perlu CA-signed.
+- Native / systemd binary deployment untuk monitoring components (Grafana, Prometheus, Node Exporter, Nginx, Keepalived) → Non-tujuan, project hanya deploy via Docker container.
 
 ## 5. Prinsip Desain
 
 1. **Topology-driven, bukan flag-driven** — perilaku (all-in-one, multi-node,
    VIP aktif/tidak) ditentukan oleh isi inventory, seminimal mungkin flag
-   eksplisit yang bisa out-of-sync dengan kondisi nyata; vars konfigurasi non-topologi (semua fitur flag, versi service tag/image, path TLS, mode deployment, grafana_database backend, dll) HANYA di single source of truth **`/etc/agra/globals.yml` absolute path control node** — inventory hanya menentukan topology via group membership (daftar host), DILARANG menyimpan vars konfigurasi fitur di dalam inventory [group:vars]. Lihat RULES.md §14.
+   eksplisit yang bisa out-of-sync dengan kondisi nyata; vars konfigurasi non-topologi (semua fitur flag, versi service tag/image, path TLS, grafana_database backend, dll) HANYA di single source of truth **`/etc/agra/globals.yml` absolute path control node** — inventory hanya menentukan topology via group membership (daftar host), DILARANG menyimpan vars konfigurasi fitur di dalam inventory [group:vars]. Lihat RULES.md §14.
 2. **Config override tanpa fork kode** — custom config user selalu didahulukan
    dari default template, lewat mekanisme `first_found` di folder
    `/etc/agra/config/<service>/`.
@@ -69,11 +70,11 @@ monitoring stack, dengan:
 ## 6. Fitur & Roadmap per Fase
 
 ### Fase 1 — Fondasi
-- Role `common` (prep host: docker/native, user, direktori, firewall dasar)
-- Role `prometheus` (hybrid docker/native, config override, scrape target dari
+- Role `common` (prep host: docker, user, direktori, firewall dasar)
+- Role `prometheus` (Docker-only via container, config override, scrape target dari
   inventory)
-- Role `node_exporter` (hybrid docker/native)
-- Role `grafana` non-HA (hybrid docker/native, provisioning datasource +
+- Role `node_exporter` (Docker-only via container)
+- Role `grafana` non-HA (Docker-only via container, provisioning datasource +
   dashboard otomatis, database sqlite default)
 - `globals.yml`, `passwords.yml` + `agra genpwd`
 - CLI wrapper Python: `deploy`, `check`, `genpwd`

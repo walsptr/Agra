@@ -2,20 +2,11 @@
 # OVERRIDE DENGAN: /etc/agra/config/grafana/grafana.ini.j2 (first_found)
 
 [paths]
-{% set _deploy = (agra_deployment_mode | default('docker')) %}
-{% if _deploy == 'native' %}
-data = {{ grafana_data_dir }}
-temp_data_lifetime = 24h
-logs = {{ grafana_data_dir }}/log
-plugins = {{ grafana_data_dir }}/plugins
-provisioning = {{ grafana_provisioning_dir }}
-{% else %}
 data = {{ grafana_container_data_dir }}
 temp_data_lifetime = 24h
 logs = {{ grafana_container_log_dir }}
 plugins = {{ grafana_container_plugins_dir }}
 provisioning = {{ grafana_container_provisioning_dir }}
-{% endif %}
 
 [server]
 protocol = {{ grafana_server_protocol }}
@@ -29,11 +20,7 @@ enable_gzip = true
 [database]
 {% if grafana_database == 'sqlite' %}
 type = sqlite3
-{% if (agra_deployment_mode | default('docker')) == 'native' %}
-path = {{ grafana_sqlite_path }}
-{% else %}
 path = {{ grafana_container_sqlite_path }}
-{% endif %}
 cache_mode = private
 wal = true
 {% elif grafana_database == 'mysql' %}

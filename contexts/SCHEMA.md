@@ -7,13 +7,7 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 
 ---
 
-## 1. Global / Deployment Mode
-
-| Variabel | Tipe | Default | Deskripsi |
-|---|---|---|---|
-| `agra_deployment_mode` | string | `docker` | `docker` \| `native` — mode deployment global untuk seluruh service |
-
-## 1a. Role Common (Preparasi Host)
+## 1. Role Common (Preparasi Host)
 
 | Variabel | Tipe | Default | Deskripsi |
 |---|---|---|---|
@@ -36,11 +30,11 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 |---|---|---|---|
 | `enable_grafana` | bool | `true` | Aktifkan deployment Grafana |
 | `enable_ha_grafana` | bool | `false` | Aktifkan mode HA (syarat: `groups['monitoring'] >= 2`) |
-| `grafana_port` | int | `3000` | Port listen Grafana |
+| `grafana_port` | int | `3000` | Port listen Grafana di dalam container (internal bind 127.0.0.1 di dalam node, tidak di-expose publik langsung ke node) |
 | `grafana_container_name` | string | `agra-grafana` | Nama container docker |
 | `grafana_image` | string | `grafana/grafana-oss` | Docker image (mode docker) |
 | `grafana_tag` | string | `11.2.0` | Docker image tag (mode docker) |
-| `grafana_native_version` | string | `11.2.0` | Versi package (mode native) |
+
 | `grafana_data_dir` | string | `/var/lib/agra/grafana` | Lokasi data persist |
 | `grafana_config_dir` | string | `/etc/grafana` | Lokasi config Grafana |
 | `grafana_provisioning_dir` | string | `{{ grafana_config_dir }}/provisioning` | Lokasi provisioning (datasources/dashboards) |
@@ -64,6 +58,7 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 | `grafana_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
 | `grafana_secret_key` | string (secret) | vault ref | Secret key untuk signing, via `vault_grafana_secret_key` |
 | `grafana_domain` | string | `""` | Custom domain expose Grafana HTTPS (mis. `monitor.example.com`). Jika diisi menjadi server_name utama block HTTPS default. |
+| `grafana_nginx_port` | int | `30080` | Port Nginx listen untuk expose Grafana ke publik ketika `grafana_domain` kosong (akses via http://<node-ip>:30080 tanpa domain). |
 | `grafana_web_listen_address` | jinja computed | conditional | Bind address: `127.0.0.1:3000` (nginx aktif) / `0.0.0.0:3000` (direct) |
 | `grafana_prometheus_datasource_name` | string | `Prometheus` | Nama display datasource Prometheus |
 | `grafana_prometheus_datasource_uid` | string | `prometheus-main` | UID datasource Prometheus (stabil) |
@@ -75,7 +70,7 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 | Variabel | Tipe | Default | Deskripsi |
 |---|---|---|---|
 | `enable_prometheus` | bool | `true` | Aktifkan deployment Prometheus |
-| `prometheus_port` | int | `9090` | Port listen Prometheus |
+| `prometheus_port` | int | `9090` | Port listen Prometheus di dalam container (internal bind 127.0.0.1) |
 | `prometheus_retention_time` | string | `15d` | Retensi data TSDB (time-based) |
 | `prometheus_retention_size` | string | `""` | Opsional retensi berbasis size, mis. `50GB` |
 | `prometheus_scrape_interval` | string | `15s` | Interval scrape default global |
@@ -88,7 +83,7 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 | `prometheus_image` | string | `prom/prometheus` | Docker image (mode docker) |
 | `prometheus_tag` | string | `v2.53.0` | Docker image tag (mode docker) |
 | `prometheus_container_name` | string | `agra-prometheus` | Nama container docker |
-| `prometheus_native_version` | string | `2.53.0` | Versi binary (mode native) |
+
 | `prometheus_native_binary_path` | string | `/usr/local/bin/prometheus` | Path binary prometheus (native) |
 | `prometheus_native_binary_url` | string | URL github | URL download tarball release Prometheus |
 | `prometheus_native_tools_path` | string | `/usr/local/bin/promtool` | Path binary promtool (validasi config) |
@@ -97,6 +92,7 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 | `prometheus_skip_head` | string | `65534` | UID user nobody untuk ownership TSDB dir + docker container user |
 | `expose_prometheus_via_nginx` | bool | `false` | Expose Prometheus UI publik lewat Nginx path `/prometheus/` |
 | `prometheus_domain` | string | `""` | Domain dedicated expose Prometheus HTTPS (mis. `prom.example.com`). Jika diisi → expose dianggap true & dedicated server block dibuat; ssl cert bisa dedicated via `tls_prometheus_cert_path`; fallback empty = expose via `/prometheus` subpath |
+| `prometheus_nginx_port` | int | `30090` | Port Nginx listen untuk expose Prometheus ke publik ketika `prometheus_domain` kosong (akses via http://<node-ip>:30090 tanpa domain). |
 
 Catatan: Tidak ada `enable_ha_prometheus`. Ketahanan Prometheus murni
 konsekuensi jumlah host di `groups['monitoring']`/`groups['prometheus']`.
@@ -110,7 +106,7 @@ konsekuensi jumlah host di `groups['monitoring']`/`groups['prometheus']`.
 | `node_exporter_port` | int | `9100` | Port listen |
 | `node_exporter_image` | string | `prom/node-exporter` | Docker image (mode docker) |
 | `node_exporter_tag` | string | `v1.8.2` | Docker image tag (mode docker) |
-| `node_exporter_native_version` | string | `1.8.2` | Versi package/binary (mode native) |
+
 | `node_exporter_collectors_enabled` | list | `[]` | Collector tambahan yang diaktifkan (--collector.) |
 | `node_exporter_collectors_disabled` | list | `[]` | Collector default yang dimatikan (--no-collector.) |
 | `node_exporter_textfile_dir` | string | `""` | Direktori textfile collector custom (opsional) |
@@ -146,8 +142,7 @@ Catatan: Tidak ada konsep HA untuk Node Exporter.
 | `grafana_health_url` | string | `http://127.0.0.1:{{grafana_port}}/api/health` | Endpoint health check Grafana untuk combined vrrp_script |
 | `prometheus_health_url` | string | `http://127.0.0.1:{{prometheus_port}}/-/healthy` | Endpoint health check Prometheus untuk combined vrrp_script |
 | `nginx_health_url` | string | `http://127.0.0.1/healthz` | Endpoint health check Nginx (reserved, future use) |
-| `keepalived_native_package_name` | string | `keepalived` | Nama OS package keepalived (native mode) |
-| `keepalived_service_name` | string | `keepalived` | Nama systemd service keepalived (native mode) |
+
 | `keepalived_image` | string | `osixia/keepalived` | Docker image keepalived (docker mode) |
 | `keepalived_tag` | string | `"2.0.20"` | Docker image tag keepalived (docker mode) |
 
@@ -166,8 +161,7 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `nginx_container_name` | string | `agra-nginx` | Nama container docker |
 | `nginx_image` | string | `nginx` | Docker image (mode docker) |
 | `nginx_tag` | string | `1.27-alpine` | Docker image tag (mode docker) |
-| `nginx_native_version` | string | `""` | Versi package (mode native, "" = latest repo) |
-| `nginx_install_method` | string | `native` | Default install method (native preferred untuk nginx) |
+
 | `nginx_config_dir` | string | `/etc/nginx` | Lokasi config nginx |
 | `nginx_sites_available_dir` | string | `{{ nginx_config_dir }}/sites-available` | Debian-style sites-available |
 | `nginx_sites_enabled_dir` | string | `{{ nginx_config_dir }}/sites-enabled` | Debian-style sites-enabled |
@@ -213,8 +207,8 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `server_name` | string | `{{ monitoring_vip | default(inventory_hostname) }} _` | server_name directive (catch-all dengan `_`) |
 | `nginx_http_port` | int | `80` | Port HTTP |
 | `nginx_https_port` | int | `443` | Port HTTPS |
-| `nginx_uid` | int | `101` (docker) / `33` (native) | UID numeric user nginx worker, untuk chown runtime dirs writable (log/cache). Override di globals.yml jika host UID beda (misal custom build image nginx). |
-| `nginx_gid` | int | `101` (docker) / `33` (native) | GID numeric group nginx worker. |
+| `nginx_uid` | int | `101` | UID numeric user nginx worker di official alpine image (101) — untuk chown runtime dirs log/cache writable. |
+| `nginx_gid` | int | `101` | GID numeric group nginx worker di official alpine image (101). |
 | `nginx_dir_mode` | string (octal) | `"0755"` | File mode untuk log/cache runtime writable dirs (default rwxr-xr-x). Valid octal string e.g. `"0750"` untuk restrict group non-writable. |
 
 Catatan: Untuk custom cert CA-signed, taruh `agra.crt`, `agra.key`, opsional `agra-ca.crt` di folder `/etc/agra/config/nginx/ssl/` (di control node sebelum deploy, atau remote di managed host) — config.yml akan otomatis copy ke `/etc/nginx/ssl/` tanpa overwrite self-signed generate.
@@ -259,7 +253,7 @@ Catatan: Untuk custom cert CA-signed, taruh `agra.crt`, `agra.key`, opsional `ag
 ## 10. Konvensi Umum
 
 - Semua flag boolean pakai prefix `enable_`.
-- Semua variabel versi dipisah `_tag` (docker) vs `_native_version` (native).
+- Semua variabel versi Docker WAJIB format: `<service>_image` + `<service>_tag`.
 - Semua path pakai suffix `_path` (file) atau `_dir` (direktori).
 - Semua secret hanya boleh direferensikan lewat prefix `vault_` dari
   `passwords.yml`, tidak pernah didefinisikan langsung di `globals.yml`.

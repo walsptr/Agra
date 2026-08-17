@@ -85,8 +85,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         except Exception as e:
             warn(f"Skip invalid manifest {m.name}: {e}")
 
-    cols = ["#", "BACKUP NAME", "DATE", "HOST", "MODE", "TSDB?", "SIZE", "TARBALL"]
-    rows: List[List[str]] = []
+    cols = ["#", "NAME", "DATE", "HOST", "TSDB", "SIZE", "TAR"]
+    rows = []
     for i, d in enumerate(parsed, 1):
         name = d.get("backup_name", d.get("_manifest_path", "?")).split("/")[-1].replace(".yml", "")
         date_val = d.get("backup_date_human", d.get("backup_timestamp", ""))
@@ -97,11 +97,10 @@ def cmd_list(args: argparse.Namespace) -> int:
         except Exception:
             pass
         host = d.get("backup_host", "-")
-        mode = d.get("agra_deployment_mode", "-")
         tsdb = "Y" if d.get("backup_include_prometheus_tsdb") else "n"
         size = _fmt_size(d.get("backup_tarball_size_bytes", d.get("backup_tarball_size", 0)))
         tar = "✅" if d.get("_tarball_exists") else "❌"
-        rows.append([str(i), name, date_val, host, mode, tsdb, size, tar])
+        rows.append([str(i), name, date_val, host, tsdb, size, tar])
 
     widths = [len(c) for c in cols]
     for r in rows:

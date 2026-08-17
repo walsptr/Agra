@@ -58,7 +58,7 @@ agra/
 │   │   ├── restore.yml
 │   │   └── genpwd.yml
 │   ├── roles/
-│   │   ├── common/               # docker/native prep, user, dir, firewall
+│   │   ├── common/               # docker prep, user, dir, firewall
 │   │   ├── keepalived/           # reusable, dipakai untuk monitoring_vip
 │   │   ├── nginx/                # reverse proxy + TLS
 │   │   ├── prometheus/
@@ -79,22 +79,22 @@ agra/
 | `/etc/agra/config/<svc>/` | Absolute path config override custom user per-service. Template struktur default di repo: `./etc/agra/config/<svc>/`. |
 | `/etc/agra/ssl/agra.{crt,key,ca,dhparam.pem}` | **BARU**. Output self-signed cert pre-deploy `agra certificates generate`. Default source value tls_*_path. Dapat di-override user ke path CA-signed custom. |
 
-## 3. Deployment Mode — Hybrid (Docker / Native)
+## 3. Deployment Mode — Docker-only
 
-Ditentukan oleh `agra_deployment_mode: docker | native`, default global via
-`globals.yml`. Setiap role service (`prometheus`, `grafana`, `node_exporter`)
-punya router task yang meng-include salah satu implementasi:
+Semua monitoring component (Grafana, Prometheus, Node Exporter, Nginx,
+Keepalived) **hanya di-deploy sebagai Docker container**. Tidak ada mode
+native / systemd binary deployment. Setiap role service mengikuti pola
+router task:
 
 ```
 roles/<service>/tasks/
 ├── main.yml       # router
-├── config.yml     # shared, dipakai kedua mode (render config, file_sd, dst)
-├── docker.yml
-└── native.yml
+├── config.yml     # shared: render config, file_sd, dst
+└── docker.yml     # container deployment logic
 ```
 
-Fase 1: `agra_deployment_mode` berlaku **global** (satu mode untuk seluruh
-deployment). Override per-host/per-group adalah roadmap fase lanjut.
+Tidak ada variabel pemilihan mode deployment — deployment mode adalah
+docker-only secara fixed.
 
 **ETC_DIR Absolute Path Rule**: SELURUH ansible playbook (vars_files, include_vars group_vars/all) DAN CLI `agra` constants hanya membaca dari absolute `/etc/agra/globals.yml`, `/etc/agra/passwords.yml`, dan `/etc/agra/config/<svc>/`. Path relative `./etc/agra` HANYA BERISI template source untuk di-copy user ke `/etc/agra` saat install.
 
@@ -184,8 +184,8 @@ mengikuti ketahanan Prometheus yang men-scrape dia.
 
 ## 7. Versioning & Upgrade
 
-- Versi service **fully customizable** oleh user, dipisah menurut deployment
-  mode (image+tag untuk docker, package version untuk native).
+- Versi service menggunakan **single versioning via docker image tag**
+  (`<service>_image` + `<service>_tag`), fully customizable oleh user.
 - Upgrade = re-run deploy dengan versi baru (idempotent), dibungkus safety
   layer oleh CLI wrapper:
   1. Pre-flight check
@@ -209,9 +209,9 @@ mengikuti ketahanan Prometheus yang men-scrape dia.
 
 Validasi assertion precheck menggunakan **direct parse `/etc/agra/globals.yml` sebagai single source of truth untuk semua vars konfigurasi fitur & versi**; precheck tidak membaca vars konfigurasi dari inventory [group:vars] / Ansible `hostvars` per-node (inventory hanya menentukan topologi via group membership). Lihat RULES.md §14 untuk daftar vars yang termasuk konfigurasi vs koneksi.
 Seluruh validasi (`assert`) yang berkaitan dengan syarat HA, jumlah node,
-backend database, dsb, dikumpulkan di `playbooks/precheck.yml`, dijalankan
-otomatis di awal `agra deploy`/`agra upgrade`, dan bisa dipanggil standalone
-lewat `agra check`.
+backend database, dsb, dikumpulkan di `playbooks/precheck.yml`. Precheck
+dijalankan via command terpisah `agra check` sebelum deploy, dan bisa
+dipanggil standalone kapan saja.
 
 ## 10. Backup & Restore
 
