@@ -638,19 +638,11 @@
               {% else %}
                 {{ {} }}
               {% endif %}
-
-                        _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
-                        _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
-                        _precheck_pwd_globals_match_file: >-
-                          {{ ( _precheck_pwd_grafana_admin == _precheck_pwd_from_globals_grafana_admin
-                               and _precheck_pwd_grafana_admin | length > 0
-                               and (not _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') | default(false) | bool)
-                          ) | bool }}
           run_once: true
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals)'
+        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals) + cross validate Kolla pattern globals vs file'
           ansible.builtin.set_fact:
             _precheck_pwd_grafana_admin:     "{{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}"
             _precheck_pwd_grafana_secret:    "{{ (_precheck_pwd_dict.get('grafana_secret_key',    '') | default('', true) | string | trim) }}"
@@ -671,6 +663,17 @@
               {% endif %}
             _precheck_pwd_raw_first80:     "{{ _precheck_pwd_raw_text[:80] | default('', true) | string | replace('\n', ' ') }}"
             _precheck_pwd_raw_line_count:  "{{ ( _precheck_pwd_raw_text.split('\n') | list | length | default(0) | int ) }}"
+
+            _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+            _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+            _precheck_pwd_globals_match_file: >-
+              {{ ( _precheck_pwd_grafana_admin == _precheck_pwd_from_globals_grafana_admin
+                   and _precheck_pwd_grafana_admin | length > 0
+                   and (not _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') | default(false) | bool)
+              ) | bool }}
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
 
         - name: 'Precheck Secret Grafana — DEBUG SELALU PRINT: [1]STAT [2]PARSE [3]FIELD [5]RAW CONTENT slurp status [6]KOLLA CROSS-VALIDATE [4]ROOT CAUSE (dev mode — plaintext only, TANPA enkripsi)'
           ansible.builtin.debug:
@@ -749,17 +752,6 @@
               │      → Field existing (keepalived/s3) RETAIN 100% AMAN.          │
               {% elif _precheck_pwd_grafana_admin | length == 0 %}
               │   ⚠️ FIELD ADA tapi VALUE KOSONG → `agra genpwd` (field diisi random) │
-              {% elif _precheck_pwd_grafana_admin == 'admin' %}
-              │   ⚠️ VALUE = "admin" (default lemah!) → `agra genpwd --force`       │
-              {% elif _precheck_pwd_grafana_secret | length < 16 %}
-              │   ⚠️ secret_key PANJANG < 16 → `agra genpwd` (atau --force regenerate) │
-              {% else %}
-              │   ✅ SEMUA SESUAI STANDARD → assertion PASS ✔                     │
-              {% endif %}
-              └─────────────────────────────────────────────────────────────────┘
-          run_once: true
-          delegate_to: localhost
-          changed_when: false
               {% elif _precheck_pwd_grafana_admin == 'admin' %}
               │   ⚠️ VALUE = "admin" (default lemah!) → `agra genpwd --force`       │
               {% elif _precheck_pwd_grafana_secret | length < 16 %}
