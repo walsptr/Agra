@@ -1,23 +1,4 @@
 ---
-- name: Common (Docker) - Update apt package index (Debian, cache_valid_time=3600 agar idempotent)
-  ansible.builtin.apt:
-    update_cache: yes
-    cache_valid_time: 3600
-  when: ansible_facts['os_family'] == 'Debian'
-  tags: ['common', 'docker', 'packages', 'update']
-
-- name: Common (Docker) - Safe upgrade apt packages (Debian, tidak hapus paket)
-  ansible.builtin.apt:
-    upgrade: safe
-  when: ansible_facts['os_family'] == 'Debian'
-  tags: ['common', 'docker', 'packages', 'upgrade']
-
-- name: Common (Docker) - Update dnf package cache (RedHat)
-  ansible.builtin.dnf:
-    update_cache: yes
-  when: ansible_facts['os_family'] == 'RedHat'
-  tags: ['common', 'docker', 'packages', 'update']
-
 - name: Common (Docker) - Install docker prerequisites (Debian)
   ansible.builtin.apt:
     name:

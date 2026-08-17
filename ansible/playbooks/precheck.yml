@@ -83,6 +83,145 @@
           - 'date_time'
       changed_when: false
 
+    # ──────────────────────────────────────────────────────────────
+    # PHASE BARU: NODE BOOTSTRAP (mengikuti pola Kolla-Ansible bootstrap-servers)
+    # Tujuan: SEBELUM validasi vars assertion, pastikan SEMUA managed node inventory
+    #         (group [monitoring] atau [node_exporter]) sudah:
+    #         [1] apt/dnf package cache update terbaru
+    #         [2] safe-upgrade packages OS (sehingga Docker dependency libs terbaru)
+    #         [3] install Docker engine + dependencies (docker.io/python3-docker)
+    #         [4] start & enable docker.service
+    #         [5] VERIFY docker info OK (fail-fast jika daemon tidak bisa start)
+    # Fail-fast: any_errors_fatal block level
+    # Managed node ONLY: tidak jalan di control node localhost (delegate_to none)
+    # ──────────────────────────────────────────────────────────────
+    - name: 'Precheck (BOOTSTRAP NODE) — BLOCK: Update packages + safe-upgrade + install Docker engine + verify Docker ready (setiap managed node inventory — pola Kolla-ansible bootstrap-servers)'
+      block:
+        # ── 1. DEBIAN FAMILY ──
+        - name: 'Precheck Bootstrap (Debian) — Update apt package index cache_valid_time=3600 agar idempotent'
+          ansible.builtin.apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          when: ansible_facts['os_family'] == 'Debian'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages', 'update']
+
+        - name: 'Precheck Bootstrap (Debian) — Safe upgrade packages (tidak hapus paket / dist-upgrade) — agar Docker libc dependensi terbaru'
+          ansible.builtin.apt:
+            upgrade: safe
+          when: ansible_facts['os_family'] == 'Debian'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages', 'upgrade']
+
+        - name: 'Precheck Bootstrap (Debian) — Install docker prerequisite packages (apt-transport-https ca-certificates curl gnupg lsb-release)'
+          ansible.builtin.apt:
+            name:
+              - apt-transport-https
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+          when: ansible_facts['os_family'] == 'Debian'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages']
+
+        - name: 'Precheck Bootstrap (Debian) — Install Docker engine docker.io + python3-docker SDK'
+          ansible.builtin.apt:
+            name:
+              - docker.io
+              - python3-docker
+            state: present
+          when: ansible_facts['os_family'] == 'Debian'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages']
+
+        # ── 2. REDHAT FAMILY (RHEL / CentOS / Rocky / AlmaLinux / Fedora) ──
+        - name: 'Precheck Bootstrap (RedHat) — Update dnf package metadata cache'
+          ansible.builtin.dnf:
+            update_cache: yes
+          when: ansible_facts['os_family'] == 'RedHat'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages', 'update']
+
+        - name: 'Precheck Bootstrap (RedHat) — Install Docker engine docker + python3-docker SDK'
+          ansible.builtin.dnf:
+            name:
+              - docker
+              - python3-docker
+            state: present
+          when: ansible_facts['os_family'] == 'RedHat'
+          tags: ['bootstrap', 'precheck', 'docker', 'packages']
+
+        # ── 3. SEMUA OS FAMILY ──
+        - name: 'Precheck Bootstrap (All) — Start & enable docker.service via systemd'
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: true
+          ignore_errors: true
+          tags: ['bootstrap', 'precheck', 'docker', 'service']
+
+        # ── 4. VERIFY DOCKER READY (FAIL-FAST) ──
+        - name: 'Precheck Bootstrap (All) — VERIFY docker binary exists & Docker daemon bisa jalankan docker info OK'
+          ansible.builtin.command:
+            cmd: bash -lc 'set -e; command -v docker >/dev/null; docker info >/dev/null'
+          register: _precheck_bootstrap_docker_info
+          changed_when: false
+          failed_when: false
+          tags: ['bootstrap', 'precheck', 'docker', 'verify']
+
+        - name: 'Precheck Bootstrap (All) — FAIL-FAST ASSERT: Docker binary + daemon WAJIB ready di SEMUA node. Jika gagal disini, tidak lanjut ke validasi vars!'
+          ansible.builtin.assert:
+            that:
+              - _precheck_bootstrap_docker_info.rc is defined
+              - _precheck_bootstrap_docker_info.rc | int == 0
+            fail_msg: >-
+              ❌ DOCKER DAEMON TIDAK BISA START di node {{ inventory_hostname }}
+              (actual: _precheck_bootstrap_docker_info.rc={{ _precheck_bootstrap_docker_info.rc | default('undefined') }}).
+
+              Langkah perbaiki (URUT):
+              1. Cek log Docker daemon terbaru:
+                 $ sudo journalctl -u docker.service -n 80 --no-pager
+              2. Penyebab umum + solusi:
+                 a. Kernel cgroup v2 incompat → Upgrade kernel LTS terbaru
+                 b. Disk /var/lib/docker penuh → cleanup docker system prune -af
+                 c. IPTables / nf_tables bentrok → sudo systemctl restart docker
+                 d. Package corruput → reinstall: sudo apt-get install --reinstall docker.io
+                 e. DNS resolve gagal apt update (block step 1) → pastikan node bisa egress
+                    ke repo OS (deb.debian.org / mirror.centos). Firewall blok 80/443?
+              3. Setelah perbaiki, jalankan LAGI: agra precheck -i <inventory> [-K]
+          tags: ['bootstrap', 'precheck', 'docker', 'verify']
+
+        # ── 5. DEBIAN OPSIONAL: WARNING JIKA REBOOT REQUIRED (setelah upgrade kernel) ──
+        - name: 'Precheck Bootstrap (Debian ONLY) — STAT file /var/run/reboot-required (penanda upgrade kernel / libc butuh reboot)'
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+            get_checksum: false
+          register: _precheck_bootstrap_reboot_required_stat
+          when: ansible_facts['os_family'] == 'Debian'
+          changed_when: false
+          tags: ['bootstrap', 'precheck', 'reboot']
+
+        - name: 'Precheck Bootstrap ⚠️ WARNING — Node {{ inventory_hostname }} BUTUH REBOOT setelah kernel/libc upgrade. DISARANKAN reboot SEBELUM deploy!'
+          ansible.builtin.debug:
+            msg: >-
+              ⚠️  WARNING: /var/run/reboot-required ADA di {{ inventory_hostname }}.
+                  Upgrade kernel / library kritis (libc / systemd / openssl) baru saja
+                  di-install pada fase bootstrap upgrade dan BUTUH REBOOT AGAR EFEKTIF.
+                  WALAUPUN deploy bisa tetap berjalan, DISARANKAN untuk reboot node
+                  TERLEBIH DAHULU SEBELUM menjalankan `agra deploy`.
+          when:
+            - ansible_facts['os_family'] == 'Debian'
+            - _precheck_bootstrap_reboot_required_stat.stat.exists is defined
+            - _precheck_bootstrap_reboot_required_stat.stat.exists | default(false) | bool == true
+          changed_when: false
+          tags: ['bootstrap', 'precheck', 'reboot', 'warning']
+
+      # ── BLOCK LEVEL KONTROL ──
+      any_errors_fatal: true
+      # HANYA jalankan block ini di MANAGED node inventory anggota group monitoring ATAU node_exporter
+      # JANGAN jalankan di control node localhost (kecuali localhost masuk group [monitoring], misal AIO)
+      when:
+        - inventory_hostname in (groups['monitoring'] | default([]))
+          or
+          inventory_hostname in (groups['node_exporter'] | default([]))
+
     - name: 'Precheck (LOAD) — STAT /etc/agra/globals.yml & passwords.yml exists di control node (localhost)'
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -499,6 +638,7 @@
       ansible.builtin.debug:
         msg:
           - "✅ AGRA PRECHECK PASSED"
+          - "Node Bootstrap: Docker engine ready ✓ semua {{ groups['monitoring'] | default([]) | length }} monitoring node + {{ groups['node_exporter'] | default([]) | length }} node_exporter target"
           - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | default([]) | length }} node_exporter target(s)"
           - "Configuration source: DIRECT PARSE /etc/agra/globals.yml (single source of truth precheck assertions)"
           - "Grafana database: {{ _precheck_v_grafana_database }}"

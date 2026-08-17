@@ -77,7 +77,7 @@ python3 -m venv .venv && source .venv/bin/activate
 
 | COMMAND | FUNGSI | CONTOH |
 |---|---|---|
-| `agra check` | Jalankan preflight validation (topologi, TLS expiry, konektivitas DB). Read-only, tidak modifikasi host. | `agra check -i inventory/multinode -v` |
+| `agra check` | Bootstrap node (apt/dnf update cache + safe-upgrade packages + install Docker engine & dependencies + verify Docker daemon) + pre-flight validasi vars/config. -i WAJIB explicit. Jalankan SEBELUM agra deploy. | `agra check -i inventory/multinode -v` |
 | `agra genpwd` | Generate 6 random passwords 14 karakter ke `passwords.yml` (plaintext chmod 0600). Idempotent, tidak overwrite existing kecuali --force. | `agra genpwd --force` |
 | `agra deploy` | Jalankan playbooks deploy monitoring stack. **Precheck tidak otomatis jalan** — jalankan `agra precheck` / `agra check` terlebih dahulu sebelum deploy untuk validasi config. | `agra deploy -i inventory/all-in-one -t grafana` |
 | `agra upgrade` | Rolling upgrade serial:1 (standby dulu, master terakhir), max_fail 0. Backup otomatis sebelum upgrade. | `agra upgrade --grafana-tag 11.3.0 --prometheus-tag v2.54.1` |

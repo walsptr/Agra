@@ -207,6 +207,10 @@ mengikuti ketahanan Prometheus yang men-scrape dia.
 
 ## 9. Pre-flight Check
 
+Precheck sekarang **menggabungkan 2 fase dalam satu playbook** mengikuti pola Kolla-Ansible `bootstrap-servers` + preflight assertions:
+1. **Fase Bootstrap Node**: update package cache (apt/dnf) + safe-upgrade packages OS + install Docker engine + dependencies + start & enable docker.service + verify Docker daemon OK (fail-fast jika docker info tidak bisa start). Bootstrap hanya berjalan untuk node anggota group `[monitoring]` dan `[node_exporter]`, tidak di control node localhost (jika tidak termasuk salah satu group)
+2. **Fase Validasi**: semua assertion existing (direct parse `/etc/agra/globals.yml` sebagai SSOT, topologi inventory, TLS expiry, Grafana DB connectivity, versi image tag tidak kosong, dll).
+
 Validasi assertion precheck menggunakan **direct parse `/etc/agra/globals.yml` sebagai single source of truth untuk semua vars konfigurasi fitur & versi**; precheck tidak membaca vars konfigurasi dari inventory [group:vars] / Ansible `hostvars` per-node (inventory hanya menentukan topologi via group membership). Lihat RULES.md §14 untuk daftar vars yang termasuk konfigurasi vs koneksi.
 Seluruh validasi (`assert`) yang berkaitan dengan syarat HA, jumlah node,
 backend database, dsb, dikumpulkan di `playbooks/precheck.yml`. Precheck

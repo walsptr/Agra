@@ -15,10 +15,11 @@ from agra.utils.colors import error, BOLD, RESET
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "check", aliases=["precheck", "verify"],
-        help="Run preflight validation (playbook precheck.yml) + PING semua node di inventory. ⚠️ -i WAJIB explicit.",
-        description="Validasi topologi inventory, grafana DB connectivity, versi variabel, TLS expiry, + PING reachability SEMUA HOST di inventory.\n\nPENTING: Parameter -i/--inventory WAJIB diisi (TIDAK BOLEH pakai default). Explicit inventory mana yang dicek.",
+        help="Run preflight bootstrap + validation (update packages OS, safe-upgrade, install Docker engine, verify Docker ready) + PING semua node + validasi config vars. ⚠️ -i WAJIB explicit.",
+        description="Jalankan 2 fase: [1] BOOTSTRAP NODE: apt/dnf update cache + safe-upgrade packages + install Docker engine + dependencies + start Docker daemon + verify Docker info OK di setiap node. [2] VALIDASI: topologi inventory, Grafana DB connectivity, variabel versi tag, TLS expiry, + PING reachability SEMUA HOST di inventory.\n\nPENTING: Parameter -i/--inventory WAJIB diisi (TIDAK BOLEH pakai default). Explicit inventory mana yang di-bootstrap beserta divalasinya.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
+  # Bootstrap+Precheck multi-node production (butuh sudo -> flag -K):
 Contoh penggunaan:
   agra check -i inventory/all-in-one           # Precheck all-in-one 1 node
   agra check -i inventory/multinode -K         # Precheck multi-node + tanya sudo password
