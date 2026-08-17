@@ -6,8 +6,7 @@
 {% set _grafana_server_names = ((
   ([_grafana_domain_trim] if _grafana_domain_has else [])
   + ([_monitoring_vip_trim] if _monitoring_vip_has else [])
-  + [inventory_hostname]
-  + (['_'] if not _grafana_domain_has else [])
+  + (['_'] if (not _grafana_domain_has and not _monitoring_vip_has) else [])
 ) | unique | join(' ')) %}
 
 {% if _grafana_domain_has %}
@@ -45,11 +44,7 @@ server {
     server_name {{ _grafana_server_names }};
 {% endif %}
 
-    location = / {
-        return 302 /grafana/;
-    }
-
-    location /grafana/ {
+    location / {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
@@ -66,7 +61,7 @@ server {
         proxy_buffering off;
     }
 
-    location /grafana/api/live/ {
+    location /api/live/ {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -96,10 +91,6 @@ server {
         return 301 /prometheus/;
     }
 {% endif %}
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
 }
 
 {% else %}
@@ -109,11 +100,7 @@ server {
     listen [::]:{{ grafana_nginx_port }};
     server_name {{ _grafana_server_names }};
 
-    location = / {
-        return 302 /grafana/;
-    }
-
-    location /grafana/ {
+    location / {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
@@ -130,7 +117,7 @@ server {
         proxy_buffering off;
     }
 
-    location /grafana/api/live/ {
+    location /api/live/ {
         proxy_pass {{ (grafana_backend_url.split() | join('')) }}/api/live/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -160,10 +147,6 @@ server {
         return 301 /prometheus/;
     }
 {% endif %}
-
-    location / {
-        try_files $uri $uri/ =404;
-    }
 }
 
 {% endif %}
