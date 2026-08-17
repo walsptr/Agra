@@ -608,14 +608,38 @@
 
     - name: 'Precheck (GRAFANA SECRET) — BLOCK: Cek grafana_admin_password + grafana_secret_key ASLI dari /etc/agra/passwords.yml TIDAK BOLEH default/weak'
       block:
-        - name: 'Precheck Secret Grafana — Parse direct /etc/agra/passwords.yml via from_yaml file localhost (bukan include_vars untuk hindari precedence override globals)'
-          ansible.builtin.set_fact:
-            _precheck_pwd_dict: >-
-              {{ (lookup('ansible.builtin.file', '/etc/agra/passwords.yml', errors='ignore') | default('---\n', true) | from_yaml) | default({}, true) }}
+        - name: 'Precheck Secret Grafana — STAT passwords.yml exist'
+          ansible.builtin.stat:
+            path: "/etc/agra/passwords.yml"
+            get_checksum: false
+          register: _precheck_pwd_stat
           run_once: true
           delegate_to: localhost
           become: true
           become_user: root
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — SLURP /etc/agra/passwords.yml via module (PAKAI BECOME ROOT — slurp module RESPEK become, BERBEDA lookup(file) yang IGNORIR become → EACCES file chmod 0600)'
+          ansible.builtin.slurp:
+            src: "/etc/agra/passwords.yml"
+          register: _precheck_pwd_slurp
+          when: _precheck_pwd_stat.stat is defined and _precheck_pwd_stat.stat.exists
+          run_once: true
+          delegate_to: localhost
+          become: true
+          become_user: root
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Parse dict YAML: slurp content base64 decode → from_yaml. Jika file tidak ada → empty dict {}'
+          ansible.builtin.set_fact:
+            _precheck_pwd_dict: >-
+              {% if _precheck_pwd_slurp.skipped | default(false) %}
+                {{ {} }}
+              {% else %}
+                {{ ((_precheck_pwd_slurp.content | default('') | b64decode | default('---\n', true)) | from_yaml) | default({}, true) }}
+              {% endif %}
+          run_once: true
+          delegate_to: localhost
           changed_when: false
 
         - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals)'
@@ -625,9 +649,34 @@
             _precheck_pwd_prom_admin:         "{{ (_precheck_pwd_dict.get('prometheus_admin_password', '') | default('', true) | string | trim) }}"
             _precheck_pwd_grafana_db:         "{{ (_precheck_pwd_dict.get('grafana_database_password', '') | default('', true) | string | trim) }}"
             _precheck_pwd_backup_s3_secret:   "{{ (_precheck_pwd_dict.get('backup_s3_secret_key',   '') | default('', true) | string | trim) }}"
+            _precheck_pwd_file_exists:        "{{ _precheck_pwd_stat.stat is defined and _precheck_pwd_stat.stat.exists }}"
           run_once: true
           delegate_to: localhost
           changed_when: false
+
+        - name: 'Precheck Secret Grafana — ASSERT #0: passwords.yml file EXISTS & chmod 0600 root:root'
+          ansible.builtin.assert:
+            that:
+              - _precheck_pwd_file_exists | bool
+              - _precheck_pwd_stat.stat.mode is defined
+              - _precheck_pwd_stat.stat.mode == '0600'
+              - _precheck_pwd_stat.stat.pw_name == 'root'
+            fail_msg: >-
+              ❌ /etc/agra/passwords.yml TIDAK SESUAI STANDARD KEAMANAN:
+                {% if not _precheck_pwd_file_exists | bool %}
+                - FILE TIDAK ADA. Jalankan → agra genpwd
+                {% else %}
+                {% if _precheck_pwd_stat.stat.mode is defined and _precheck_pwd_stat.stat.mode != '0600' %}
+                - Mode FILE SAAT INI = {{ _precheck_pwd_stat.stat.mode }} — HARUS 0600 (hanya owner root bisa baca). Fix: sudo chmod 0600 /etc/agra/passwords.yml
+                {% endif %}
+                {% if _precheck_pwd_stat.stat.pw_name is defined and _precheck_pwd_stat.stat.pw_name != 'root' %}
+                - Owner FILE SAAT INI = {{ _precheck_pwd_stat.stat.pw_name }} — HARUS root. Fix: sudo chown root:root /etc/agra/passwords.yml
+                {% endif %}
+                {% endif %}
+            success_msg: >-
+              ✅ passwords.yml exist, mode 0600, owner root:root. Aman.
+          run_once: true
+          delegate_to: localhost
 
         - name: 'Precheck Secret Grafana — FAIL-FAST ASSERT: grafana_admin_password TIDAK BOLEH = "admin" (default) dan minimal 8 karakter'
           ansible.builtin.assert:
