@@ -32,29 +32,67 @@
       become_user: root
       changed_when: false
 
-    - name: 'GenPwd — Assert JANGAN overwrite jika existing non-empty DAN tidak force'
+    - name: 'GenPwd — PARSE granular existing passwords.yml dict (untuk field-by-field idempotent logic)'
+      ansible.builtin.set_fact:
+        _pwd_existing: >-
+          {% if _pwd_stat.stat is defined and _pwd_stat.stat.exists %}
+            {{ (lookup('ansible.builtin.file', passwords_file, errors='ignore') | default('---\n', true) | from_yaml) | default({}, true) }}
+          {% else %}
+            {{ {} }}
+          {% endif %}
+        _pwd_field_list:
+          - { key: 'grafana_admin_password',    label: 'Grafana Admin UI password' }
+          - { key: 'grafana_database_password', label: 'Grafana External DB password' }
+          - { key: 'grafana_secret_key',        label: 'Grafana security secret_key' }
+          - { key: 'keepalived_auth_pass',      label: 'Keepalived VRRP auth pass' }
+          - { key: 'backup_s3_access_key',      label: 'Backup S3 access key' }
+          - { key: 'backup_s3_secret_key',      label: 'Backup S3 secret key' }
+      changed_when: false
+
+    - name: 'GenPwd — HITUNG field status: existing_terisi / existing_kosong (untuk assertion granular)'
+      ansible.builtin.set_fact:
+        _pwd_existing_values: >-
+          {% set out = {} %}
+          {% for f in _pwd_field_list %}
+            {% set v = (_pwd_existing.get(f.key, '') | default('', true) | string | trim) %}
+            {% set _ = out.update({f.key: v}) %}
+          {% endfor %}
+          {{ out }}
+        _pwd_count_terisi: >-
+          {% set n = namespace(c=0) %}
+          {% for f in _pwd_field_list %}
+            {% set v = (_pwd_existing.get(f.key, '') | default('', true) | string | trim) %}
+            {% if v | length > 0 %}{% set n.c = n.c + 1 %}{% endif %}
+          {% endfor %}
+          {{ n.c }}
+        _pwd_count_total: "{{ _pwd_field_list | length }}"
+      changed_when: false
+
+    - name: 'GenPwd — Assert granular: JIKA SEMUA field SUDAH TERISI 6/6 DAN TIDAK ADA flag --force → STOP (mencegah overwrite tidak sengaja)'
       ansible.builtin.assert:
         that:
-          - (_pwd_stat.stat.size | default(0) < 50) or genpwd_force | bool
+          - (_pwd_count_terisi | int < _pwd_count_total | int) or genpwd_force | bool
         fail_msg: >-
-          ❌ /etc/agra/passwords.yml SUDAH ADA dan terisi. TIDAK di-overwrite untuk mencegah kehilangan creds.
-          Jika YAKIN ingin generate BARU (semua password lama di-reset) —
-          jalankan `agra genpwd --force` (akan set extra_vars genpwd_force=true).
-          Backup manual dulu jika perlu — cp /etc/agra/passwords.yml /etc/agra/passwords.yml.bak
+          ❌ SEMUA {{ _pwd_count_total }} password fields di {{ passwords_file }} SUDAH TERISI ({{ _pwd_count_terisi }}/{{ _pwd_count_total }}).
+          Tidak ada field kosong yang perlu diisi.
+          Jika YAKIN ingin REGENERATE SEMUA PASSWORD (semua field lama di-overwrite BARU SEMUA), gunakan:
+              $ agra genpwd --force
+          ⚠️ Disarankan backup dulu sebelum force:
+              cp /etc/agra/passwords.yml /etc/agra/passwords.yml.bak-$(date +%Y%m%d-%H%M%S)
       when: _pwd_stat.stat is defined and _pwd_stat.stat.exists
 
-    - name: 'GenPwd — Backup existing sebelum overwrite'
+    - name: 'GenPwd — Backup existing passwords.yml SEBELUM modifikasi (selalu buat backup untuk rollback)'
       ansible.builtin.copy:
         src: "{{ passwords_file }}"
         dest: "{{ passwords_file }}.bak-{{ lookup('pipe', 'date +%s') | default('0') }}"
         remote_src: true
-      when:
-        - _pwd_stat.stat is defined
-        - _pwd_stat.stat.exists
-        - _pwd_stat.stat.size | default(0) > 10
-      ignore_errors: true
+        mode: '0600'
+        owner: root
+        group: root
       become: true
       become_user: root
+      when: _pwd_stat.stat is defined and _pwd_stat.stat.exists
+      changed_when: false
 
     - name: 'GenPwd — Generate 6 random passwords via python3 secrets module (ZERO DEPENDENCY)'
       block:
@@ -118,47 +156,102 @@
           ansible.builtin.set_fact:
             _gen_pwd_map: "{{ _gen_py_out.stdout | from_json }}"
 
-        - name: 'GenPwd — Set 6 fact passwords'
+        - name: 'GenPwd — Set 6 fact passwords RANDOM (BARU generate — belum di-apply, dipisahkan existing vs final)'
           ansible.builtin.set_fact:
-            _pwd_grafana_admin: "{{ _gen_pwd_map['grafana_admin_password'] }}"
-            _pwd_grafana_db: "{{ _gen_pwd_map['grafana_database_password'] }}"
-            _pwd_grafana_secret_key: "{{ _gen_pwd_map['grafana_secret_key'] }}"
-            _pwd_keepalived: "{{ _gen_pwd_map['keepalived_auth_pass'] }}"
-            _pwd_backup_s3_access: "{{ _gen_pwd_map['backup_s3_access_key'] }}"
-            _pwd_backup_s3_secret: "{{ _gen_pwd_map['backup_s3_secret_key'] }}"
+            _new_pwd_grafana_admin:     "{{ _gen_pwd_map['grafana_admin_password'] }}"
+            _new_pwd_grafana_db:        "{{ _gen_pwd_map['grafana_database_password'] }}"
+            _new_pwd_grafana_secret:    "{{ _gen_pwd_map['grafana_secret_key'] }}"
+            _new_pwd_keepalived:        "{{ _gen_pwd_map['keepalived_auth_pass'] }}"
+            _new_pwd_backup_s3_access:  "{{ _gen_pwd_map['backup_s3_access_key'] }}"
+            _new_pwd_backup_s3_secret:  "{{ _gen_pwd_map['backup_s3_secret_key'] }}"
 
         - name: 'GenPwd — Cleanup temp py script'
           ansible.builtin.file:
             path: "{{ _gen_py.path }}"
             state: absent
 
-    - name: 'GenPwd — Tulis passwords.yml (TANPA VAULT, plaintext 14 chars)'
+    - name: 'GenPwd — COMPUTE FINAL (idempotent field-by-field): existing terisi RETAIN. existing kosong diisi NEW random. --force → overwrite SEMUA NEW'
+      ansible.builtin.set_fact:
+        _final_pwd_grafana_admin: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_grafana_admin }}
+          {%- elif (_pwd_existing_values['grafana_admin_password'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['grafana_admin_password'] }}
+          {%- else -%}{{ _new_pwd_grafana_admin }}{%- endif -%}
+        _final_pwd_grafana_db: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_grafana_db }}
+          {%- elif (_pwd_existing_values['grafana_database_password'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['grafana_database_password'] }}
+          {%- else -%}{{ _new_pwd_grafana_db }}{%- endif -%}
+        _final_pwd_grafana_secret: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_grafana_secret }}
+          {%- elif (_pwd_existing_values['grafana_secret_key'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['grafana_secret_key'] }}
+          {%- else -%}{{ _new_pwd_grafana_secret }}{%- endif -%}
+        _final_pwd_keepalived: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_keepalived }}
+          {%- elif (_pwd_existing_values['keepalived_auth_pass'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['keepalived_auth_pass'] }}
+          {%- else -%}{{ _new_pwd_keepalived }}{%- endif -%}
+        _final_pwd_backup_s3_access: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_backup_s3_access }}
+          {%- elif (_pwd_existing_values['backup_s3_access_key'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['backup_s3_access_key'] }}
+          {%- else -%}{{ _new_pwd_backup_s3_access }}{%- endif -%}
+        _final_pwd_backup_s3_secret: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_backup_s3_secret }}
+          {%- elif (_pwd_existing_values['backup_s3_secret_key'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['backup_s3_secret_key'] }}
+          {%- else -%}{{ _new_pwd_backup_s3_secret }}{%- endif -%}
+        _force_mode_active: "{{ genpwd_force | bool }}"
+      changed_when: false
+
+    - name: 'GenPwd — DEBUG user-friendly: Field mana yang RETAIN existing / BARU diisi random'
+      ansible.builtin.debug:
+        msg: |
+          🔑 AGRA GENPWD — Field Status Summary (Total {{ _pwd_count_total }} fields):
+          {% if _force_mode_active %}
+          ⚠️  MODE --FORCE AKTIF: SEMUA FIELD DI-OVERWRITE DENGAN RANDOM BARU!
+          {% endif %}
+          {% set ns = namespace(retain=0, new=0) %}
+          {% for f in _pwd_field_list %}
+            {% set final_v = {
+                 'grafana_admin_password':    _final_pwd_grafana_admin,
+                 'grafana_database_password': _final_pwd_grafana_db,
+                 'grafana_secret_key':        _final_pwd_grafana_secret,
+                 'keepalived_auth_pass':      _final_pwd_keepalived,
+                 'backup_s3_access_key':      _final_pwd_backup_s3_access,
+                 'backup_s3_secret_key':      _final_pwd_backup_s3_secret,
+               }[f.key] %}
+            {% set existing_v = _pwd_existing_values[f.key] | default('') %}
+            {% set status = 'RETAIN' if existing_v | trim | length > 0 and final_v == existing_v and not _force_mode_active else 'NEW RANDOM' %}
+            {% if status == 'RETAIN' %}{% set ns.retain = ns.retain + 1 %}{% else %}{% set ns.new = ns.new + 1 %}{% endif %}
+            · {{ '%-32s' | format(f.label) }} → [{{ status }}]{% if status == 'NEW RANDOM' and not _force_mode_active %} (field sebelumnya kosong){% elif status == 'NEW RANDOM' and _force_mode_active %} (--force overwrite){% endif %}
+          {% endfor %}
+          — Summary: {{ ns.retain }} RETAIN (existing aman), {{ ns.new }} NEW (random diisi).
+
+    - name: 'GenPwd — Tulis passwords.yml (field-by-field idempotent: RETAIN existing, hanya NEW ditulis; MODE 0600 OWNER ROOT)'
       ansible.builtin.copy:
         dest: "{{ passwords_file }}"
         mode: '0600'
+        owner: root
+        group: root
         content: |
           # ============================================================
           # /etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
-          # Generated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
+          # Generated / Updated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
           #
           # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600. JANGAN PERNAH commit PLAINTEXT passwords.yml ke GIT (SUDAH di .gitignore). Jika butuh enkripsi, pakai tool external seperti git-crypt / blackbox / sops.
           # ============================================================
 
           # Grafana admin password (login ke UI https://vip/ — path root /, TANPA subpath /grafana/)
-          grafana_admin_password: "{{ _pwd_grafana_admin }}"
+          grafana_admin_password: "{{ _final_pwd_grafana_admin }}"
 
           # Grafana external database password (mysql / postgresql)
-          grafana_database_password: "{{ _pwd_grafana_db }}"
+          grafana_database_password: "{{ _final_pwd_grafana_db }}"
 
           # Grafana [security] secret_key (signing session cookies, link sharing)
-          grafana_secret_key: "{{ _pwd_grafana_secret_key }}"
+          grafana_secret_key: "{{ _final_pwd_grafana_secret }}"
 
           # Keepalived VRRP authentication password (antar node sync)
-          keepalived_auth_pass: "{{ _pwd_keepalived }}"
+          keepalived_auth_pass: "{{ _final_pwd_keepalived }}"
 
           # S3 access credentials (backup.yml — HANYA jika backup_s3_bucket di-set)
-          backup_s3_access_key: "{{ _pwd_backup_s3_access }}"
-          backup_s3_secret_key: "{{ _pwd_backup_s3_secret }}"
+          backup_s3_access_key: "{{ _final_pwd_backup_s3_access }}"
+          backup_s3_secret_key: "{{ _final_pwd_backup_s3_secret }}"
       no_log: true
       become: true
       become_user: root
@@ -166,6 +259,7 @@
     - name: 'GenPwd — Success info'
       ansible.builtin.debug:
         msg:
-          - "✅ AGRA GENPWD SELESAI → 6 random password 14 karakter ditulis ke {{ passwords_file }}"
-          - "ℹ️ Passwords dalam plaintext. MODE 0600 hanya owner bisa baca. FILE INI TERMASUK .gitignore JANGAN di-commit."
-          - "ℹ️ SELANJUTNYA: Edit globals.yml sesuai environment, lalu jalankan `agra check` lalu `agra deploy`."
+          - "✅ AGRA GENPWD SELESAI → passwords.yml ditulis ke {{ passwords_file }} (chmod 0600, owner root)."
+          - "ℹ️  Password dalam plaintext. MODE 0600 hanya owner (root) bisa baca. FILE INI TERMASUK .gitignore — JANGAN PERNAH di-commit."
+          - "ℹ️  SELANJUTNYA (jika precheck tadi gagal secret grafana): Jalankan → agra precheck -i inventory/<nama>.yml    (sekarang assertion Grafana secret PASS)."
+          - "ℹ️  Setelah precheck PASS → agra deploy -i inventory/<nama>.yml"
