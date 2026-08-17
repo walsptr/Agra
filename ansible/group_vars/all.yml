@@ -11,7 +11,7 @@
   loop: "{{ agra_globals | dict2items }}"
   delegate_to: localhost
   run_once: true
-- name: Include passwords from etc/agra (vaulted or plain)
+- name: Include passwords from etc/agra (plaintext chmod 0600 RULES §7 — NO vault, dev mode plaintext only)
   ansible.builtin.include_vars:
     file: "/etc/agra/passwords.yml"
     name: agra_passwords
