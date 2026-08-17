@@ -19,7 +19,7 @@
   ansible.builtin.set_fact:
     _gf_domain_clean:  "{{ (grafana_domain   | default('')) | string | trim | regex_replace('\\s+', '') }}"
     _gf_vip_clean:     "{{ (monitoring_vip   | default('')) | string | trim | regex_replace('\\s+', '') }}"
-    _gf_host_fallback: "{{ inventory_hostname | string | trim | regex_replace('[^A-Za-z0-9\\.\\-]', '') }}"
+    _gf_host_fallback: "{{ inventory_hostname | string | trim | regex_replace('[^A-Za-z0-9.-]', '') }}"
     _gf_port_int:      "{{ grafana_port     | default(3000) | int }}"
     _gf_nginx_bool:    "{{ enable_nginx     | default(true) | bool }}"
 
@@ -30,7 +30,7 @@
 
 - name: 'Grafana (PRE compute 3/3) - FINAL: SET grafana_server_domain + grafana_server_root_url TOP LEVEL namespace (digunakan config.yml render grafana.ini.j2 line 14-15 + docker.yml)'
   ansible.builtin.set_fact:
-    grafana_server_domain: "{{ _gf_domain_selected | trim | regex_replace('[^A-Za-z0-9\\.\\-]', '') }}"
+    grafana_server_domain: "{{ _gf_domain_selected | trim | regex_replace('[^A-Za-z0-9.-]', '') }}"
     grafana_server_root_url: >-
       {%- set scheme = 'https' if _gf_nginx_bool | bool else 'http' -%}
       {%- set host_for_url = _gf_vip_clean if (_gf_vip_clean | default('') | length > 0) else _gf_host_fallback -%}

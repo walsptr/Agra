@@ -47,19 +47,19 @@
 
 - name: 'Grafana (Docker) - Safety set_fact sanitize root_url dan fallback default admin password IF empty (precheck nanti fail jika default)'
   ansible.builtin.set_fact:
-    _gf_safe_admin_user:     "{{ grafana_admin_user                                           | default('admin')   | trim | regex_replace('[^A-Za-z0-9_\\-\\.]', '') }}"
+    _gf_safe_admin_user:     "{{ grafana_admin_user                                           | default('admin')   | trim | regex_replace('[^A-Za-z0-9_.-]', '') }}"
     _gf_safe_admin_password: "{{ ((grafana_admin_password | default('') | trim | length == 0) | ternary('admin', grafana_admin_password | default('admin'))) | trim }}"
-    _gf_safe_server_domain:  "{{ grafana_server_domain                                       | default('')        | trim | regex_replace('[^A-Za-z0-9\\.\\-:]', '') }}"
+    _gf_safe_server_domain:  "{{ grafana_server_domain                                       | default('')        | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
     _gf_safe_server_root_url: >-
       {{ (
-        (grafana_server_root_url | default('') | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/\\.\\-?&=_#%]', ''))
+        (grafana_server_root_url | default('') | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/.?&=_#%-]', ''))
         | default(
           ((enable_nginx | default(true) | bool) | ternary('https://' ~ (monitoring_vip | default(inventory_hostname)) ~ '/',
                                                             'http://'  ~ (monitoring_vip | default(inventory_hostname)) ~ ':' ~ (grafana_port | default(3000)) ~ '/'))
         , true)
       ) | trim }}
-    _gf_safe_secret_key:    "{{ ((grafana_secret_key | default('') | trim | length == 0) | ternary('CHANGE_ME_TEMPORARY_FALLBACK_SECRET_KEY_MIN32CHARSXXXXXXXXXXXXXXXXXXXXXXXX', grafana_secret_key)) | trim | regex_replace('[^A-Za-z0-9!@#$%^&*()_\\-+=\\[\\]{};:''\"<>,./?]', '') }}"
-    _gf_safe_listen_address: "{{ grafana_web_listen_address | default('127.0.0.1:' ~ grafana_port | default(3000)) | trim | regex_replace('[^A-Za-z0-9\\.\\-:]', '') }}"
+    _gf_safe_secret_key:    "{{ ((grafana_secret_key | default('') | trim | length == 0) | ternary('CHANGE_ME_TEMPORARY_FALLBACK_SECRET_KEY_MIN32CHARSXXXXXXXXXXXXXXXXXXXXXXXX', grafana_secret_key)) | trim | regex_replace('[^][A-Za-z0-9!@#$%^&*()_+={};:''\"<>,./?-]', '') }}"
+    _gf_safe_listen_address: "{{ grafana_web_listen_address | default('127.0.0.1:' ~ grafana_port | default(3000)) | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
   tags: ['grafana', 'docker', 'config']
 
 - name: 'Grafana (Docker) - Warning debug fallback admin password default admin terdeteksi (segera jalankan agra genpwd dan re-deploy untuk security)'
