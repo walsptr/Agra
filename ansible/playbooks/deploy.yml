@@ -16,7 +16,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_common
+    - name: 'Precheck deploy 1: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: common
 
@@ -37,7 +65,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_node_exporter
+    - name: 'Precheck deploy 2: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: node_exporter
 
@@ -58,7 +114,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_prometheus
+    - name: 'Precheck deploy 3: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: prometheus
 
@@ -79,7 +163,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_grafana
+    - name: 'Precheck deploy 4: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: grafana
 
@@ -100,7 +212,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_nginx
+    - name: 'Precheck deploy 5: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   tasks:
     - name: 'Deploy — Apply role nginx jika enable_nginx=true'
       ansible.builtin.include_role:
@@ -125,7 +265,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_keepalived
+    - name: 'Precheck deploy 6: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   tasks:
     - name: 'Deploy — Apply role keepalived HANYA JIKA groups monitoring length > 1'
       ansible.builtin.include_role:
@@ -151,7 +319,35 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      failed_when: false
+      register: _deploy_include_vars_load_summary
+    - name: 'Precheck deploy 7: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password is defined
+          - grafana_secret_key is defined
+          - grafana_admin_password | string | length > 0
+        fail_msg: |
+          **********************************************************************
+          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
+          **********************************************************************
+          3 penyebab umum:
+          1. File /etc/agra/passwords.yml TIDAK ADA
+          2. chmod file BUKAN 0600 (harus root:root 0600)
+          3. YAML syntax ERROR di dalam file
+
+          Solusi 6 langkah perbaikan:
+          1. sudo ls -la /etc/agra/passwords.yml
+          2. sudo chown root:root /etc/agra/passwords.yml
+          3. sudo chmod 0600 /etc/agra/passwords.yml
+          4. agra genpwd
+          5. agra precheck pass
+          6. agra deploy
+        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      tags: ['deploy', 'config', 'precheck', 'passwords']
   vars:
     access_url: >-
       {% if (groups['monitoring'] | length > 1) and (hostvars[groups['monitoring'][0]]['monitoring_vip'] | default('') | length > 0) %}https://{{ hostvars[groups['monitoring'][0]]['monitoring_vip'] }}/
@@ -164,7 +360,7 @@
         msg:
           - "✅ AGRA DEPLOY SELESAI"
           - "Grafana URL: {{ access_url | trim }}"
-          - "Default user: {{ grafana_admin_user | default('admin') }} — password: lihat /etc/agra/passwords.yml field grafana_admin_password (default fallback: admin jika belum run genpwd)"
+          - "Default user: {{ grafana_admin_user | default('admin') }} — grafana_admin_password len={{ grafana_admin_password | default('') | string | length }} chars (lihat /etc/agra/passwords.yml field grafana_admin_password). CATATAN: default admin fallback TIDAK DIIZINKAN (ada fail-fast assertion di role grafana docker.yml dan deploy.yml include_vars level)."
           - "Prometheus: {% if _expose_prometheus_via_nginx %}{{ access_url | trim }}prometheus/{% else %}http://127.0.0.1:9090 (HANYA internal node, tidak expose via nginx){% endif %}"
       vars:
         _enable_https: "{{ lookup('vars', 'enable_https', default=true) | bool }}"

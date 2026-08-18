@@ -37,6 +37,61 @@
       {%- set port_suffix = ':' ~ _gf_port_int if (not _gf_nginx_bool | bool) else '' -%}
       {{ scheme ~ '://' ~ host_for_url ~ port_suffix ~ '/' }}
 
+- name: 'Grafana (AC-2/AC-6 SPEC) - Safety set_fact sanitize 6 vars TANPA fallback default (precheck fail nanti)'
+  ansible.builtin.set_fact:
+    _gf_safe_admin_user:     "{{ grafana_admin_user                                           | default('admin')   | trim | regex_replace('[^A-Za-z0-9_.-]', '') }}"
+    _gf_safe_admin_password: "{{ grafana_admin_password                                       | default('')        | string | trim }}"
+    _gf_safe_server_domain:  "{{ grafana_server_domain                                       | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
+    _gf_safe_server_root_url: >-
+      {{ (
+        (grafana_server_root_url | default('https://' ~ (_gf_vip_clean if (_gf_vip_clean | default('') | length > 0) else _gf_host_fallback) ~ '/') | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/.?&=_#%-]', ''))
+      ) | trim }}
+    _gf_safe_secret_key:     "{{ grafana_secret_key                                          | default('')        | string | trim }}"
+    _gf_safe_listen_address: "{{ grafana_web_listen_address | default('127.0.0.1:' ~ _gf_port_int) | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
+  tags: ['grafana', 'config', 'security']
+
+- name: 'Grafana (AC-2 TARGET) - FAIL-FAST ASSERTION Password Policy (min len, not default, secret key kuat)'
+  ansible.builtin.assert:
+    that:
+      - _gf_safe_admin_password | default('') | length > 0
+      - _gf_safe_admin_password != 'admin'
+      - _gf_safe_admin_password | default('') | length >= 8
+      - _gf_safe_secret_key | default('') | length >= 16
+      - not (_gf_safe_secret_key | default('') is search('^CHANGE_ME'))
+    fail_msg: |
+      ╔══════════════════════════════════════════════════════════════════╗
+      ║  SECURITY BLOCK (Grafana AC-2 Password Policy FAIL)              ║
+      ╠══════════════════════════════════════════════════════════════════╣
+      ║  Grafana admin_password dan secret_key TIDAK MEET policy:        ║
+      ║  • admin_password TIDAK BOLEH kosong                             ║
+      ║  • admin_password TIDAK BOLEH default 'admin'                    ║
+      ║  • admin_password MINIMAL 8 karakter                             ║
+      ║  • secret_key MINIMAL 16 karakter                                ║
+      ║  • secret_key TIDAK BOLEH startswith 'CHANGE_ME'                 ║
+      ║                                                                   ║
+      ║  SOLUSI: Jalankan perintah berikut SEBELUM deploy:               ║
+      ║    1. $ agra genpwd   (generate random password ke passwords.yml)║
+      ║    2. $ agra precheck -i inventory/....yml  (pastikan PASS)      ║
+      ║    3. $ agra deploy   -i inventory/....yml  (re-deploy grafana)  ║
+      ╚══════════════════════════════════════════════════════════════════╝
+    success_msg: "OK (Grafana AC-2): Password policy assertion PASS — admin_password dan secret_key MEET requirements."
+  run_once: true
+  delegate_to: localhost
+  tags: ['grafana', 'config', 'security', 'precheck']
+
+- name: 'Grafana (AC-4 target 5a nanti) - Password Summary Masked Debug (source passwords.yml, NO plaintext full)'
+  ansible.builtin.debug:
+    msg: |
+      Grafana Password Summary (MASKED):
+        Source of truth  → include_vars: passwords.yml (/etc/agra/passwords.yml)
+        admin_user       → {{ _gf_safe_admin_user }}
+        admin_password   → len={{ _gf_safe_admin_password | default('') | length }}  prefix={{ _gf_safe_admin_password | default('') | truncate(4, true, '') }}**** suffix=****{{ _gf_safe_admin_password | default('') | reverse | truncate(4, true, '') | reverse }}
+        secret_key       → len={{ _gf_safe_secret_key | default('') | length }}  prefix={{ _gf_safe_secret_key | default('') | truncate(4, true, '') }}**** suffix=****{{ _gf_safe_secret_key | default('') | reverse | truncate(4, true, '') | reverse }}
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  tags: ['grafana', 'config', 'debug', 'passwords']
+
 - name: Grafana - Include shared config tasks
   ansible.builtin.include_tasks: config.yml
 

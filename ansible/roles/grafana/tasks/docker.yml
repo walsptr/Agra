@@ -45,37 +45,6 @@
   failed_when: false
   tags: ['grafana', 'docker', 'container']
 
-- name: 'Grafana (Docker) - Safety set_fact sanitize root_url dan fallback default admin password IF empty (precheck nanti fail jika default)'
-  ansible.builtin.set_fact:
-    _gf_safe_admin_user:     "{{ grafana_admin_user                                           | default('admin')   | trim | regex_replace('[^A-Za-z0-9_.-]', '') }}"
-    _gf_safe_admin_password: "{{ ((grafana_admin_password | default('') | trim | length == 0) | ternary('admin', grafana_admin_password | default('admin'))) | trim }}"
-    _gf_safe_server_domain:  "{{ grafana_server_domain                                       | default('')        | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
-    _gf_safe_server_root_url: >-
-      {{ (
-        (grafana_server_root_url | default('') | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/.?&=_#%-]', ''))
-        | default(
-          ((enable_nginx | default(true) | bool) | ternary('https://' ~ (monitoring_vip | default(inventory_hostname)) ~ '/',
-                                                            'http://'  ~ (monitoring_vip | default(inventory_hostname)) ~ ':' ~ (grafana_port | default(3000)) ~ '/'))
-        , true)
-      ) | trim }}
-    _gf_safe_secret_key:    "{{ ((grafana_secret_key | default('') | trim | length == 0) | ternary('CHANGE_ME_TEMPORARY_FALLBACK_SECRET_KEY_MIN32CHARSXXXXXXXXXXXXXXXXXXXXXXXX', grafana_secret_key)) | trim | regex_replace('[^][A-Za-z0-9!@#$%^&*()_+={};:''\"<>,./?-]', '') }}"
-    _gf_safe_listen_address: "{{ grafana_web_listen_address | default('127.0.0.1:' ~ grafana_port | default(3000)) | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
-  tags: ['grafana', 'docker', 'config']
-
-- name: 'Grafana (Docker) - Warning debug fallback admin password default admin terdeteksi (segera jalankan agra genpwd dan re-deploy untuk security)'
-  ansible.builtin.debug:
-    msg: |
-      ⚠️ SECURITY WARNING (Grafana):
-        GF_SECURITY_ADMIN_PASSWORD fallback ke default 'admin'.
-        Grafana BISA diakses user siapapun dengan username admin/admin.
-        SEGERA jalankan perintah untuk fix:
-          1. $ agra genpwd   (generate random 14 chars passwords ke /etc/agra/passwords.yml)
-          2. $ agra precheck -i inventory/....yml   (pastikan assertion PASS)
-          3. $ agra deploy    -i inventory/....yml   (re-deploy grafana pakai password baru)
-  when: _gf_safe_admin_password == 'admin' or _gf_safe_secret_key | length < 16 or _gf_safe_secret_key.startswith('CHANGE_ME_TEMPORARY_FALLBACK')
-  changed_when: false
-  tags: ['grafana', 'docker', 'config']
-
 - name: Grafana (Docker) - Start container
   ansible.builtin.shell:
     cmd: |
@@ -111,3 +80,53 @@
   when: _gf_container_running.rc != 0
   changed_when: true
   tags: ['grafana', 'docker', 'container']
+
+- name: 'Grafana (Docker) — Wait container healthy state (health check /api/health green) SEBELUM reset password via cli'
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      TRIES=0
+      MAX=60
+      while [ $TRIES -lt $MAX ]; do
+        STATE=$($RUNTIME inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ grafana_container_name }} 2>/dev/null || echo "")
+        if [ "$STATE" = "healthy" ]; then
+          echo "HEALTHY_TRIES=$TRIES"
+          exit 0
+        fi
+        TRIES=$((TRIES + 1))
+        sleep 2
+      done
+      echo "TIMEOUT_UNHEALTHY_AFTER_120s"
+      exit 1
+  register: _gf_wait_healthy
+  changed_when: false
+  retries: 2
+  delay: 10
+  until: _gf_wait_healthy is succeeded
+  tags: ['grafana', 'docker', 'container', 'healthcheck', 'passwords']
+
+- name: 'Grafana (Docker) — SET ADMIN PASSWORD INSIDE CONTAINER via grafana-cli (GRAFANA BEHAVIOR FIX: env var IGNORED for existing user in sqlite!)'
+  ansible.builtin.shell:
+    cmd: |
+      RUNTIME=$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+      TARGET_PW="{{ _gf_safe_admin_password_escaped }}"
+      HTTP_CODE=$($RUNTIME exec {{ grafana_container_name }} bash -c 'curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:{{grafana_port}}/api/login -H "Content-Type: application/json" -d '\''{"user":"{{_gf_safe_admin_user}}","password":"'"${TARGET_PW}"'"}'\'')
+      if [ "$HTTP_CODE" = "200" ]; then
+        echo "PASSWORD_ALREADY_MATCHED_NO_CHANGE"
+        exit 0
+      fi
+      $RUNTIME exec {{ grafana_container_name }} grafana-cli admin reset-admin-password "${TARGET_PW}" 2>&1 | tail -3
+      sleep 2
+      HTTP_CODE2=$($RUNTIME exec {{ grafana_container_name }} bash -c 'curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:{{grafana_port}}/api/login -H "Content-Type: application/json" -d '\''{"user":"{{_gf_safe_admin_user}}","password":"'"${TARGET_PW}"'"}'\'')
+      if [ "$HTTP_CODE2" != "200" ]; then
+        echo "ERROR_RESET_FAILED_VERIFY_HTTP=$HTTP_CODE2"
+        exit 2
+      fi
+      echo "PASSWORD_UPDATED_VIA_GRAFANA_CLI_SUCCESS_HTTP_200_VERIFIED"
+  register: _gf_cli_reset_pw
+  changed_when: "'PASSWORD_UPDATED_VIA_GRAFANA_CLI_SUCCESS' in _gf_cli_reset_pw.stdout"
+  failed_when: "'ERROR_RESET_FAILED_VERIFY' in _gf_cli_reset_pw.stdout or _gf_cli_reset_pw.rc not in [0, 2]"
+  no_log: true
+  vars:
+    _gf_safe_admin_password_escaped: "{{ _gf_safe_admin_password | to_json | regex_replace('^\"', '') | regex_replace('\"$', '') }}"
+  tags: ['grafana', 'docker', 'container', 'passwords', 'idempotent']

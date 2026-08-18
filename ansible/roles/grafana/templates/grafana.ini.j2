@@ -43,9 +43,9 @@ ssl_mode = {{ grafana_database_ssl_mode }}
 {% endif %}
 
 [security]
-admin_user = {{ grafana_admin_user }}
-admin_password = {{ grafana_admin_password }}
-secret_key = {{ grafana_secret_key }}
+admin_user = {{ _gf_safe_admin_user | default(grafana_admin_user) | default('admin') | string | trim }}
+admin_password = {{ _gf_safe_admin_password | default(grafana_admin_password) | string | trim }}
+secret_key = {{ _gf_safe_secret_key | default(grafana_secret_key) | string | trim }}
 disable_brute_force_login_protection = false
 
 [users]
