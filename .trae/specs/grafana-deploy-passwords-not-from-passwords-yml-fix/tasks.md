@@ -259,7 +259,7 @@
   - `programmatic` TR-5.1: Deploy dengan valid password `P0Y5yE9H8jb7u-` → Debug msg menampilkan: `Prefix 4 chars: P0Y5, Suffix 4 chars: b7u-, Length: 14 chars`. grep log output untuk full `P0Y5yE9H8jb7u-` FULL 14 chars BERURUTAN → TIDAK KETEMU (cuma terpecah prefix dan suffix). AC-4 TERPENUHI.
   - `programmatic` TR-5.2: Deploy playbook RUN FULL sampai summary step 7 → summary line TIDAK BERISI password value plaintext, hanya: `len=14 chars` (hanya panjang). AC-4 NFR-2 TERPENUHI.
 
-## [/] Task 6: SYNTAX CHECK, full E2E linting & YAML validasi, update SCHEMA.md & checklist
+## [x] Task 6: SYNTAX CHECK, full E2E linting & YAML validasi, update SCHEMA.md & checklist
 - **Priority**: high
 - **Depends On**: Task 1,2,3,4,5
 - **Description**:

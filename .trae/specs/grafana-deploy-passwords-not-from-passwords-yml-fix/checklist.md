@@ -43,6 +43,6 @@
 
 ## Checkpoints Dokumentasi + SCHEMA
 - [ ] Checkpoint 25: JIKA menambah variable baru ke defaults/main.yml → SCHEMA.md §2 Grafana di-update 1 baris. Untuk case ini: TIDAK ADA variable baru (hanya restructure task), SCHEMA.md tetap sama, checklist lewat otomatis.
-- [ ] Checkpoint 26: git diff --stat: HANYA file yang relevan berubah: deploy.yml, roles/grafana/tasks/main.yml, roles/grafana/tasks/docker.yml, roles/grafana/templates/grafana.ini.j2. TIDAK ada file lain (precheck.yml, globals.yml, passwords.yml, dsb) ikut berubah tanpa perlu.
-- [ ] Checkpoint 27: Commit message jelas mention 5 layer fix: (1) silent fail include_vars dihapus, (2) fail-fast assertion password invalid, (3) safety set_fact pindah ke main.yml + admin fallback dihapus, (4) grafana.ini sinkron safe var, (5) grafana-cli reset inside container + idempotent verify.
+- [x] Checkpoint 26: git diff --stat: HANYA file yang relevan berubah: deploy.yml, roles/grafana/tasks/main.yml, roles/grafana/tasks/docker.yml, roles/grafana/templates/grafana.ini.j2. TIDAK ada file lain (precheck.yml, globals.yml, passwords.yml, dsb) ikut berubah tanpa perlu.
+- [x] Checkpoint 27: Commit message jelas mention 5 layer fix: (1) silent fail include_vars dihapus, (2) fail-fast assertion password invalid, (3) safety set_fact pindah ke main.yml + admin fallback dihapus, (4) grafana.ini sinkron safe var, (5) grafana-cli reset inside container + idempotent verify.
 - [ ] Checkpoint 28: Command user test E2E di dokumentasi: Step-by-step (a) sudo grep grafana_admin_password /etc/agra/passwords.yml → line ada, (b) agra precheck PASS, (c) agra deploy SUCCESS FAILED=0 semua node, (d) curl /api/login dengan passwords.yml value → 200 OK, (e) admin/admin login TIDAK BISA (401).
