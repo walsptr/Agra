@@ -642,7 +642,7 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals) + cross validate Kolla pattern globals vs file'
+        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals)'
           ansible.builtin.set_fact:
             _precheck_pwd_grafana_admin:     "{{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}"
             _precheck_pwd_grafana_secret:    "{{ (_precheck_pwd_dict.get('grafana_secret_key',    '') | default('', true) | string | trim) }}"
@@ -663,7 +663,12 @@
               {% endif %}
             _precheck_pwd_raw_first80:     "{{ _precheck_pwd_raw_text[:80] | default('', true) | string | replace('\n', ' ') }}"
             _precheck_pwd_raw_line_count:  "{{ ( _precheck_pwd_raw_text.split('\n') | list | length | default(0) | int ) }}"
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
 
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern: Fact global include_vars PLAY AWAL (grafana_admin_password) vs Direct file parse'
+          ansible.builtin.set_fact:
             _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
             _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
             _precheck_pwd_globals_match_file: >-
