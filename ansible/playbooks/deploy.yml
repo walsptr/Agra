@@ -5,7 +5,15 @@
   become: true
   tags: ['deploy', 'common', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -16,34 +24,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_common
-    - name: 'Precheck deploy 1: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_common_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_common_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_common_pwd_slurp
+      when:
+        - _deploy_dual_common_pwd_stat.stat is defined
+        - _deploy_dual_common_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_common_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_common_pwd_raw: >-
+          {% if _deploy_dual_common_pwd_slurp.content is defined and _deploy_dual_common_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_common_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_common_globals_raw: >-
+          {% if _deploy_dual_common_globals_slurp.content is defined and _deploy_dual_common_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_common_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_common_pwd_dict: "{{ ( (_deploy_dual_common_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_common_globals_dict: "{{ ( (_deploy_dual_common_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_common_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_common_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_common_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_common_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_common_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_common_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_common_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: common
@@ -54,7 +236,15 @@
   become: true
   tags: ['deploy', 'node_exporter', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -65,34 +255,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_node_exporter
-    - name: 'Precheck deploy 2: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_node_exporter_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_node_exporter_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_node_exporter_pwd_slurp
+      when:
+        - _deploy_dual_node_exporter_pwd_stat.stat is defined
+        - _deploy_dual_node_exporter_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_node_exporter_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_node_exporter_pwd_raw: >-
+          {% if _deploy_dual_node_exporter_pwd_slurp.content is defined and _deploy_dual_node_exporter_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_node_exporter_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_node_exporter_globals_raw: >-
+          {% if _deploy_dual_node_exporter_globals_slurp.content is defined and _deploy_dual_node_exporter_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_node_exporter_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_node_exporter_pwd_dict: "{{ ( (_deploy_dual_node_exporter_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_node_exporter_globals_dict: "{{ ( (_deploy_dual_node_exporter_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_node_exporter_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_node_exporter_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_node_exporter_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_node_exporter_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_node_exporter_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_node_exporter_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_node_exporter_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: node_exporter
@@ -103,7 +467,15 @@
   become: true
   tags: ['deploy', 'prometheus', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -114,34 +486,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_prometheus
-    - name: 'Precheck deploy 3: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_prometheus_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_prometheus_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_prometheus_pwd_slurp
+      when:
+        - _deploy_dual_prometheus_pwd_stat.stat is defined
+        - _deploy_dual_prometheus_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_prometheus_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_prometheus_pwd_raw: >-
+          {% if _deploy_dual_prometheus_pwd_slurp.content is defined and _deploy_dual_prometheus_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_prometheus_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_prometheus_globals_raw: >-
+          {% if _deploy_dual_prometheus_globals_slurp.content is defined and _deploy_dual_prometheus_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_prometheus_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_prometheus_pwd_dict: "{{ ( (_deploy_dual_prometheus_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_prometheus_globals_dict: "{{ ( (_deploy_dual_prometheus_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_prometheus_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_prometheus_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_prometheus_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_prometheus_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_prometheus_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_prometheus_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_prometheus_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: prometheus
@@ -152,7 +698,15 @@
   become: true
   tags: ['deploy', 'grafana', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -163,34 +717,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_grafana
-    - name: 'Precheck deploy 4: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_grafana_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_grafana_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_grafana_pwd_slurp
+      when:
+        - _deploy_dual_grafana_pwd_stat.stat is defined
+        - _deploy_dual_grafana_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_grafana_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_grafana_pwd_raw: >-
+          {% if _deploy_dual_grafana_pwd_slurp.content is defined and _deploy_dual_grafana_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_grafana_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_grafana_globals_raw: >-
+          {% if _deploy_dual_grafana_globals_slurp.content is defined and _deploy_dual_grafana_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_grafana_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_grafana_pwd_dict: "{{ ( (_deploy_dual_grafana_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_grafana_globals_dict: "{{ ( (_deploy_dual_grafana_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_grafana_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_grafana_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_grafana_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_grafana_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_grafana_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_grafana_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_grafana_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   roles:
     - role: grafana
@@ -201,7 +929,15 @@
   become: true
   tags: ['deploy', 'nginx', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -212,34 +948,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_nginx
-    - name: 'Precheck deploy 5: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_nginx_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_nginx_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_nginx_pwd_slurp
+      when:
+        - _deploy_dual_nginx_pwd_stat.stat is defined
+        - _deploy_dual_nginx_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_nginx_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_nginx_pwd_raw: >-
+          {% if _deploy_dual_nginx_pwd_slurp.content is defined and _deploy_dual_nginx_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_nginx_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_nginx_globals_raw: >-
+          {% if _deploy_dual_nginx_globals_slurp.content is defined and _deploy_dual_nginx_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_nginx_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_nginx_pwd_dict: "{{ ( (_deploy_dual_nginx_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_nginx_globals_dict: "{{ ( (_deploy_dual_nginx_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_nginx_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_nginx_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_nginx_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_nginx_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_nginx_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_nginx_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_nginx_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   tasks:
     - name: 'Deploy — Apply role nginx jika enable_nginx=true'
@@ -254,7 +1164,15 @@
   become: true
   tags: ['deploy', 'keepalived', 'ha', 'config']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -265,34 +1183,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_keepalived
-    - name: 'Precheck deploy 6: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_keepalived_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_keepalived_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_keepalived_pwd_slurp
+      when:
+        - _deploy_dual_keepalived_pwd_stat.stat is defined
+        - _deploy_dual_keepalived_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_keepalived_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_keepalived_pwd_raw: >-
+          {% if _deploy_dual_keepalived_pwd_slurp.content is defined and _deploy_dual_keepalived_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_keepalived_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_keepalived_globals_raw: >-
+          {% if _deploy_dual_keepalived_globals_slurp.content is defined and _deploy_dual_keepalived_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_keepalived_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_keepalived_pwd_dict: "{{ ( (_deploy_dual_keepalived_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_keepalived_globals_dict: "{{ ( (_deploy_dual_keepalived_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_keepalived_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_keepalived_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_keepalived_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_keepalived_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_keepalived_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_keepalived_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_keepalived_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   tasks:
     - name: 'Deploy — Apply role keepalived HANYA JIKA groups monitoring length > 1'
@@ -308,7 +1400,15 @@
   connection: local
   tags: ['deploy']
   pre_tasks:
-    - name: 'Load globals.yml + passwords.yml (become root — handle 0600 passwords.yml RULES §7)'
+
+    # ==========================================================
+    # TASK 1/10: PRIMARY (A) LOAD via include_vars become root
+    #   JIKA passwordless sudo available → BERHASIL langsung.
+    #   JIKA FAIL (case user sudo butuh password / not sudoer) →
+    #     DIABAIKAN (ignore_errors:true + failed_when:false).
+    #   Kita TIDAK langsung FAIL, tapi coba FALLBACK slurp method.
+    # ==========================================================
+    - name: 'Load globals.yml + passwords.yml via include_vars (MODE A, become root PRIMARY — ignore errors fallback ke slurp)'
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
@@ -319,34 +1419,208 @@
       run_once: true
       delegate_to: localhost
       changed_when: false
-      register: _deploy_include_vars_load_summary
-    - name: 'Precheck deploy 7: HARD FAIL assertion include_vars /etc/agra/passwords.yml (AC-1)'
+      ignore_errors: true
+      failed_when: false
+      register: _deploy_dual_summary_primary
+
+    # ==========================================================
+    # TASK 2/10: STAT PASSWORDS.YML MODE B (before slurp)
+    # ==========================================================
+    - name: 'STAT /etc/agra/passwords.yml (MODE B FALLBACK slurp check exists & permission)'
+      ansible.builtin.stat:
+        path: "/etc/agra/passwords.yml"
+        get_checksum: false
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+      register: _deploy_dual_summary_pwd_stat
+
+    # ==========================================================
+    # TASK 3/10: SLURP PASSWORDS.YML MODE B (ROOT VIA BECOME)
+    #   Modul ansible.builtin.slurp become lebih tolerant
+    #   daripada include_vars dalam hal privilege escalation.
+    #   Bisa fallback work meskipun include_vars fail.
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/passwords.yml become root (MODE B secondary slurp bypass include_vars)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/passwords.yml"
+      register: _deploy_dual_summary_pwd_slurp
+      when:
+        - _deploy_dual_summary_pwd_stat.stat is defined
+        - _deploy_dual_summary_pwd_stat.stat.exists | default(false) | bool
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 4/10: SLURP GLOBALS.YML MODE B
+    # ==========================================================
+    - name: 'FALLBACK B: SLURP /etc/agra/globals.yml become root (MODE B secondary slurp bypass)'
+      ansible.builtin.slurp:
+        src: "/etc/agra/globals.yml"
+      register: _deploy_dual_summary_globals_slurp
+      run_once: true
+      delegate_to: localhost
+      become: true
+      become_user: root
+      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    # ==========================================================
+    # TASK 5/10: DECODE SLURP B64 PASSWORDS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode passwords.yml → raw text (single line, NO from_yaml)'
+      ansible.builtin.set_fact:
+        _deploy_dual_summary_pwd_raw: >-
+          {% if _deploy_dual_summary_pwd_slurp.content is defined and _deploy_dual_summary_pwd_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_summary_pwd_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 6/10: DECODE SLURP B64 GLOBALS → RAW TEXT
+    # ==========================================================
+    - name: 'FALLBACK B: DECODE slurp b64decode globals.yml → raw text'
+      ansible.builtin.set_fact:
+        _deploy_dual_summary_globals_raw: >-
+          {% if _deploy_dual_summary_globals_slurp.content is defined and _deploy_dual_summary_globals_slurp.content | default('') | length > 0 %}
+            {{ _deploy_dual_summary_globals_slurp.content | b64decode | default('', true) }}
+          {% else %}
+            ---
+          {% endif %}
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 7/10: FROM_YAML PASSWORDS RAW → NATIVE DICT (NO block scalar coercion → to_json | from_json!)
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml passwords RAW → dict (single line, to_json|from_json bypass coercion STRING→DICT!)'
+      ansible.builtin.set_fact:
+        _deploy_dual_summary_pwd_dict: "{{ ( (_deploy_dual_summary_pwd_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 8/10: FROM_YAML GLOBALS RAW → NATIVE DICT
+    # ==========================================================
+    - name: 'FALLBACK B: NATIVE from_yaml globals RAW → dict'
+      ansible.builtin.set_fact:
+        _deploy_dual_summary_globals_dict: "{{ ( (_deploy_dual_summary_globals_raw | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 9/10: INJECT DICT SEBAGAI TOP LEVEL FACTS (JIKA PRIMARY MODE A FAIL)
+    #   TAPI: JIKA PRIMARY MODE A SUDAH BERHASIL (grafana_admin_password already defined len>0),
+    #   skip inject! (TIDAK menimpa value fact global yang sudah terdefinisi benar)
+    # ==========================================================
+    - name: 'FALLBACK B: INJECT passwords.yml dict AS TOP LEVEL FACTS (HANYA JIKA PRIMARY MODE A GAGAL grafana_admin_password TIDAK terdefinisi!)'
+      ansible.builtin.set_fact:
+        "{{ k }}": "{{ v }}"
+      loop: "{{ _deploy_dual_summary_pwd_dict | dict2items }}"
+      loop_control:
+        loop_var: kv
+        label: "{{ kv.key }}=len_{{ kv.value | default('') | string | length }}"
+      vars:
+        k: "{{ kv.key }}"
+        v: "{{ kv.value }}"
+      when:
+        - (grafana_admin_password is not defined or (grafana_admin_password | default('') | string | length == 0))
+        - _deploy_dual_summary_pwd_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+
+    # TASK 9B/10: INJECT GLOBALS DICT (JUGA HANYA JIKA monitoring_vip BELUM terdefinisi dari mode A)
+    - name: 'FALLBACK B: INJECT globals.yml dict AS TOP LEVEL FACTS (HANYA JIKA monitoring_vip UNDEFINED)'
+      ansible.builtin.set_fact:
+        "{{ gk }}": "{{ gv }}"
+      loop: "{{ _deploy_dual_summary_globals_dict | dict2items }}"
+      loop_control:
+        loop_var: gvkv
+        label: "{{ gvkv.key }}"
+      vars:
+        gk: "{{ gvkv.key }}"
+        gv: "{{ gvkv.value }}"
+      when:
+        - monitoring_vip is not defined or (monitoring_vip | default('') | string | length == 0)
+        - _deploy_dual_summary_globals_dict | default({}) | length > 0
+      run_once: true
+      delegate_to: localhost
+      changed_when: false
+
+    # ==========================================================
+    # TASK 10/10: FINAL ASSERTION HARD FAIL (AC-1)
+    #   TIDAK PEDULI MODE ATAU B YANG DIGUNAKAN.
+    #   FINAL STATE: grafana_admin_password defined AND len>0!
+    #   Pesan error SEKARANG JUGA MENCANTUMKAN: (a) sudo passwordless status, (b) both method A/B fail info.
+    # ==========================================================
+    - name: 'Precheck deploy: HARD FAIL FINAL STATE grafana_admin_password TERDEFINISI len>0 (DUAL MODE A+B → TIDAK PEDULI parsing method apa yang work!)'
       ansible.builtin.assert:
         that:
           - grafana_admin_password is defined
           - grafana_secret_key is defined
           - grafana_admin_password | string | length > 0
+          - grafana_admin_password | string | length >= 8
+          - grafana_admin_password != 'admin'
         fail_msg: |
-          **********************************************************************
-          *   DEPLOY BLOKIR /etc/agra/passwords.yml TIDAK BERHASIL di-load    *
-          **********************************************************************
-          3 penyebab umum:
-          1. File /etc/agra/passwords.yml TIDAK ADA
-          2. chmod file BUKAN 0600 (harus root:root 0600)
-          3. YAML syntax ERROR di dalam file
-
-          Solusi 6 langkah perbaikan:
-          1. sudo ls -la /etc/agra/passwords.yml
-          2. sudo chown root:root /etc/agra/passwords.yml
-          3. sudo chmod 0600 /etc/agra/passwords.yml
-          4. agra genpwd
-          5. agra precheck pass
-          6. agra deploy
-        success_msg: "✅ include_vars passwords.yml BERHASIL grafana_admin_password len={{ grafana_admin_password | string | length }} chars."
+          ┌─────────────────────────────────────────────────────────────────────────┐
+          │ DEPLOY GAGAL: grafana_admin_password TIDAK BERHASIL DIMUAT!              │
+          │ DUA METODE PARSUAL TELAH DICOBA SEMUA GAGAL:                            │
+          │  (A) include_vars become_user=root → GAGAL.                              │
+          │  (B) SLURP module b64decode + from_yaml → DICT KOSONG / FAIL.            │
+          │                                                                          │
+          │ 🔴 ROOT CAUSE HARI INI (user mengalami Errno 13 Permission denied!):     │
+          │    Kamu menjalankan `agra deploy` sebagai user BIASA (bukan root), TAPI  │
+          │    /etc/agra/passwords.yml chmod 0600 milik root!                        │
+          │    include_vars + become_user=root BUTUH privilege escalation SUDO.      │
+          │    JIKA user TIDAK PUNYA passwordless sudo (sudo -n true FAIL) →        │
+          │    task become TIDAK BISA baca file 0600.                                │
+          │                                                                          │
+          │ ✅ SOLUSI 1 (CEPAT DAN RECOMMENDED TANPA UBAH FILE):                     │
+          │    Jalankan deploy DENGAN SUDO sebagai root:                            │
+          │      $ sudo agra deploy -i inventory/multinode.yml                       │
+          │                                                                          │
+          │ ✅ SOLUSI 2 (TANPA ROOT user):                                           │
+          │    Tambahkan user kamu KE /etc/sudoers passwordless sudo untuk file:     │
+          │      $ sudo visudo                                                       │
+          │      # Tambahkan line di bawah (ganti ubuntu → user kamu):               │
+          │      ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/ansible*      │
+          │    Kemudian run ulang: agra deploy -i ...                                │
+          │                                                                          │
+          │ ✅ SOLUSI 3 (PERBAIKI PERMISSION FILE TEMPORER untuk TESTING SAJA):       │
+          │    $ sudo chown root:root /etc/agra/passwords.yml                        │
+          │    $ sudo chmod 0640 /etc/agra/passwords.yml  # group readable!          │
+          │    $ sudo chgrp $(id -gn) /etc/agra/passwords.yml  # group = user group! │
+          │    (CATATAN: 0640 BUKAN recommended production! 0600 SELALU LEBIH AMAN!)│
+          │                                                                          │
+          │ ⚠️ STATUS METHOD:                                                        │
+          │   PRIMARY (A) include_vars ok? : {{ not (_deploy_dual_summary_primary.failed | default(false)) }} │
+          │   FALLBACK (B) slurp passwords.content defined len>0? : {{ _deploy_dual_summary_pwd_slurp.content | default('') | length > 0 }} │
+          │   FALLBACK (B) dict len = {{ _deploy_dual_summary_pwd_dict | default({}) | length }} keys │
+          │   FINAL grafana_admin_password defined? {{ grafana_admin_password is defined }} │
+          │   FINAL grafana_admin_password len = {{ grafana_admin_password | default('') | string | length }} chars │
+          └─────────────────────────────────────────────────────────────────────────┘
+        success_msg: '✅ DUAL MODE load SUCCESS (mode A include_vars atau mode B slurp!). grafana_admin_password: len={{ grafana_admin_password | string | length }} chars, BUKAN default admin (policy AC-1 FAIL-FAST TERPENUHI).'
       run_once: true
       delegate_to: localhost
-      become: true
-      become_user: root
       tags: ['deploy', 'config', 'precheck', 'passwords']
   vars:
     access_url: >-
