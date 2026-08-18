@@ -670,10 +670,16 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (1/2): Read fact global include_vars PLAY AWAL (grafana_admin_password) ke tmp vars + boolean defined CHECK (no deprecation bool coerce!)'
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (1/3): READ fact global include_vars PLAY AWAL (grafana_admin_password) ke tmp vars (from_globals* SAJA)'
           ansible.builtin.set_fact:
             _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
             _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (2/3): COMPUTE boolean fact_admin_defined (REAL bool, NO deprecation bool coerce!) — READ from_globals dari TASK (1/3) DI ATASNYA'
+          ansible.builtin.set_fact:
             _precheck_pwd_fact_admin_defined: >-
               {{ ( _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') is none and
                    _precheck_pwd_from_globals_grafana_admin | string | length > 0 ) | bool }}
@@ -681,7 +687,7 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (2/2): COMPARE Fact global (task di atas) vs Direct file parse (block Extract fields)'
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (3/3): COMPARE Fact global (TASK 1/3 di atas) vs Direct file parse (Block Extract fields line 645) — READ boolean dari TASK (2/3)'
           ansible.builtin.set_fact:
             _precheck_pwd_globals_match_file: >-
               {{ ( _precheck_pwd_fact_admin_defined | bool
