@@ -642,7 +642,7 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Extract grafana_admin_password + grafana_secret_key real dari passwords.yml (bukan role defaults, bukan globals)'
+        - name: 'Precheck Secret Grafana — Extract PART 1/2: fields from passwords.yml + define _precheck_pwd_raw_text'
           ansible.builtin.set_fact:
             _precheck_pwd_grafana_admin:     "{{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}"
             _precheck_pwd_grafana_secret:    "{{ (_precheck_pwd_dict.get('grafana_secret_key',    '') | default('', true) | string | trim) }}"
@@ -661,6 +661,12 @@
               {% else %}
                 <<<SLURP_CONTENT_UNDEFINED_or_SKIPPED>>>
               {% endif %}
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Extract PART 2/2: derivatives _precheck_pwd_raw_text → first80 chars, line_count, vault prefix detect'
+          ansible.builtin.set_fact:
             _precheck_pwd_raw_first80:     "{{ _precheck_pwd_raw_text[:80] | default('', true) | string | replace('\n', ' ') }}"
             _precheck_pwd_raw_line_count:  "{{ ( _precheck_pwd_raw_text.split('\n') | list | length | default(0) | int ) }}"
             _precheck_pwd_raw_prefix_vault: >-
