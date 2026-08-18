@@ -32,22 +32,34 @@
       become_user: root
       changed_when: false
 
-    - name: 'GenPwd — PARSE granular existing passwords.yml dict (untuk field-by-field idempotent logic)'
-      ansible.builtin.set_fact:
-        _pwd_existing: >-
-          {% if _pwd_stat.stat is defined and _pwd_stat.stat.exists %}
-            {{ (lookup('ansible.builtin.file', passwords_file, errors='ignore') | default('---\n', true) | from_yaml) | default({}, true) }}
-          {% else %}
-            {{ {} }}
-          {% endif %}
-        _pwd_field_list:
-          - { key: 'grafana_admin_password',    label: 'Grafana Admin UI password' }
-          - { key: 'grafana_database_password', label: 'Grafana External DB password' }
-          - { key: 'grafana_secret_key',        label: 'Grafana security secret_key' }
-          - { key: 'keepalived_auth_pass',      label: 'Keepalived VRRP auth pass' }
-          - { key: 'backup_s3_access_key',      label: 'Backup S3 access key' }
-          - { key: 'backup_s3_secret_key',      label: 'Backup S3 secret key' }
-      changed_when: false
+    - name: 'GenPwd — PARSE granular existing passwords.yml dict (untuk field-by-field idempotent logic) — VIA SLURP + BECOME ROOT (bukan lookup file yg tanpa become!)'
+      block:
+        - name: 'GenPwd — SLURP existing passwords.yml via become root (handle chmod 0600, lookup FILE module default TANPA become = PERMISSION DENIED!)'
+          ansible.builtin.slurp:
+            src: "{{ passwords_file }}"
+          become: true
+          become_user: root
+          register: _pwd_slurp
+          when: _pwd_stat.stat is defined and _pwd_stat.stat.exists
+          changed_when: false
+
+        - name: 'GenPwd — SET FACT parse dict (SLURP → b64decode → from_yaml), JIKA file tidak ada = empty dict {}'
+          ansible.builtin.set_fact:
+            _pwd_existing: >-
+              {% if _pwd_stat.stat is defined and _pwd_stat.stat.exists and _pwd_slurp.content is defined and _pwd_slurp.content | default('') | length > 0 %}
+                {{ ( (_pwd_slurp.content | b64decode | default('---\n', true) ) | from_yaml) | default({}, true) }}
+              {% else %}
+                {{ {} }}
+              {% endif %}
+            _pwd_field_list:
+              - { key: 'grafana_admin_password',    label: 'Grafana Admin UI password' }
+              - { key: 'grafana_database_password', label: 'Grafana External DB password' }
+              - { key: 'grafana_secret_key',        label: 'Grafana security secret_key' }
+              - { key: 'prometheus_admin_password', label: 'Prometheus basic auth admin' }
+              - { key: 'backup_s3_access_key',      label: 'Backup S3 access key' }
+              - { key: 'backup_s3_secret_key',      label: 'Backup S3 secret key' }
+          changed_when: false
+
 
     - name: 'GenPwd — HITUNG field status: existing_terisi / existing_kosong (untuk assertion granular)'
       ansible.builtin.set_fact:
@@ -137,12 +149,12 @@
                   return "".join(password_chars)
 
               out = {
-                'grafana_admin_password': gen_pwd(14),
-                'grafana_database_password': gen_pwd(14),
-                'grafana_secret_key': gen_pwd(14, extra_chars="-_."),
-                'keepalived_auth_pass': gen_pwd(14, extra_chars=""),
-                'backup_s3_access_key': gen_pwd(14, extra_chars=""),
-                'backup_s3_secret_key': gen_pwd(14, extra_chars=SPECIAL_EXTRA),
+                'grafana_admin_password': gen_pwd(16),
+                'grafana_database_password': gen_pwd(16),
+                'grafana_secret_key': gen_pwd(32, extra_chars="-_."),
+                'prometheus_admin_password': gen_pwd(16, extra_chars=""),
+                'backup_s3_access_key': gen_pwd(20, extra_chars=""),
+                'backup_s3_secret_key': gen_pwd(40, extra_chars=SPECIAL_EXTRA),
               }
               sys.stdout.write(json.dumps(out, indent=2))
 
@@ -161,7 +173,7 @@
             _new_pwd_grafana_admin:     "{{ _gen_pwd_map['grafana_admin_password'] }}"
             _new_pwd_grafana_db:        "{{ _gen_pwd_map['grafana_database_password'] }}"
             _new_pwd_grafana_secret:    "{{ _gen_pwd_map['grafana_secret_key'] }}"
-            _new_pwd_keepalived:        "{{ _gen_pwd_map['keepalived_auth_pass'] }}"
+            _new_pwd_prom_admin:        "{{ _gen_pwd_map['prometheus_admin_password'] }}"
             _new_pwd_backup_s3_access:  "{{ _gen_pwd_map['backup_s3_access_key'] }}"
             _new_pwd_backup_s3_secret:  "{{ _gen_pwd_map['backup_s3_secret_key'] }}"
 
@@ -184,10 +196,10 @@
           {%- if genpwd_force | bool -%}{{ _new_pwd_grafana_secret }}
           {%- elif (_pwd_existing_values['grafana_secret_key'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['grafana_secret_key'] }}
           {%- else -%}{{ _new_pwd_grafana_secret }}{%- endif -%}
-        _final_pwd_keepalived: >-
-          {%- if genpwd_force | bool -%}{{ _new_pwd_keepalived }}
-          {%- elif (_pwd_existing_values['keepalived_auth_pass'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['keepalived_auth_pass'] }}
-          {%- else -%}{{ _new_pwd_keepalived }}{%- endif -%}
+        _final_pwd_prom_admin: >-
+          {%- if genpwd_force | bool -%}{{ _new_pwd_prom_admin }}
+          {%- elif (_pwd_existing_values['prometheus_admin_password'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['prometheus_admin_password'] }}
+          {%- else -%}{{ _new_pwd_prom_admin }}{%- endif -%}
         _final_pwd_backup_s3_access: >-
           {%- if genpwd_force | bool -%}{{ _new_pwd_backup_s3_access }}
           {%- elif (_pwd_existing_values['backup_s3_access_key'] | default('') | trim | length > 0) -%}{{ _pwd_existing_values['backup_s3_access_key'] }}
@@ -212,7 +224,7 @@
                  'grafana_admin_password':    _final_pwd_grafana_admin,
                  'grafana_database_password': _final_pwd_grafana_db,
                  'grafana_secret_key':        _final_pwd_grafana_secret,
-                 'keepalived_auth_pass':      _final_pwd_keepalived,
+                 'prometheus_admin_password': _final_pwd_prom_admin,
                  'backup_s3_access_key':      _final_pwd_backup_s3_access,
                  'backup_s3_secret_key':      _final_pwd_backup_s3_secret,
                }[f.key] %}
@@ -223,35 +235,39 @@
           {% endfor %}
           — Summary: {{ ns.retain }} RETAIN (existing aman), {{ ns.new }} NEW (random diisi).
 
-    - name: 'GenPwd — Tulis passwords.yml (field-by-field idempotent: RETAIN existing, hanya NEW ditulis; MODE 0600 OWNER ROOT)'
+    - name: 'GenPwd — BUILD FINAL DICT facts (ZERO INDENT via to_nice_yaml! MENCEGAH bug 2 leading spaces YAML TIDAK TERPARSE!)'
+      ansible.builtin.set_fact:
+        _pwd_final_dict:
+          grafana_admin_password:    "{{ _final_pwd_grafana_admin }}"
+          grafana_database_password: "{{ _final_pwd_grafana_db }}"
+          grafana_secret_key:        "{{ _final_pwd_grafana_secret }}"
+          prometheus_admin_password: "{{ _final_pwd_prom_admin }}"
+          backup_s3_access_key:      "{{ _final_pwd_backup_s3_access }}"
+          backup_s3_secret_key:      "{{ _final_pwd_backup_s3_secret }}"
+      no_log: true
+      changed_when: false
+
+    - name: 'GenPwd — GENERATE CONTENT (Header comment + to_nice_yaml explicit_start --- ZERO INDENT!)'
+      ansible.builtin.set_fact:
+        _pwd_final_content: |
+          # ============================================================
+          # /etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
+          # Generated / Updated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
+          #
+          # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600.
+          # ============================================================
+          {{ _pwd_final_dict | to_nice_yaml(explicit_start=true, width=4096, indent=2, sort_keys=false) | indent(0, first=false) | trim }}
+
+      no_log: true
+      changed_when: false
+
+    - name: 'GenPwd — Tulis passwords.yml (ZERO LEADING SPACES via to_nice_yaml! chmod 0600 owner root)'
       ansible.builtin.copy:
         dest: "{{ passwords_file }}"
         mode: '0600'
         owner: root
         group: root
-        content: |
-          # ============================================================
-          # /etc/agra/passwords.yml — AGRA SECRETS (PLAINTEXT — JANGAN commit! SUDAH di .gitignore)
-          # Generated / Updated — {{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S%z') | default('today') }}
-          #
-          # ❗ PRODUKSI — LINDUNGI FILE INI DENGAN chmod 0600. JANGAN PERNAH commit PLAINTEXT passwords.yml ke GIT (SUDAH di .gitignore). Jika butuh enkripsi, pakai tool external seperti git-crypt / blackbox / sops.
-          # ============================================================
-
-          # Grafana admin password (login ke UI https://vip/ — path root /, TANPA subpath /grafana/)
-          grafana_admin_password: "{{ _final_pwd_grafana_admin }}"
-
-          # Grafana external database password (mysql / postgresql)
-          grafana_database_password: "{{ _final_pwd_grafana_db }}"
-
-          # Grafana [security] secret_key (signing session cookies, link sharing)
-          grafana_secret_key: "{{ _final_pwd_grafana_secret }}"
-
-          # Keepalived VRRP authentication password (antar node sync)
-          keepalived_auth_pass: "{{ _final_pwd_keepalived }}"
-
-          # S3 access credentials (backup.yml — HANYA jika backup_s3_bucket di-set)
-          backup_s3_access_key: "{{ _final_pwd_backup_s3_access }}"
-          backup_s3_secret_key: "{{ _final_pwd_backup_s3_secret }}"
+        content: "{{ _pwd_final_content }}"
       no_log: true
       become: true
       become_user: root

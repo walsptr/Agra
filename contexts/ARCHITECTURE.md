@@ -181,6 +181,18 @@ mengikuti ketahanan Prometheus yang men-scrape dia.
   datasource.
 - Renewal self-signed cert bersifat **manual** (`agra tls regenerate`), dengan
   peringatan expiry ditampilkan oleh `agra check`.
+- **⚠️ BREAKING CHANGE Path Grafana (v0.5)**: Grafana **serve LANGSUNG di
+  path ROOT `/`**, tidak lagi di subpath `/grafana/`. Contoh akses:
+  - HA: `https://<monitoring_vip>/` (bukan `.../grafana/`)
+  - Single-node domain: `https://grafana.local/`
+  Bookmark lama `/grafana/` akan 404 (tidak ada redirect backward compat).
+- **server_name policy**: Nginx `server_name` directive untuk site Grafana
+  HANYA memuat **`grafana_domain` + `monitoring_vip`** (2 value publik).
+  **Hostname node (inventory_hostname ubuntu-1/2/3)** TIDAK DIMASUKKAN ke
+  `server_name`, karena hostname adalah identitas internal node, bukan
+  server alias publik yang harus resolve ke Grafana. Catch-all `_` hanya
+  ditambahkan JIKA `grafana_domain` DAN `monitoring_vip` sama-sama KOSONG
+  (fallback first-time deploy tanpa config).
 
 ## 7. Versioning & Upgrade
 

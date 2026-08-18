@@ -52,12 +52,12 @@ Lokasi utama: **`/etc/agra/globals.yml` absolute path di control node** = SATU-S
 | `grafana_sqlite_sync_method` | string | `rsync` | Metode sinkronisasi sqlite antar node saat HA |
 | `grafana_sqlite_sync_interval` | string | `*/5 * * * *` | Cron expression interval sync sqlite |
 | `grafana_sqlite_sync_ssh_user` | string | `root` | SSH user untuk rsync sync sqlite |
-| `grafana_server_domain` | string | `{{ inventory_hostname }}` | Domain server Grafana |
-| `grafana_server_root_url` | jinja computed | conditional | Root URL (otomatis pakai monitoring_vip jika ada, else nginx/port) |
+| `grafana_server_domain` | string | `{{ inventory_hostname }}` | Domain server Grafana (internal value — nilai **publik** untuk `server_name` di nginx pakai `grafana_domain` + `monitoring_vip`) |
+| `grafana_server_root_url` | jinja computed | conditional | Root URL Grafana di path root `/` (tanpa subpath `/grafana/`). Otomatis pakai https://<monitoring_vip>/ jika ada, else https://<host>/ (nginx aktif) atau http://<host>:3000/ (direct tanpa nginx). serve_from_sub_path=false (serve root) |
 | `grafana_server_protocol` | string | `http` | Protocol server (http/https) |
 | `grafana_log_level` | string | `info` | Log level: `debug` \| `info` \| `warn` \| `error` |
 | `grafana_secret_key` | string (secret) | vault ref | Secret key untuk signing, via `vault_grafana_secret_key` |
-| `grafana_domain` | string | `""` | Custom domain expose Grafana HTTPS (mis. `monitor.example.com`). Jika diisi menjadi server_name utama block HTTPS default. |
+| `grafana_domain` | string | `""` | Custom domain expose Grafana HTTPS (mis. `monitor.example.com`). Bersama `monitoring_vip` menjadi 2 value utama nginx `server_name` public (TIDAK include hostname node). |
 | `grafana_nginx_port` | int | `30080` | Port Nginx listen untuk expose Grafana ke publik ketika `grafana_domain` kosong (akses via http://<node-ip>:30080 tanpa domain). |
 | `grafana_web_listen_address` | jinja computed | conditional | Bind address: `127.0.0.1:3000` (nginx aktif) / `0.0.0.0:3000` (direct) |
 | `grafana_prometheus_datasource_name` | string | `Prometheus` | Nama display datasource Prometheus |
@@ -204,7 +204,7 @@ eksplisit. Single-node → role `meta: end_host` (idempotent skip, no-op).
 | `tls_hsts_preload` | bool | `false` | HSTS preload (false = tidak otomatis submit ke list preload) |
 | `grafana_backend_url` | string | `http://127.0.0.1:{{ grafana_port | default(3000) }}` | Upstream reverse proxy Grafana (internal bind) |
 | `prometheus_backend_url` | string | `http://127.0.0.1:{{ prometheus_port | default(9090) }}` | Upstream reverse proxy Prometheus (internal bind) |
-| `server_name` | string | `{{ monitoring_vip | default(inventory_hostname) }} _` | server_name directive (catch-all dengan `_`) |
+| `server_name` | string | computed (grafana site) | Nginx `server_name` directive untuk site Grafana: HANYA gabungan `grafana_domain` + `monitoring_vip` (tidak include hostname/inventory_hostname node, karena hostname bukan server alias publik). Catch-all `_` hanya ditambahkan jika KEDUA value (`grafana_domain` DAN `monitoring_vip`) sama-sama kosong. |
 | `nginx_http_port` | int | `80` | Port HTTP |
 | `nginx_https_port` | int | `443` | Port HTTPS |
 | `nginx_uid` | int | `101` | UID numeric user nginx worker di official alpine image (101) — untuk chown runtime dirs log/cache writable. |

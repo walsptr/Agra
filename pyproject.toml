@@ -40,10 +40,10 @@ dev = ["ansible-lint>=24", "molecule>=24", "molecule-plugins[docker]>=24"]
 agra = "agra.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/example/agra"
-Documentation = "https://github.com/example/agra/blob/main/contexts/ARCHITECTURE.md"
-Source = "https://github.com/example/agra"
-Issues = "https://github.com/example/agra/issues"
+Homepage = "https://github.com/walsptr/Agra"
+Documentation = "https://github.com/walsptr/Agra/blob/main/contexts/ARCHITECTURE.md"
+Source = "https://github.com/walsptr/Agra"
+Issues = "https://github.com/walsptr/Agra/issues"
 
 [tool.setuptools.packages.find]
 include = ["agra*"]
