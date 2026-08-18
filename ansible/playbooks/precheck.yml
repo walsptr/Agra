@@ -630,31 +630,77 @@
           become_user: root
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Parse dict YAML: slurp content defined + length>0 → b64decode → from_yaml (JIKA content undefined / length 0 → empty dict {}, BUKAN check .skipped yang salah logic)'
+        - name: 'Precheck Secret Grafana — Parse STEP 1/2: DECODE slurp.content → b64decode RAW TEXT (TANPA from_yaml dulu! Hindari block scalar coercion string→dict!)'
           ansible.builtin.set_fact:
-            _precheck_pwd_dict: >-
+            _precheck_pwd_raw_decoded_text: >-
               {% if _precheck_pwd_slurp.content is defined and _precheck_pwd_slurp.content | default('') | length > 0 %}
-                {{ ((_precheck_pwd_slurp.content | b64decode | default('---\n', true)) | from_yaml) | default({}, true) }}
+                {{ _precheck_pwd_slurp.content | b64decode | default('', true) }}
               {% else %}
-                {{ {} }}
+                ---
               {% endif %}
           run_once: true
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Extract PART 1/2: fields from passwords.yml + define _precheck_pwd_raw_text'
+        - name: 'Precheck Secret Grafana — Parse STEP 2/2: NATIVE from_yaml DICT (single-line expression TANPA block scalar! + to_json|from_json FORCE native dict type — BYPASS Jinja2 coercion STRING→DICT!)'
           ansible.builtin.set_fact:
-            _precheck_pwd_grafana_admin:     "{{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}"
-            _precheck_pwd_grafana_secret:    "{{ (_precheck_pwd_dict.get('grafana_secret_key',    '') | default('', true) | string | trim) }}"
-            _precheck_pwd_prom_admin:         "{{ (_precheck_pwd_dict.get('prometheus_admin_password', '') | default('', true) | string | trim) }}"
-            _precheck_pwd_grafana_db:         "{{ (_precheck_pwd_dict.get('grafana_database_password', '') | default('', true) | string | trim) }}"
-            _precheck_pwd_backup_s3_secret:   "{{ (_precheck_pwd_dict.get('backup_s3_secret_key',   '') | default('', true) | string | trim) }}"
+            _precheck_pwd_dict: "{{ ( (_precheck_pwd_raw_decoded_text | default('---', true) | string) | from_yaml | default({}, true) | to_json | from_json ) }}"
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla (1/N): READ fact global include_vars PLAY AWAL (grafana_admin_password + grafana_secret_key) ke tmp vars from_globals* SAJA. Pindah KE ATAS Extract agar fallback chain di Extract BISA PAKAI boolean defined!'
+          ansible.builtin.set_fact:
+            _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+            _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla (2/N): COMPUTE 2 REAL BOOLEAN SEKALIGUS (fact_admin_defined + fact_secret_defined) dari TASK (1/N) DI ATAS! NO deprecation coerce — REAL boolean murni!'
+          ansible.builtin.set_fact:
+            _precheck_pwd_fact_admin_defined: >-
+              {{ ( _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') is none and
+                   _precheck_pwd_from_globals_grafana_admin | string | length > 0 ) | bool }}
+            _precheck_pwd_fact_secret_defined: >-
+              {{ ( _precheck_pwd_from_globals_grafana_secret | string | regex_search('FACT_UNDEFINED') is none and
+                   _precheck_pwd_from_globals_grafana_secret | string | length > 0 ) | bool }}
+          run_once: true
+          delegate_to: localhost
+          changed_when: false
+
+        - name: 'Precheck Secret Grafana — Extract PART 1/2: FALLBACK CHAIN! PRIMARY = fact include_vars (KOLLA PATTERN - paling terpercaya, 100% native dict type Ansible). SECONDARY = direct slurp dict (hanya jika fact global UNDEFINED). Semua field DI-PRIORITASKAN DARI FACT GLOBAL include_vars!'
+          ansible.builtin.set_fact:
             _precheck_pwd_file_exists:        "{{ _precheck_pwd_stat.stat is defined and _precheck_pwd_stat.stat.exists }}"
             _precheck_pwd_dict_keys:          "{{ (_precheck_pwd_dict.keys() | default([], true) | list | sort) }}"
             _precheck_pwd_dict_keys_count:    "{{ (_precheck_pwd_dict.keys() | default([], true) | list | length) }}"
-            _precheck_pwd_field_admin_exists: "{{ (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_admin_password']) | length > 0) }}"
-            _precheck_pwd_field_secret_exists: "{{ (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_secret_key']) | length > 0) }}"
-
+            _precheck_pwd_grafana_admin: >-
+              {%- if _precheck_pwd_fact_admin_defined is defined and _precheck_pwd_fact_admin_defined | bool -%}
+                {{ _precheck_pwd_from_globals_grafana_admin | string | trim }}
+              {%- else -%}
+                {{ (_precheck_pwd_dict.get('grafana_admin_password', '') | default('', true) | string | trim) }}
+              {%- endif -%}
+            _precheck_pwd_grafana_secret: >-
+              {%- if _precheck_pwd_fact_secret_defined is defined and _precheck_pwd_fact_secret_defined | bool -%}
+                {{ _precheck_pwd_from_globals_grafana_secret | string | trim }}
+              {%- else -%}
+                {{ (_precheck_pwd_dict.get('grafana_secret_key', '') | default('', true) | string | trim) }}
+              {%- endif -%}
+            _precheck_pwd_prom_admin:         "{{ (_precheck_pwd_dict.get('prometheus_admin_password', '') | default('', true) | string | trim) }}"
+            _precheck_pwd_grafana_db:         "{{ (_precheck_pwd_dict.get('grafana_database_password', '') | default('', true) | string | trim) }}"
+            _precheck_pwd_backup_s3_secret:   "{{ (_precheck_pwd_dict.get('backup_s3_secret_key',   '') | default('', true) | string | trim) }}"
+            _precheck_pwd_field_admin_exists: >-
+              {{ (
+                   (_precheck_pwd_fact_admin_defined is defined and _precheck_pwd_fact_admin_defined | bool)
+                   or
+                   (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_admin_password']) | length > 0)
+                 ) | bool }}
+            _precheck_pwd_field_secret_exists: >-
+              {{ (
+                   (_precheck_pwd_fact_secret_defined is defined and _precheck_pwd_fact_secret_defined | bool)
+                   or
+                   (_precheck_pwd_dict.keys() | default([], true) | list | intersect(['grafana_secret_key']) | length > 0)
+                 ) | bool }}
             _precheck_pwd_raw_text: >-
               {% if _precheck_pwd_slurp.content is defined and _precheck_pwd_slurp.content | default('') | length > 0 %}
                 {{ _precheck_pwd_slurp.content | b64decode | default('', true) }}
@@ -676,24 +722,7 @@
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (1/3): READ fact global include_vars PLAY AWAL (grafana_admin_password) ke tmp vars (from_globals* SAJA)'
-          ansible.builtin.set_fact:
-            _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
-            _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
-          run_once: true
-          delegate_to: localhost
-          changed_when: false
-
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (2/3): COMPUTE boolean fact_admin_defined (REAL bool, NO deprecation bool coerce!) — READ from_globals dari TASK (1/3) DI ATASNYA'
-          ansible.builtin.set_fact:
-            _precheck_pwd_fact_admin_defined: >-
-              {{ ( _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') is none and
-                   _precheck_pwd_from_globals_grafana_admin | string | length > 0 ) | bool }}
-          run_once: true
-          delegate_to: localhost
-          changed_when: false
-
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (3/3): COMPARE Fact global (TASK 1/3 di atas) vs Direct file parse (Block Extract fields line 645) — READ boolean dari TASK (2/3)'
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (3/N): COMPARE Fact global (TASK 1/N di ATAS Extract!) vs Direct file parse (Block Extract fields line 672) — READ boolean dari TASK 2/N! Urutan FIX: Global READ → Global bool → Extract → Compare → Debug → Assert!'
           ansible.builtin.set_fact:
             _precheck_pwd_globals_match_file: >-
               {{ ( _precheck_pwd_fact_admin_defined | bool
@@ -720,6 +749,8 @@
               │ [2] HASIL PARSE DICT passwords.yml (slurp + b64decode + from_yaml)│
               │     · Jumlah total keys  : {{ _precheck_pwd_dict_keys_count }} keys
               │     · List keys yang ADA : [{% for k in _precheck_pwd_dict_keys %}'{{ k }}'{% if not loop.last %}, {% endif %}{% endfor %}]
+              │     · ⚠ TYPE _precheck_pwd_dict (native?): `{{ _precheck_pwd_dict | type_debug }}`
+              │       (Expected: dict / AnsibleMapping. JIKA = str / AnsibleUnsafeText = BUG COERCION! → hubungi dev)
               ├─────────────────────────────────────────────────────────────────┤
               │ [3] FIELD YANG DICEK assertion:                                 │
               │     · grafana_admin_password
@@ -727,10 +758,12 @@
               │       → VALUE (truncate 16) : "{{ _precheck_pwd_grafana_admin[:16] }}{% if _precheck_pwd_grafana_admin | length > 16 %}...{% endif %}"
               │       → PANJANG VALUE      : {{ _precheck_pwd_grafana_admin | length }}
               │       → EQUAL "admin"?     : {{ _precheck_pwd_grafana_admin == 'admin' }}
+              │       → ⚠ TYPE value      : `{{ _precheck_pwd_grafana_admin | type_debug }}`
               │     · grafana_secret_key
               │       → FIELD ADA di file?  : {{ _precheck_pwd_field_secret_exists }}
               │       → VALUE (truncate 20) : "{{ _precheck_pwd_grafana_secret[:20] }}{% if _precheck_pwd_grafana_secret | length > 20 %}...{% endif %}"
               │       → PANJANG VALUE      : {{ _precheck_pwd_grafana_secret | length }}
+              │       → ⚠ TYPE value      : `{{ _precheck_pwd_grafana_secret | type_debug }}`
               ├─────────────────────────────────────────────────────────────────┤
               │ [5] SLURP RAW CONTENT STATUS (PLAINTEXT SAJA, DEV MODE)     │
               │     · First 80 chars raw decoded: "{{ _precheck_pwd_raw_first80 }}"
