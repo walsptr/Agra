@@ -663,14 +663,20 @@
               {% endif %}
             _precheck_pwd_raw_first80:     "{{ _precheck_pwd_raw_text[:80] | default('', true) | string | replace('\n', ' ') }}"
             _precheck_pwd_raw_line_count:  "{{ ( _precheck_pwd_raw_text.split('\n') | list | length | default(0) | int ) }}"
+            _precheck_pwd_raw_prefix_vault: >-
+              {{ ( _precheck_pwd_raw_text | default('', true) | regex_search('^\$ANSIBLE_VAULT', multiline=True) is not none and
+                   _precheck_pwd_raw_text | default('', true) | regex_search('^\$ANSIBLE_VAULT', multiline=True) | length > 0 ) | bool }}
           run_once: true
           delegate_to: localhost
           changed_when: false
 
-        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (1/2): Read fact global include_vars PLAY AWAL (grafana_admin_password) ke tmp vars'
+        - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (1/2): Read fact global include_vars PLAY AWAL (grafana_admin_password) ke tmp vars + boolean defined CHECK (no deprecation bool coerce!)'
           ansible.builtin.set_fact:
             _precheck_pwd_from_globals_grafana_admin: "{{ grafana_admin_password | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
             _precheck_pwd_from_globals_grafana_secret: "{{ grafana_secret_key | default('<<<FACT_UNDEFINED_AFTER_INCLUDE_VARS>>>', true) | string | trim }}"
+            _precheck_pwd_fact_admin_defined: >-
+              {{ ( _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') is none and
+                   _precheck_pwd_from_globals_grafana_admin | string | length > 0 ) | bool }}
           run_once: true
           delegate_to: localhost
           changed_when: false
@@ -678,9 +684,9 @@
         - name: 'Precheck Secret Grafana — Cross-validate Kolla pattern (2/2): COMPARE Fact global (task di atas) vs Direct file parse (block Extract fields)'
           ansible.builtin.set_fact:
             _precheck_pwd_globals_match_file: >-
-              {{ ( _precheck_pwd_grafana_admin == _precheck_pwd_from_globals_grafana_admin
+              {{ ( _precheck_pwd_fact_admin_defined | bool
+                   and _precheck_pwd_grafana_admin == _precheck_pwd_from_globals_grafana_admin
                    and _precheck_pwd_grafana_admin | length > 0
-                   and (not _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') | default(false) | bool)
               ) | bool }}
           run_once: true
           delegate_to: localhost
@@ -719,13 +725,15 @@
               │     · Total baris decoded     : {{ _precheck_pwd_raw_line_count }} lines
               │     · Size bytes file STAT    : {{ _precheck_pwd_stat.stat.size | default('?') }}
               │     · ✨ SLURP content TERDEFINISI DENGAN BAIK? : {{ (_precheck_pwd_slurp.content is defined and _precheck_pwd_slurp.content | default('') | length > 0) | bool }}
-              │       (jika False = PENYEBAB UTAMA semua field kosong! biasanya module slurp become tidak jalan; cek sudo passwordless? cek permission /etc/agra chmod?)
+              │       (jika False = module slurp become tidak jalan; cek sudo passwordless? cek permission /etc/agra chmod?)
+              │     · 🔐 FILE TER-ENKRIPSI ANSIBLE VAULT? : {{ _precheck_pwd_raw_prefix_vault | bool }}
+              │       (jika True = FILE TIDAK ADA ISI PLAINTEXT YANG BISA DI-PARSE! Solusi: agra genpwd --force / ansible-vault decrypt.)
               ├─────────────────────────────────────────────────────────────────┤
               │ [6] CROSS-VALIDASI KOLLA-ANSIBLE PATTERN: Fact include_vars vs Direct file parse │
               │     · Fact include_vars grafana_admin (PLAY AWAL line 237 include_vars, Kolla pattern)
               │       → VALUE trunc 16 chars: "{{ _precheck_pwd_from_globals_grafana_admin[:16] }}{% if _precheck_pwd_from_globals_grafana_admin | length > 16 %}...{% endif %}"
               │       → PANJANG          : {{ _precheck_pwd_from_globals_grafana_admin | length }}
-              │       → APAKAH TERDEFINISI? : {{ (not _precheck_pwd_from_globals_grafana_admin | string | regex_search('FACT_UNDEFINED') | default(false) | bool) }}
+              │       → APAKAH TERDEFINISI? : {{ _precheck_pwd_fact_admin_defined | bool }}
               │     · Direct file parse grafana_admin (panel [3])
               │       → VALUE trunc 16 chars: "{{ _precheck_pwd_grafana_admin[:16] }}{% if _precheck_pwd_grafana_admin | length > 16 %}...{% endif %}"
               │       → PANJANG          : {{ _precheck_pwd_grafana_admin | length }}
@@ -743,6 +751,14 @@
               │   ⚠️ MODE FILE BUKAN 0600 → Fix: sudo chmod 0600 /etc/agra/passwords.yml │
               {% elif _precheck_pwd_stat.stat.pw_name is defined and _precheck_pwd_stat.stat.pw_name != 'root' %}
               │   ⚠️ OWNER BUKAN root → Fix: sudo chown root:root /etc/agra/passwords.yml │
+              {% elif _precheck_pwd_file_exists | bool and ( _precheck_pwd_stat.stat.size | default(0) | int > 50 ) and ( _precheck_pwd_raw_prefix_vault | bool ) %}
+              │   🚨 SIZE BESAR ({{ _precheck_pwd_stat.stat.size }} bytes) + VAULT DETECTED (prefix $ANSIBLE_VAULT)!
+              │      → TIDAK BISA from_yaml karena FILE TERENKRIPSI VAULT (DEV MODE = TIDAK BOLEH ADA VAULT!)
+              │      💡 USER REQUEST HARI INI: "tidak ada vault, blm lagi ini masih dev. rewrite tanpa vault!"
+              │         → Fix WAJIB OVERWRITE:
+              │            $ agra genpwd --force  (TULIS ULANG passwords.yml PLAINTEXT YANG VALID!)
+              │         → ATAU (jika ingin simpan isi file tapi decrypt):
+              │            $ sudo ansible-vault decrypt /etc/agra/passwords.yml
               {% elif _precheck_pwd_file_exists | bool and ( _precheck_pwd_stat.stat.size | default(0) | int > 50 ) and ( not (_precheck_pwd_slurp.content is defined and _precheck_pwd_slurp.content | default('') | length > 0) ) %}
               │   🚨 SLURP MODULE GAGAL BACA CONTENT (content undefined / length 0)!
               │      → file size {{ _precheck_pwd_stat.stat.size | default('?') }} bytes tapi content tidak bisa di-slurp!
@@ -751,7 +767,8 @@
               │              (c) JALANKAN LAGI: agra genpwd --force (overwrite file dgn plaintext baru).
               {% elif _precheck_pwd_file_exists | bool and ( _precheck_pwd_stat.stat.size | default(0) | int > 50 ) and ( _precheck_pwd_dict_keys_count | int == 0 ) %}
               │   ⚠️ FILE BESAR tapi PARSE YAML RETURN DICT KOSONG (0 keys)!      │
-              │      → YAML TIDAK VALID. Kemungkinan:
+              │      → BUKAN VAULT (prefix $ANSIBLE_VAULT tidak ditemukan) tapi YAML TIDAK VALID.
+              │        Kemungkinan:
               │        · Hanya comment TANPA key:value apapun.
               │        · Syntax YAML rusak total (tab / colon / quote salah).
               │   ✅ FIX: Jalankan `agra genpwd --force` (overwrite file dgn YANG VALID!)
