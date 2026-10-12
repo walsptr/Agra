@@ -16,7 +16,10 @@ platforms:
       # Nested Docker cannot run overlayfs on top of the container overlay.
       - /var/lib/docker
       - /var/lib/containerd
-    cgroupns_mode: private  # own cgroup tree for nested Docker (cgroup v2)
+      # systemd in the node needs the cgroup v2 tree rw; with a private
+      # cgroupns it exits at boot (255) on Docker 28 / GitHub ubuntu-24.04.
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
 
 provisioner:
   name: ansible

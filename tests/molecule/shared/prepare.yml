@@ -26,7 +26,7 @@
         mode: '0750'
     - name: Generate certificate and key
       ansible.builtin.command:
-        argv: [openssl, req, -x509, -newkey, rsa:2048, -nodes, -days, '30', -subj, /CN=agra-molecule,
+        argv: [openssl, req, -x509, -newkey, rsa:2048, -nodes, -days, '365', -subj, /CN=agra-molecule,
                -keyout, "{{ tls_key_path }}", -out, "{{ tls_cert_path }}"]
         creates: "{{ tls_cert_path }}"
       when: enable_https | default(true) | bool
