@@ -1,0 +1,107 @@
+---
+# Test fixtures first, then the shared prepare (= `agra check`, which
+# validates — and reaches — the external database).
+#
+# agra-db1 stands in for the operator's existing servers: MySQL for Grafana
+# and an S3 endpoint for backups. agra only connects to them (RULES §9).
+- name: Fixtures — MySQL and S3 (agra-db1)
+  hosts: agra-db1
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install Docker for the fixtures
+      ansible.builtin.apt:
+        name: docker.io
+        update_cache: true
+
+    - name: Start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+
+    - name: Existing fixture containers
+      ansible.builtin.command:
+        argv: [docker, ps, -a, --format, "{% raw %}{{.Names}}{% endraw %}"]
+      register: _fixtures
+      changed_when: false
+
+    # Registry hiccups should not fail the run; `docker run` itself never retries.
+    - name: Pull the fixture images
+      ansible.builtin.command:
+        argv: [docker, pull, "{{ item }}"]
+      loop: ["{{ _fixture_mysql_image }}", "{{ _fixture_s3_image }}"]
+      register: _fixture_pull
+      until: _fixture_pull is succeeded
+      retries: 5
+      delay: 10
+      changed_when: true
+
+    - name: MySQL 8.4 (host network, 3306)
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - -d
+          - --name=molecule-mysql
+          - --restart=unless-stopped
+          - --network=host
+          - --env=MYSQL_RANDOM_ROOT_PASSWORD=yes
+          - --env=MYSQL_DATABASE={{ grafana_database_name }}
+          - --env=MYSQL_USER={{ grafana_database_user }}
+          - --env=MYSQL_PASSWORD={{ grafana_database_password }}
+          - "{{ _fixture_mysql_image }}"
+      when: "'molecule-mysql' not in _fixtures.stdout_lines"
+      changed_when: true
+      no_log: true
+
+    - name: S3 endpoint (s3mock on 9000, bucket created at start)
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - -d
+          - --name=molecule-s3
+          - --restart=unless-stopped
+          - --publish=9000:9090
+          - --env=COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS={{ backup_s3_bucket }}
+          - "{{ _fixture_s3_image }}"
+      when: "'molecule-s3' not in _fixtures.stdout_lines"
+      changed_when: true
+
+    - name: Wait until MySQL accepts the Grafana user
+      ansible.builtin.command:
+        argv: [docker, exec, molecule-mysql, mysql, "-u{{ grafana_database_user }}", "-p{{ grafana_database_password }}",
+               "{{ grafana_database_name }}", -e, SELECT 1]
+      register: _mysql_ready
+      until: _mysql_ready.rc == 0
+      retries: 40
+      delay: 3
+      changed_when: false
+      no_log: true
+
+    - name: Wait until the S3 bucket answers
+      ansible.builtin.uri:
+        url: "{{ backup_s3_endpoint }}/{{ backup_s3_bucket }}?list-type=2"
+      register: _s3_ready
+      until: _s3_ready.status == 200
+      retries: 40
+      delay: 3
+
+# amazon.aws needs a current boto3 on the master (backup_s3_enabled); Ubuntu
+# 22.04's python3-boto3 is too old for it.
+- name: Fixture — boto3 on the master
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Pip
+      ansible.builtin.apt:
+        name: python3-pip
+        update_cache: true
+    - name: Boto3
+      ansible.builtin.pip:
+        name: boto3
+        executable: pip3
+
+- name: Shared prepare (= agra check)
+  ansible.builtin.import_playbook: ../shared/prepare.yml

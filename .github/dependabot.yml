@@ -1,0 +1,15 @@
+---
+# Version bumps arrive as PRs and go through the full CI, molecule included.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+    groups:
+      ci-tools:
+        patterns: ["*"]

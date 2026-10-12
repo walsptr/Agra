@@ -58,8 +58,9 @@
 
 # Grafana hanya memakai admin_password (grafana.ini) saat user admin PERTAMA kali
 # dibuat; untuk DB yang sudah ada, password disinkronkan via grafana-cli.
-# Password tidak pernah masuk ke shell string: login dicek via uri, reset via
-# command argv (tanpa interpolasi shell) — aman untuk karakter apa pun.
+# Password tidak pernah masuk ke shell string atau argv: login dicek via uri,
+# reset lewat stdin (--password-from-stdin) — argv `docker exec` terlihat oleh
+# siapa pun di host lewat `ps`, stdin tidak. Aman untuk karakter apa pun.
 - name: Grafana (Docker) - Cek login admin dengan password dari passwords.yml
   ansible.builtin.uri:
     # GET /api/user + basic auth (Grafana tidak punya route POST /api/login).
@@ -77,11 +78,13 @@
     argv:
       - docker
       - exec
+      - --interactive
       - "{{ grafana_container_name }}"
       - grafana-cli
       - admin
       - reset-admin-password
-      - "{{ _gf_safe_admin_password }}"
+      - --password-from-stdin
+    stdin: "{{ _gf_safe_admin_password }}"
   when: _gf_login.status != 200
   changed_when: true
   no_log: true

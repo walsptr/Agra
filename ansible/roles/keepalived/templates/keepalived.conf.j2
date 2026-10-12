@@ -3,7 +3,7 @@
 # Paths below are inside the container ({{ keepalived_config_dir }} on the host
 # is mounted at {{ keepalived_container_config_dir }}).
 #
-# Priority (DESIGN §4): {{ keepalived_priority_base }} for groups['monitoring'][0], -1 per
+# Priority: {{ keepalived_priority_base }} for groups['monitoring'][0], -1 per
 # position; a failing health check adds {{ keepalived_weight }}, so an unhealthy node
 # always ranks below every healthy one and the VIP moves.
 #
@@ -22,7 +22,7 @@ global_defs {
     vrrp_gna_interval 0.001
 }
 
-# Combined health check — DESIGN §4
+# Combined health check
 vrrp_script {{ keepalived_script_name }} {
     script "{{ keepalived_container_config_dir }}/agra_monitoring_healthcheck.sh"
     interval {{ keepalived_check_interval }}

@@ -5,7 +5,70 @@ reads are redirected to tmp_path and ansible availability checks are stubbed.
 """
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+
+from agra.constants import PLAYBOOK_DIR, PROJECT_ROOT
+
+ANSIBLE_PLAYBOOK = (shutil.which("ansible-playbook", path=str(Path(sys.executable).parent))
+                    or shutil.which("ansible-playbook"))
+needs_ansible = pytest.mark.skipif(ANSIBLE_PLAYBOOK is None, reason="needs ansible-playbook")
+
+# Skips CI accepts: contexts/ and docs/ are not published (PR 12). With
+# AGRA_STRICT_SKIPS=1 (CI) any other skip fails, so a missing tool or file
+# cannot quietly turn a check off.
+ALLOWED_SKIP = "not in this checkout"
+
+
+def _strict_skip(report):
+    if not (os.environ.get("AGRA_STRICT_SKIPS") and report.skipped) or hasattr(report, "wasxfail"):
+        return
+    reason = report.longrepr[-1] if isinstance(report.longrepr, tuple) else str(report.longrepr)
+    if ALLOWED_SKIP not in reason:
+        report.outcome = "failed"
+        report.longrepr = f"skipped, and AGRA_STRICT_SKIPS allows only '{ALLOWED_SKIP}': {reason}"
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    _strict_skip(outcome.get_result())
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    outcome = yield
+    _strict_skip(outcome.get_result())
+
+
+def run_playbook_locally(tmp_path, playbook: str, inventory: str, extra_vars: dict, *args: str):
+    """Run a repo playbook for real, like the CLI does: the globals.yml
+    template first, then extra_vars. Callers keep every task on localhost or
+    on hosts with ansible_connection=local + ansible_become=false, with paths
+    under tmp_path."""
+    inv = tmp_path / "hosts.ini"
+    inv.write_text(inventory)
+    evars = tmp_path / "vars.json"
+    evars.write_text(json.dumps(extra_vars))
+    env = {**os.environ, "ANSIBLE_HOST_KEY_CHECKING": "False", "ANSIBLE_NOCOLOR": "1",
+           "ANSIBLE_LOCALHOST_WARNING": "False", "ANSIBLE_INVENTORY_UNPARSED_WARNING": "False",
+           # Modules run with this Python, not ansible.cfg's /usr/bin/python3
+           # (absent on python:*-slim images, an older system Python elsewhere).
+           "ANSIBLE_PYTHON_INTERPRETER": sys.executable,
+           # ansible.cfg says become = True: never sudo from a unit test
+           # (plays that set become themselves get ansible_become=false hosts).
+           "ANSIBLE_BECOME": "False"}
+    return subprocess.run(
+        [ANSIBLE_PLAYBOOK, "-i", str(inv), "-e", f"@{PROJECT_ROOT / 'etc/agra/globals.yml'}", "-e", f"@{evars}",
+         *args, str(PLAYBOOK_DIR / playbook)],
+        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=180, check=False,
+    )
 
 
 @pytest.fixture

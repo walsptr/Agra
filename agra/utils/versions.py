@@ -43,3 +43,16 @@ def globals_versions() -> Dict[str, str]:
     """Tag versi dari globals.yml — fallback `current` jika belum ada catatan versi."""
     data = load_globals_file()
     return {var: str(data[var]) for var in SERVICE_TAG_VARS.values() if var in data}
+
+
+def partial_rollout_note(limit: Optional[str]) -> Optional[str]:
+    """With -l only part of the cluster changes version, and the localhost
+    play that records versions does not match the pattern, so nothing is
+    recorded: `current`/`previous` keep describing the last full run. That is
+    intended (a mixed cluster has no single version) but must be said."""
+    if not limit:
+        return None
+    return (f"-l {limit}: hanya host itu yang berganti versi, dan versi TIDAK dicatat di "
+            f"{INSTALLED_VERSIONS_FILE} (cluster campuran tidak punya satu versi). "
+            "Jalankan ulang tanpa -l untuk menyelesaikan seluruh cluster dan mencatat versinya; "
+            "sampai itu, `agra rollback` masih memakai catatan run penuh terakhir.")

@@ -41,6 +41,15 @@
       register: _pg
       changed_when: false
       failed_when: false
+    - name: Pull the PostgreSQL image (registry hiccups retry)
+      ansible.builtin.command:
+        argv: [docker, pull, postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea]
+      register: _pg_pull
+      until: _pg_pull is succeeded
+      retries: 5
+      delay: 10
+      changed_when: true
+      when: _pg.rc != 0
     - name: Run PostgreSQL 16 (host network, port 5432)
       ansible.builtin.command:
         argv:
@@ -52,7 +61,7 @@
           - --env=POSTGRES_USER={{ grafana_database_user }}
           - --env=POSTGRES_DB={{ grafana_database_name }}
           - --env=POSTGRES_PASSWORD={{ grafana_database_password }}
-          - postgres:16-alpine
+          - postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
       when: _pg.rc != 0
       changed_when: true
       no_log: true

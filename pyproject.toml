@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agra"
-version = "0.1.0"
+# Satu sumber versi: agra/__init__.py (__version__), dibaca saat build.
+dynamic = ["version"]
 description = "Ansible deployment + lifecycle management monitoring stack (Grafana + Prometheus + Node Exporter, Kolla-Ansible pattern)"
 readme = "README.md"
 license = "MIT"
@@ -46,6 +47,9 @@ Homepage = "https://github.com/walsptr/Agra"
 Documentation = "https://github.com/walsptr/Agra#readme"
 Source = "https://github.com/walsptr/Agra"
 Issues = "https://github.com/walsptr/Agra/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "agra.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["agra*"]

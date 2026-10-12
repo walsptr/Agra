@@ -1,0 +1,17 @@
+---
+# `agra reconfigure` after an nginx.conf change, with agra-nginx running. A
+# reload keeps the old nginx.conf (single-file mount); verify checks that
+# nginx runs the new one (PR 17).
+- name: Advance test phase (deploy → reconfigure)
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Write next phase
+      ansible.builtin.copy:
+        dest: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/phase"
+        content: "reconfigure\n"
+        mode: '0644'
+
+- name: Deploy with the changed nginx.conf
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/deploy.yml

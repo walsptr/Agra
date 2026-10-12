@@ -11,5 +11,6 @@ providers:
     updateIntervalSeconds: 30
     allowUiUpdates: true
     options:
-      path: {{ grafana_provisioning_dir }}/dashboards
+      # Inside the container (Grafana reads it there), not the host dir.
+      path: {{ grafana_container_provisioning_dir }}/dashboards
       foldersFromFilesStructure: true

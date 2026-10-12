@@ -33,3 +33,14 @@ INVENTORY_HELP = (
 def add_inventory_argument(parser: argparse.ArgumentParser, help: str = INVENTORY_HELP) -> None:
     """`-i/--inventory` untuk command/subcommand — default milik parser global `agra`."""
     parser.add_argument("-i", "--inventory", dest="inventory", default=argparse.SUPPRESS, help=help)
+
+
+def positive_int(value: str) -> int:
+    """argparse type: integer >= 1 (e.g. a count where 0 or less would delete everything)."""
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"bukan bilangan bulat: {value!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"minimal 1, bukan {n}")
+    return n

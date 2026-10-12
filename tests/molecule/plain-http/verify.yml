@@ -1,0 +1,71 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml
+
+- name: Verify — plain HTTP, prometheus_domain, MySQL, S3
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Grafana login over plain HTTP
+      ansible.builtin.uri:
+        url: http://127.0.0.1/login
+        method: POST
+        body_format: json
+        body:
+          user: "{{ grafana_admin_user | default('admin') }}"
+          password: "{{ grafana_admin_password }}"
+      register: _login
+      no_log: true
+
+    # A Secure cookie is never sent back over HTTP: every request after the
+    # login would be logged out (grafana_cookie_secure follows enable_https).
+    - name: The session cookie works over HTTP
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/user
+        headers:
+          Cookie: "{{ _login.cookies_string }}"
+      register: _me
+      failed_when: _me.status != 200 or 'Secure' in _login.set_cookie | default('')
+
+    - name: Prometheus on prometheus_domain (HTTP)
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/v1/status/buildinfo
+        headers:
+          Host: "{{ prometheus_domain }}"
+        return_content: true
+      register: _prom_domain
+      failed_when: "'\"status\":\"success\"' not in _prom_domain.content"
+
+    - name: Its admin API is refused
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/v1/admin/tsdb/snapshot
+        method: POST
+        headers:
+          Host: "{{ prometheus_domain }}"
+        status_code: 403
+
+    - name: Grafana's tables are in MySQL
+      ansible.builtin.command:
+        argv: [docker, exec, molecule-mysql, mysql, "-u{{ grafana_database_user }}", "-p{{ grafana_database_password }}",
+               "{{ grafana_database_name }}", -N, -e, SHOW TABLES LIKE 'dashboard']
+      register: _tables
+      delegate_to: agra-db1
+      changed_when: false
+      failed_when: _tables.stdout | trim != 'dashboard'
+      no_log: true
+
+    - name: No SQLite database was created
+      ansible.builtin.stat:
+        path: "{{ grafana_data_dir | default('/var/lib/agra/grafana') }}/grafana.db"
+      register: _sqlite
+      failed_when: _sqlite.stat.exists
+
+    - name: The backup and its manifest are in the S3 bucket
+      ansible.builtin.uri:
+        url: "{{ backup_s3_endpoint }}/{{ backup_s3_bucket }}?list-type=2&prefix={{ backup_s3_prefix | default('agra-backups') }}/"
+        return_content: true
+      register: _bucket
+      failed_when: >-
+        _bucket.content | regex_findall('agra-backup-[^<]+\.tar\.gz') | length != 1
+        or _bucket.content | regex_findall('agra-backup-[^<]+\.yml') | length != 1

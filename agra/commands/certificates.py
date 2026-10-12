@@ -76,7 +76,7 @@ def _require_globals_yml() -> int:
 
 def _ssl_permission_hint(path: Path) -> None:
     error(f"Tidak bisa menulis/membaca {path} sebagai user saat ini.")
-    print(f'Perbaiki ownership (ARCHITECTURE.md §8.2): sudo chown -R "$USER:$USER" {ETC_DIR}')
+    print(f'Perbaiki ownership (/etc/agra milik operator user): sudo chown -R "$USER:$USER" {ETC_DIR}')
 
 
 def _resolve_paths(args: argparse.Namespace) -> Tuple[str, str, str, str]:

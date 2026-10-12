@@ -1,0 +1,76 @@
+---
+# The smallest stack, on one node. Run from tests/:
+#   cd tests && molecule test -s minimal
+#
+# enable_nginx: false and enable_grafana: false: Prometheus + node_exporter
+# only. A backup must then include the TSDB snapshot on its own (the only
+# state there is, PR 16).
+# Same CLI flow as `default`: prepare = `agra check`, converge = `agra deploy`,
+# side_effect = `agra backup create`.
+driver:
+  name: docker
+
+platforms:
+  - name: agra-mon1
+    image: geerlingguy/docker-ubuntu2204-ansible@sha256:66cb5cb99bd08c40ec7c8d2b1c31efc3359a3e950c05427d1d4bed7b2f33781f
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      # Nested Docker cannot run overlayfs on top of the container overlay.
+      - /var/lib/docker
+      - /var/lib/containerd
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    # host: systemd in the node exits at boot (255) with a private cgroupns
+    # on Docker 28 (GitHub ubuntu-24.04). Rootless podman is the opposite:
+    # nested Docker cannot create cgroups with host, so run it with
+    # MOLECULE_CGROUPNS=private.
+    cgroupns_mode: ${MOLECULE_CGROUPNS:-host}
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    side_effect: side_effect.yml
+    verify: verify.yml
+  # Two distinct keys because molecule turns this dict into flags and cannot
+  # repeat one; both become ansible-playbook extra-vars, in this order.
+  options:
+    e: "@${MOLECULE_SCENARIO_DIRECTORY}/../../../etc/agra/globals.yml"
+    extra-vars: "@${MOLECULE_SCENARIO_DIRECTORY}/agra-vars.yml"
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_SCENARIO_DIRECTORY}/../../../ansible/roles"
+  inventory:
+    hosts:
+      all:
+        vars:
+          ansible_python_interpreter: /usr/bin/python3
+        children:
+          monitoring:
+            hosts:
+              agra-mon1:
+          grafana:
+            children:
+              monitoring:
+          prometheus:
+            children:
+              monitoring:
+          node_exporter:
+            hosts:
+              agra-mon1:
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - side_effect  # agra backup create
+    - verify
+    - destroy

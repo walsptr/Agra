@@ -29,7 +29,7 @@
         argv: [openssl, req, -x509, -newkey, rsa:2048, -nodes, -days, '365', -subj, /CN=agra-molecule,
                -keyout, "{{ tls_key_path }}", -out, "{{ tls_cert_path }}"]
         creates: "{{ tls_cert_path }}"
-      when: enable_https | default(true) | bool
+      when: enable_nginx | default(true) | bool and enable_https | default(true) | bool
 
 # prepare = `agra check`: validate config, then bootstrap every node (Docker).
 # The CLI sets the guard var after confirming an explicit inventory; molecule's

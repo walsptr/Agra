@@ -10,28 +10,14 @@
     - name: Grafana - Remove leftovers of the removed SQLite rsync sync
       ansible.builtin.include_tasks: cleanup_sqlite_sync.yml
 
-    - name: 'Grafana (PRE compute) - set_fact grafana_server_domain + grafana_server_root_url (BREAKDOWN intermediate vars — HINDARI nested ternary parentheses mismatch ERROR: unexpected "}" expected ")")'
+    # Public URL: one definition for root_url, Prometheus and the deploy
+    # summary (ansible/playbooks/vars/public_url.yml, DESIGN §8).
+    - name: Grafana - domain dan root_url dari URL publik
       ansible.builtin.set_fact:
-        _gf_domain_clean:  "{{ (grafana_domain   | default('')) | string | trim | regex_replace('\\s+', '') }}"
-        _gf_vip_clean:     "{{ (monitoring_vip   | default('')) | string | trim | regex_replace('\\s+', '') }}"
-        _gf_host_fallback: "{{ inventory_hostname | string | trim | regex_replace('[^A-Za-z0-9.-]', '') }}"
-        _gf_port_int:      "{{ grafana_port     | default(3000) | int }}"
-        _gf_nginx_bool:    "{{ enable_nginx     | default(true) | bool }}"
-        _gf_https_bool:    "{{ (enable_nginx | default(true) | bool) and (enable_https | default(true) | bool) }}"
-
-    - name: 'Grafana (PRE compute 2/3) - Intermediate step: pilih domain source (grafana_domain > monitoring_vip > inventory_hostname)'
-      ansible.builtin.set_fact:
-        _gf_domain_selected: >-
-          {% if _gf_domain_clean | default('') | length > 0 %}{{ _gf_domain_clean }}{% elif _gf_vip_clean | default('') | length > 0 %}{{ _gf_vip_clean }}{% else %}{{ _gf_host_fallback }}{% endif %}
-
-    - name: 'Grafana (PRE compute 3/3) - FINAL: SET grafana_server_domain + grafana_server_root_url TOP LEVEL namespace (digunakan config.yml render grafana.ini.j2 line 14-15 + docker.yml)'
-      ansible.builtin.set_fact:
-        grafana_server_domain: "{{ _gf_domain_selected | trim | regex_replace('[^A-Za-z0-9.-]', '') }}"
-        grafana_server_root_url: >-
-          {%- set scheme = 'https' if _gf_https_bool | bool else 'http' -%}
-          {%- set host_for_url = _gf_domain_selected | trim -%}
-          {%- set port_suffix = ':' ~ _gf_port_int if (not _gf_nginx_bool | bool) else '' -%}
-          {{ scheme ~ '://' ~ host_for_url ~ port_suffix ~ '/' }}
+        _gf_port_int: "{{ grafana_port | default(3000) | int }}"
+        grafana_server_domain: "{{ _agra_public_host | trim | regex_replace('[^A-Za-z0-9.-]', '') }}"
+        grafana_server_root_url: "{{ _agra_public_url | trim }}"
+      tags: ['grafana', 'config', 'security']
 
     - name: 'Grafana (AC-2/AC-6 SPEC) - Safety set_fact sanitize 6 vars TANPA fallback default (precheck fail nanti)'
       ansible.builtin.set_fact:
@@ -39,7 +25,7 @@
         _gf_safe_server_domain:  "{{ grafana_server_domain                                       | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
         _gf_safe_server_root_url: >-
           {{ (
-            (grafana_server_root_url | default('https://' ~ (_gf_vip_clean if (_gf_vip_clean | default('') | length > 0) else _gf_host_fallback) ~ '/') | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/.?&=_#%-]', ''))
+            (grafana_server_root_url | trim | regex_replace('`', '') | regex_replace('"', '') | regex_replace("'", '') | regex_replace('[^A-Za-z0-9:/.?&=_#%-]', ''))
           ) | trim }}
         _gf_safe_listen_address: "{{ grafana_web_listen_address | default('127.0.0.1:' ~ _gf_port_int) | trim | regex_replace('[^A-Za-z0-9.:-]', '') }}"
       tags: ['grafana', 'config', 'security']

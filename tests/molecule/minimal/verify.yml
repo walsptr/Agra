@@ -1,0 +1,48 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml
+
+- name: Verify — nothing listens for users without nginx and Grafana
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: List TCP listeners
+      ansible.builtin.command:
+        argv: [ss, -Hltn]
+      register: _ss
+      changed_when: false
+
+    - name: No 80, 443 or 3000
+      ansible.builtin.assert:
+        that: _listen | select('search', ':(80|443|3000)$') | list == []
+        fail_msg: "{{ _listen }}"
+      vars:
+        _listen: "{{ _ss.stdout_lines | map('split') | map(attribute=3) | list }}"
+
+# PR 16: without Grafana the TSDB is the only state, so a plain
+# `agra backup create` includes the snapshot by itself.
+- name: Verify — the backup holds the TSDB snapshot
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Find backups on the control node
+      ansible.builtin.find:
+        paths: "{{ backup_control_node_dir }}"
+        patterns: "agra-backup-*.tar.gz"
+      register: _found
+
+    - name: List the backup
+      ansible.builtin.command:
+        argv: [tar, -tzf, "{{ (_found.files | first).path }}"]
+      register: _tar
+      changed_when: false
+
+    - name: One backup, with the TSDB snapshot and no Grafana
+      ansible.builtin.assert:
+        that:
+          - _found.files | length == 1
+          - _tar.stdout_lines | select('search', 'prometheus/tsdb-snapshot/') | list | length > 0
+          - _tar.stdout_lines | select('search', 'grafana/') | list == []
+        fail_msg: "{{ _tar.stdout_lines[:20] }}"

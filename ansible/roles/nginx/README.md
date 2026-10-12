@@ -1,21 +1,33 @@
 # Role: nginx
 
 Reverse proxy di setiap host `[monitoring]` (container `agra-nginx`, image
-`nginx:1.27-alpine`). Grafana dilayani di root `/` sebagai `default_server`,
+`nginx:1.27.5-alpine`). Grafana dilayani di root `/` sebagai `default_server`,
 dengan atau tanpa `grafana_domain`. Prometheus hanya dipublikasikan jika
-diminta. Desain: contexts/DESIGN.md §8.
+diminta.
 
-- `enable_https: true` (default): 443, port 80 redirect 301 ke 443, HSTS.
+- `enable_https: true` (default): `nginx_https_port` (443), `nginx_http_port` (80)
+  redirect 301 ke HTTPS di port itu (port ikut ditulis jika bukan 443), HSTS.
   `false`: Grafana di port 80.
 - Cert dibaca dari **control node** (`tls_cert_path` / `tls_key_path`, default
   hasil `agra certificates generate`) dan disalin ke `/etc/nginx/ssl/` di setiap
   host. CA chain (`tls_ca_path`) dan `dhparam.pem` disalin hanya jika ada; CA
-  chain menyalakan OCSP stapling (`enable_ssl_stapling` untuk memaksa ON/OFF).
+  chain menyalakan OCSP stapling (`enable_ssl_stapling` untuk memaksa ON/OFF),
+  selalu dengan `resolver` (nameserver host, atau `nginx_resolver`).
+- Path di config nginx selalu path di dalam container (`/etc/nginx`,
+  `/var/log/nginx`); `nginx_config_dir` dkk. hanya menentukan lokasi di host.
+  Symlink `sites-enabled` relatif.
+- `listen [::]` hanya jika host punya alamat IPv6 (`nginx_listen_ipv6`).
 - Prometheus (tanpa auth): `prometheus_domain` → server block sendiri;
   `expose_prometheus_via_nginx: true` → path `/prometheus/` di site Grafana.
   `/api/v1/admin/*`, `/-/quit`, `/-/reload` selalu 403.
 - `/healthz` hanya di `127.0.0.1:18080` (`nginx_health_port`) untuk health
   check keepalived.
+- Setiap pasangan cert/key dicek di control node sebelum disalin: key harus
+  milik cert-nya (public key sama), jika tidak deploy berhenti.
+- Setiap perubahan config diuji dulu dengan `nginx -t` di container sementara
+  yang memakai mount yang sama. Config invalid menghentikan deploy sebelum
+  nginx di-reload. Perubahan `nginx.conf` me-restart nginx (file di-mount
+  sendiri, reload tidak membaca file baru); site, `conf.d` dan cert cukup reload.
 
 ## Variabel utama
 
@@ -23,9 +35,11 @@ diminta. Desain: contexts/DESIGN.md §8.
 |---|---|---|
 | `enable_nginx` | `true` | `false` = tanpa reverse proxy; Grafana listen di `0.0.0.0:3000` |
 | `enable_https` | `true` | |
-| `nginx_tag` | `1.27-alpine` | |
+| `nginx_tag` | `1.27.5-alpine` | |
 | `nginx_http_port` / `nginx_https_port` | `80` / `443` | |
 | `nginx_health_port` | `18080` | Loopback saja, tidak dibuka di firewall |
+| `nginx_listen_ipv6` | ada alamat IPv6 di host | Listen juga di `[::]` |
+| `nginx_resolver` | `""` (nameserver host) | Resolver untuk OCSP stapling |
 | `grafana_domain` | `""` | Bersama `monitoring_vip` menjadi `server_name` |
 | `prometheus_domain` | `""` | Server block Prometheus |
 | `expose_prometheus_via_nginx` | `false` | `/prometheus/` di site Grafana |

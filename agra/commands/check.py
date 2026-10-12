@@ -7,10 +7,11 @@ inventory mana yang mau di-check node-node nya sekaligus).
 from __future__ import annotations
 import argparse
 import os
+from agra.errors import AgraUserError
 from agra.constants import GLOBALS_FILE, SECRET_KEYS, PER_HOST_KEYS, REMOVED_KEYS
 from agra.utils.cli_args import add_inventory_argument
 from agra.utils.run_playbook import run_playbook
-from agra.utils.colors import error, warn, BOLD, RESET
+from agra.utils.colors import warn
 
 
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
@@ -52,41 +53,49 @@ def _warn_misplaced_globals_keys() -> None:
             warn(f"{GLOBALS_FILE}: '{key}' adalah secret — pindahkan ke passwords.yml (passwords.yml dimuat setelah globals.yml dan menang jika key ada di sana).")
     for key in PER_HOST_KEYS:
         if key in data:
-            warn(f"{GLOBALS_FILE}: '{key}' berlaku per-host — hapus dari globals.yml dan set di host_vars/<host>.yml (RULES.md §14.6).")
+            warn(f"{GLOBALS_FILE}: '{key}' berlaku per-host — hapus dari globals.yml dan set di host_vars/<host>.yml (globals.yml berlaku untuk semua host).")
     for key, why in REMOVED_KEYS.items():
         if key in data:
             warn(f"{GLOBALS_FILE}: '{key}' sudah dihapus dan tidak berefek — hapus dari globals.yml. {why}")
 
 
+def require_explicit_inventory(args: argparse.Namespace, command: str) -> None:
+    """Precheck menyentuh SEMUA host inventory: tanpa -i / AGRA_INVENTORY jangan
+    pernah jatuh ke inventory/all-in-one diam-diam. Exit 2 (kesalahan operator)."""
+    if getattr(args, "inventory", None) or os.environ.get("AGRA_INVENTORY", ""):
+        return
+    raise AgraUserError(
+        f"`{command}` menjalankan precheck dan MEMERLUKAN inventory explicit: tambahkan "
+        f"-i <inventory> (contoh: {command} -i inventory/multinode), atau set env AGRA_INVENTORY. "
+        "Precheck tidak memakai default inventory/all-in-one supaya tidak salah target."
+    )
+
+
+def run_validation(args: argparse.Namespace, command: str) -> int:
+    """Precheck untuk backup/upgrade/rollback/restore: validasi konfigurasi +
+    koneksi + `docker info` di host yang di-target (--limit dihormati), TANPA
+    bootstrap. apt/dnf upgrade hanya lewat `agra check`: upgrade paket Docker
+    me-restart semua container di semua node sekaligus."""
+    require_explicit_inventory(args, command)
+    _warn_misplaced_globals_keys()
+    evars = {"_agra_cli_inventory_explicit_confirmed": True, "_agra_precheck_bootstrap": False}
+    # Bukan --limit: play validasi di localhost tidak cocok dengan pattern host
+    # user dan akan di-skip. Pattern dipakai sebagai `hosts:` play node saja.
+    if getattr(args, "limit", None):
+        evars["_agra_precheck_limit"] = args.limit
+    return run_playbook(
+        "precheck",
+        inventory=getattr(args, "inventory", None),
+        verbosity=getattr(args, "verbose", 0),
+        extra_vars=evars,
+        description=f"Precheck validasi sebelum `{command}` (tanpa bootstrap node)",
+        abort_on_nonzero=False,
+    )
+
+
 def run_check(args: argparse.Namespace) -> int:
-    """Wrapper: pastikan -i / --inventory / AGRA_INVENTORY ADA, baru jalankan precheck."""
-
-    inv_from_cli = getattr(args, "inventory", None) or None
-    inv_from_env = os.environ.get("AGRA_INVENTORY", "") or None
-
-    if inv_from_cli is None and inv_from_env is None:
-        error("❌ `agra check` / `agra precheck` / `agra verify` MEMERLUKAN -i / --inventory secara EXPLICIT.")
-        print(f"""
-{BOLD}Kenapa diwajibkan?{RESET}
-  • Command ini tidak hanya validasi vars — TAPI JUGA PING SEMUA HOST di inventory
-    untuk memastikan NODE BISA DIKONEKSI (SSH reachable).
-  • Agar anda TIDAK salah precheck — misal lupa inventory, tapi malah ke-all-in-one localhost
-    padahal ingin precheck inventory multi-node production.
-  • Semua 3 alias: `agra check` | `agra precheck` | `agra verify` — WAJIB pakai -i explicit.
-
-{BOLD}Cara perbaiki (PILIH SALAH SATU):{RESET}
-  1. Tambahkan flag explicit -i:   {BOLD}agra check -i inventory/all-in-one{RESET}
-     atau:  {BOLD}agra precheck -i inventory/multinode{RESET}
-  2. Atau set env AGRA_INVENTORY permanen (tidak perlu -i tiap kali):
-        export AGRA_INVENTORY=/home/user/Agra/inventory/multinode
-     lalu jalankan:  agra check / agra precheck / agra verify
-
-{BOLD}Contoh command valid:{RESET}
-  agra check -i inventory/all-in-one
-  agra precheck -i inventory/multinode
-  agra verify -i ~/custom-inv/production.ini
-""", flush=True)
-        return 1
+    """`agra check`: validasi + bootstrap node (apt/dnf upgrade, Docker)."""
+    require_explicit_inventory(args, "agra check")
 
     # Guard: Extra_vars boolean flag untuk defense-in-depth di playbook level (precheck.yml assert PALING ATAS).
     # Flag ini HANYA di-set JIKA user lewat CLI `agra check/precheck/verify` DENGAN -i / AGRA_INVENTORY valid.
@@ -99,7 +108,7 @@ def run_check(args: argparse.Namespace) -> int:
 
     return run_playbook(
         "precheck",
-        inventory=inv_from_cli,  # jika inv_from_cli None (cuma env), resolve_inventory nanti ambil dari env
+        inventory=getattr(args, "inventory", None),  # None (cuma env): resolve_inventory ambil dari env
         verbosity=args.verbose,
         extra_vars=cli_guard_extra_vars,
         description="Preflight Validation (agra check) + PING SEMUA NODE",

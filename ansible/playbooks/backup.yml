@@ -17,10 +17,18 @@
   gather_facts: false
   become: true
   tags: ['backup']
+  vars_files:
+    - vars/service_paths.yml
   vars:
     _bk_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
     _bk_ctrl_dir: "{{ backup_control_node_dir | default('/etc/agra/backups') }}"
-    _bk_include_tsdb: "{{ backup_include_prometheus_tsdb | default(false) | bool }}"
+    # Without Grafana on the master the TSDB is the only state there is, so
+    # it is always included — otherwise a Prometheus-only stack has nothing
+    # to back up and `agra upgrade` (backup first, RULES §10) can never run.
+    _bk_has_prometheus: "{{ (enable_prometheus | default(true) | bool) and inventory_hostname in groups['prometheus'] | default([]) }}"
+    _bk_include_tsdb: >-
+      {{ _bk_has_prometheus | bool and
+         ((backup_include_prometheus_tsdb | default(false) | bool) or not _bk_has_grafana | bool) }}
     _bk_retention_count: "{{ backup_retention_count | default(7) | int }}"
     _bk_apply_retention: "{{ backup_apply_retention | default(true) | bool }}"
     # Safety backup sebelum restore: simpan apa yang ada. State yang rusak
@@ -30,7 +38,7 @@
     _bk_s3_prefix: "{{ backup_s3_prefix | default('agra-backups') }}"
     _bk_has_grafana: "{{ (enable_grafana | default(true) | bool) and inventory_hostname in groups['grafana'] | default([]) }}"
     _bk_grafana_sqlite: "{{ _bk_has_grafana | bool and (grafana_database | default('sqlite')) == 'sqlite' }}"
-    _bk_grafana_sqlite_path: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+    _bk_grafana_sqlite_path: "{{ _svc_grafana_db }}"
     _bk_timestamp: "{{ ansible_facts['date_time'].iso8601_basic_short }}"
     _bk_name: "agra-backup-{{ inventory_hostname }}-{{ _bk_timestamp }}"
     _bk_stage_dir: "{{ _bk_root_dir }}/{{ _bk_name }}"
@@ -76,6 +84,18 @@
       tags: ['always']
 
   tasks:
+    # [n:] on the sorted list keeps n backups; n <= 0 would delete every
+    # backup, the one just made included, on master and control node.
+    - name: 'Backup — backup_retention_count minimal 1'
+      ansible.builtin.assert:
+        that: _bk_retention_count | int >= 1
+        fail_msg: >-
+          backup_retention_count={{ backup_retention_count | default(7) }}: minimal 1
+          (jumlah backup terbaru yang disimpan). 0 atau negatif akan menghapus semua
+          backup, termasuk yang baru dibuat.
+        quiet: true
+      when: _bk_apply_retention | bool
+
     - name: 'Backup — Ensure backup root + stage dir'
       ansible.builtin.file:
         path: "{{ item }}"
@@ -83,10 +103,9 @@
         owner: root
         group: root
         mode: '0750'
-      loop:
-        - "{{ _bk_root_dir }}"
-        - "{{ _bk_stage_dir }}"
-        - "{{ _bk_stage_dir }}/grafana"
+      # grafana/ only when there is a Grafana to back up: a Prometheus-only
+      # backup must not look like one with an empty Grafana part.
+      loop: "{{ [_bk_root_dir, _bk_stage_dir] + ([_bk_stage_dir ~ '/grafana'] if _bk_has_grafana | bool else []) }}"
 
     # ── Grafana ─────────────────────────────────────────────────────────
     - name: 'Backup Grafana — config + provisioning + database'
@@ -96,8 +115,8 @@
           ansible.builtin.stat:
             path: "{{ item }}"
           loop:
-            - "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
-            - "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}"
+            - "{{ _svc_grafana_config_dir }}/grafana.ini"
+            - "{{ _svc_grafana_provisioning_dir }}"
             - "{{ _bk_grafana_sqlite_path }}"
           register: _bk_gf_src
 
@@ -117,7 +136,7 @@
 
         - name: 'Backup Grafana — Copy grafana.ini'
           ansible.builtin.copy:
-            src: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+            src: "{{ _svc_grafana_config_dir }}/grafana.ini"
             dest: "{{ _bk_stage_dir }}/grafana/grafana.ini"
             remote_src: true
             mode: '0600'
@@ -125,7 +144,7 @@
 
         - name: 'Backup Grafana — Copy provisioning'
           ansible.builtin.copy:
-            src: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}/"
+            src: "{{ _svc_grafana_provisioning_dir }}/"
             dest: "{{ _bk_stage_dir }}/grafana/provisioning/"
             remote_src: true
             directory_mode: '0750'
@@ -173,13 +192,13 @@
             directory_mode: '0750'
             mode: preserve
           vars:
-            _bk_snap_src: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
+            _bk_snap_src: "{{ _svc_prometheus_data_dir }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
 
       always:
         # Snapshot di data dir Prometheus memakan disk — selalu hapus.
         - name: 'Backup Prometheus — Hapus snapshot dari data dir'
           ansible.builtin.file:
-            path: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
+            path: "{{ _svc_prometheus_data_dir }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
             state: absent
           when: _bk_prom_snap.content is defined
 
@@ -189,9 +208,8 @@
       ansible.builtin.assert:
         that: _bk_components | length > 0
         fail_msg: >-
-          Tidak ada komponen untuk di-backup di {{ inventory_hostname }}: Grafana tidak
-          berjalan di master (enable_grafana / grup [grafana]) dan TSDB tidak diminta
-          (--tsdb).
+          Tidak ada komponen untuk di-backup di {{ inventory_hostname }}: Grafana maupun
+          Prometheus tidak berjalan di master (enable_grafana / enable_prometheus).
         quiet: true
       when: not _bk_safety | bool
 
@@ -297,6 +315,12 @@
       delegate_to: localhost
       become: false
 
+    # restore.yml refuses to overwrite anything unless this is set in the
+    # same run: no tag or --skip-tags combination can skip the safety backup.
+    - name: 'Backup — Selesai (tarball + manifest di master dan control node)'
+      ansible.builtin.set_fact:
+        _bk_completed_name: "{{ _bk_name }}"
+
     # ── Retensi ─────────────────────────────────────────────────────────
     # Dilewati saat safety backup sebelum restore (backup_apply_retention:
     # false) agar backup yang sedang direstore tidak ikut terhapus.
@@ -356,4 +380,4 @@
         _bk_external_db_note: >-
           ⚠️ grafana_database={{ grafana_database }}: dashboard/user/alert ada di database
           eksternal dan TIDAK termasuk backup ini — backup database tersebut di sisi
-          database (pg_dump/mysqldump); database di luar scope agra (PRD §4).
+          database (pg_dump/mysqldump); database di luar scope agra.

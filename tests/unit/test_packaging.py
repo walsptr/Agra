@@ -100,3 +100,17 @@ def test_requirements_txt_matches_pyproject_dependencies():
     listed = [line.strip() for line in (REPO_ROOT / "requirements.txt").read_text().splitlines()
               if line.strip() and not line.startswith("#")]
     assert listed == declared
+
+
+def test_version_has_one_source_and_a_changelog_entry():
+    """PR 20: agra/__init__.py is the only place the version is written."""
+    import re
+
+    import agra
+
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text()
+    assert re.search(r'^version\s*=\s*"', pyproject, re.M) is None, "pyproject.toml must not repeat the version"
+    assert re.search(r'^dynamic = \[[^]]*"version"', pyproject, re.M)
+    assert re.search(r'^version = \{attr = "agra.__version__"\}', pyproject, re.M)
+    released = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", (REPO_ROOT / "CHANGELOG.md").read_text(), re.M)
+    assert released and released[0] == agra.__version__, f"CHANGELOG.md tops at {released[:1]}, agra is {agra.__version__}"

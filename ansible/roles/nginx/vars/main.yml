@@ -1,0 +1,22 @@
+---
+# Paths inside the container. nginx reads its config there, so every path in
+# the templates is one of these — never a host *_dir, which only decides where
+# on the host the files live (nginx_config_dir: /opt/... must still work).
+_nginx_ct_config_dir: /etc/nginx
+_nginx_ct_log_dir: /var/log/nginx
+_nginx_ct_cache_dir: /var/cache/nginx
+_nginx_ct_ssl_dir: "{{ _nginx_ct_config_dir }}/ssl"
+
+# Host → container mounts, shared by the container (tasks/docker.yml) and the
+# syntax check (handlers), so `nginx -t` reads exactly what nginx will read.
+# nginx.conf is a single-file mount: a re-rendered file is a new inode the
+# running container never sees, so a change to it restarts nginx (DESIGN §8A).
+# The image's own /etc/nginx (mime.types, ...) stays visible around them.
+_nginx_volumes:
+  - "{{ nginx_config_dir }}/nginx.conf:{{ _nginx_ct_config_dir }}/nginx.conf:ro"
+  - "{{ nginx_sites_available_dir }}:{{ _nginx_ct_config_dir }}/sites-available:ro"
+  - "{{ nginx_sites_enabled_dir }}:{{ _nginx_ct_config_dir }}/sites-enabled:ro"
+  - "{{ nginx_confd_dir }}:{{ _nginx_ct_config_dir }}/conf.d:ro"
+  - "{{ nginx_config_dir }}/ssl:{{ _nginx_ct_ssl_dir }}:ro"
+  - "{{ nginx_log_dir }}:{{ _nginx_ct_log_dir }}:rw"
+  - "{{ nginx_cache_dir }}:{{ _nginx_ct_cache_dir }}:rw"

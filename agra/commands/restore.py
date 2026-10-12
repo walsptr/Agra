@@ -19,6 +19,7 @@ except ImportError:
 from agra.utils.colors import warn, info, error, section, BOLD, RESET, RED, YELLOW, MAGENTA
 from agra.utils.backups import backup_name, control_backup_dir, manifest_for, resolve_manifest, tarball_for
 from agra.utils.cli_args import add_inventory_argument
+from agra.commands.check import require_explicit_inventory, run_validation
 from agra.utils.run_playbook import check_extra_vars_conflicts, run_playbook
 
 
@@ -37,7 +38,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     p = subparsers.add_parser(
         "restore", aliases=["res", "revert-backup"],
         help="Restore dari backup (butuh --backup-name ATAU --backup-tarball). SAFETY 2-LAYER.",
-        description="Restore dari backup agra. Safety: CLI validate manifest EXISTS terlebih dahulu (tidak blind call ansible), --yes-i-really-mean-it WAJIB, typed sentence confirm. Playbook jalankan backup-before-restore otomatis (RULES §8).",
+        description="Restore dari backup agra. Safety: CLI validate manifest EXISTS terlebih dahulu (tidak blind call ansible), --yes-i-really-mean-it WAJIB, typed sentence confirm. Playbook jalankan backup-before-restore otomatis.",
     )
     add_inventory_argument(p)
     p.add_argument("-l", "--limit")
@@ -63,7 +64,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action=argparse.BooleanOptionalAction,
         default=True,
         dest="precheck",
-        help="Jalankan precheck SEBELUM restore (default: TRUE / precheck aktif). "
+        help="Jalankan precheck validasi (tanpa update OS/Docker) SEBELUM restore (default: TRUE / precheck aktif). "
              "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
     )
     p.add_argument("-v", "--verbose", action="count", default=0)
@@ -79,11 +80,15 @@ RESTORE_CLI_VARS = ("restore_confirm", "restore_backup_name", "restore_local_tar
 def run_restore(args: argparse.Namespace) -> int:
     check_extra_vars_conflicts(args.extra_vars, RESTORE_CLI_VARS)
     if not getattr(args, "yes_i_really_mean_it", False):
-        error("RESTORE DIBLOKIR (RULES §8 SAFETY LAYER 1: TIDAK ADA FLAG --yes-i-really-mean-it).")
+        error("RESTORE DIBLOKIR (SAFETY LAYER 1: TIDAK ADA FLAG --yes-i-really-mean-it).")
         print(f"\n{RED}{BOLD}Restore bersifat DESTRUKTIF (menimpa Grafana DB saat ini).{RESET}")
         print(f"Tambahkan: {YELLOW}{BOLD}agra restore -n <BACKUP_NAME> --yes-i-really-mean-it{RESET}")
         print(f"\nLihat daftar backup: {MAGENTA}agra backup list{RESET}")
         return 1
+
+    precheck_enabled = getattr(args, "precheck", True)
+    if precheck_enabled:
+        require_explicit_inventory(args, "agra restore")
 
     # Backup selalu dari salinan di control node (backup.yml mem-fetch setiap
     # backup) — playbook meng-copy-nya ke master, jadi master remote pun bisa.
@@ -128,15 +133,6 @@ def run_restore(args: argparse.Namespace) -> int:
         except Exception as e:
             warn(f"Manifest tidak valid (lanjut tetap): {e}")
 
-    precheck_enabled = getattr(args, "precheck", True)
-    if precheck_enabled:
-        from agra.commands.check import run_check
-        rc = run_check(args)
-        if rc != 0:
-            error(f"Precheck FAILED (rc={rc}). Restore DIBATALKAN untuk mencegah bad state.")
-            warn("Untuk bypass precheck: `agra restore --no-precheck` (TIDAK DISARANKAN production).")
-            return rc
-
     interactive = (os.environ.get("AGRA_NON_INTERACTIVE", "") != "1") and not getattr(args, "auto_yes", False)
     if interactive:
         section(f"{RED}{BOLD}RESTORE — KONFIRMASI TYPED SENTENCE{RESET}")
@@ -151,6 +147,14 @@ def run_restore(args: argparse.Namespace) -> int:
         if resp != RESTORE_CONFIRM_SENTENCE:
             error("Kalimat konfirmasi TIDAK cocok → ABORT.")
             return 1
+
+    # Precheck SETELAH konfirmasi: operator yang batal tidak menyentuh node sama sekali.
+    if precheck_enabled:
+        rc = run_validation(args, "agra restore")
+        if rc != 0:
+            error(f"Precheck FAILED (rc={rc}). Restore DIBATALKAN untuk mencegah bad state.")
+            warn("Untuk bypass precheck: `agra restore --no-precheck` (TIDAK DISARANKAN production).")
+            return rc
 
     evars: Dict[str, Any] = {
         "restore_confirm": True,

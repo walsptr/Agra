@@ -8,19 +8,31 @@
   vars:
     agra_container_name: "{{ nginx_container_name }}"
     agra_container_image: "{{ nginx_image }}:{{ nginx_tag }}"
-    agra_container_options:
-      - --restart=always
-      - --network=host
-      - "--volume={{ nginx_config_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro"
-      - "--volume={{ nginx_config_dir }}/sites-available:/etc/nginx/sites-available:ro"
-      - "--volume={{ nginx_config_dir }}/sites-enabled:/etc/nginx/sites-enabled:ro"
-      - "--volume={{ nginx_config_dir }}/conf.d:/etc/nginx/conf.d:ro"
-      - "--volume={{ nginx_config_dir }}/ssl:/etc/nginx/ssl:ro"
-      - "--volume={{ nginx_log_dir }}:/var/log/nginx:rw"
-      - "--volume={{ nginx_cache_dir }}:/var/cache/nginx:rw"
-      - "--health-cmd=curl -fsS --max-time 3 http://127.0.0.1:{{ nginx_health_port }}/healthz -o /dev/null || exit 1"
-      - --health-interval=30s
-      - --health-timeout=7s
-      - --health-retries=3
-      - --health-start-period=45s
+    agra_container_options: >-
+      {{ ['--restart=always', '--network=host']
+         + _nginx_volumes | map('regex_replace', '^', '--volume=') | list
+         + ['--health-cmd=curl -fsS --max-time 3 http://127.0.0.1:' ~ nginx_health_port ~ '/healthz -o /dev/null || exit 1',
+            '--health-interval=30s', '--health-timeout=7s', '--health-retries=3', '--health-start-period=45s'] }}
+  tags: ['nginx', 'docker', 'container']
+
+# A container created before nginx.conf changed — or by an agra that only
+# reloaded on a change — still reads the old file (single-file mount). Compare
+# what it reads with the host file; on a mismatch validate, then restart.
+- name: Nginx (Docker) - Checksum nginx.conf di host
+  ansible.builtin.stat:
+    path: "{{ nginx_config_dir }}/nginx.conf"
+    checksum_algorithm: sha256
+  register: _nginx_conf_host
+  tags: ['nginx', 'docker', 'container']
+
+- name: Nginx (Docker) - Checksum nginx.conf yang dibaca container
+  ansible.builtin.command:
+    argv: [docker, exec, "{{ nginx_container_name }}", sha256sum, /etc/nginx/nginx.conf]
+  register: _nginx_conf_live
+  changed_when: _nginx_conf_live.stdout.split() | first | default('') != _nginx_conf_host.stat.checksum
+  notify: ['nginx syntax check', 'restart nginx']
+  tags: ['nginx', 'docker', 'container']
+
+- name: Nginx (Docker) - Terapkan nginx.conf yang berbeda
+  ansible.builtin.meta: flush_handlers
   tags: ['nginx', 'docker', 'container']

@@ -7,6 +7,11 @@
 #
 # Urutan: validasi config (murah, di control node) DULU, baru ping + bootstrap
 # node (apt/dnf upgrade + Docker) — config salah gagal sebelum node disentuh.
+#
+# Bootstrap (apt/dnf upgrade, install + start Docker) hanya untuk `agra check`.
+# backup/upgrade/rollback/restore memanggil playbook ini dengan
+# _agra_precheck_bootstrap=false: validasi + `docker info` saja, tanpa mengubah
+# node — upgrade paket Docker me-restart semua container di semua node sekaligus.
 
 - name: 'AGRA PRECHECK 1/3 — Validasi konfigurasi (control node)'
   hosts: localhost
@@ -21,7 +26,7 @@
     _tls_cert_path: "{{ tls_cert_path | default('/etc/agra/ssl/agra.crt', true) }}"
     _tls_key_path: "{{ tls_key_path | default('/etc/agra/ssl/agra.key', true) }}"
     _needs_tls: "{{ (enable_nginx | default(true) | bool) and (enable_https | default(true) | bool) }}"
-    _fix_globals: "Perbaiki di /etc/agra/globals.yml (bukan inventory [group:vars] — RULES.md §14)."
+    _fix_globals: "Perbaiki di /etc/agra/globals.yml (bukan inventory [group:vars]: globals.yml di-inject sebagai extra-vars dan selalu menang)."
     _fix_passwords: "Jalankan `agra genpwd` (field kosong diisi, field terisi tidak ditimpa)."
 
   tasks:
@@ -40,7 +45,7 @@
         that: _monitoring_hosts | length >= 1
         fail_msg: >-
           Group [monitoring] kosong atau tidak ada. Tambahkan minimal 1 host ke
-          [monitoring] di inventory (ARCHITECTURE.md §4).
+          [monitoring] di inventory.
         quiet: true
 
     - name: 'Precheck (TOPOLOGI) — Minimal 1 host di group [node_exporter]'
@@ -50,6 +55,28 @@
           Group [node_exporter] kosong atau tidak ada. Tambahkan host yang ingin
           dimonitor (mis. [node_exporter:children] monitoring).
         quiet: true
+
+    # Grafana + Prometheus run on every [monitoring] node and nowhere else:
+    # nginx proxies to 127.0.0.1:3000, the Grafana datasource is
+    # 127.0.0.1:9090, keepalived health-checks both on loopback, and
+    # upgrade/backup/restore only target [monitoring]. A split inventory would
+    # deploy fine and then serve 502s, or be skipped by upgrade.
+    - name: 'Precheck (TOPOLOGI) — [grafana] dan [prometheus] = [monitoring]'
+      ansible.builtin.assert:
+        that: groups[item.group] | default([]) | sort == _monitoring_hosts | sort
+        fail_msg: >-
+          [{{ item.group }}] = {{ groups[item.group] | default([]) | sort }}, [monitoring] =
+          {{ _monitoring_hosts | sort }}. agra menjalankan {{ item.group }} di setiap node
+          [monitoring] dan hanya di sana (nginx, datasource Grafana dan health check
+          keepalived memakai 127.0.0.1). Pakai `[{{ item.group }}:children]` berisi
+          `monitoring` di inventory{{ ', atau set ' ~ item.flag ~ ': false jika tidak dipakai' }}.
+        quiet: true
+      loop:
+        - { group: grafana, flag: enable_grafana }
+        - { group: prometheus, flag: enable_prometheus }
+      loop_control:
+        label: "{{ item.group }}"
+      when: lookup('vars', item.flag, default=true) | bool
 
     - name: 'Precheck (TOPOLOGI) — Multi-node wajib monitoring_vip'
       ansible.builtin.assert:
@@ -75,7 +102,7 @@
           Semua wajib IPv4 literal, unik, dan bukan monitoring_vip. Tidak valid:
           {{ _ka_bad }}. Jika ansible_host berupa hostname atau IP management, set
           keepalived_unicast_ip: <ip di monitoring_vip_interface> di host_vars/<host>.yml
-          (var per-host — RULES.md §14.6).
+          (var per-host).
         quiet: true
       vars:
         _ka_ips: >-
@@ -154,7 +181,7 @@
           enable_ha_grafana=true butuh grafana_database mysql atau postgresql
           (sekarang '{{ _grafana_database }}'): semua node Grafana memakai satu
           database eksternal yang sudah ada. agra tidak menyinkronkan file SQLite
-          antar node dan tidak memasang database (PRD §4). Siapkan database, isi
+          antar node dan tidak memasang database. Siapkan database, isi
           grafana_database / grafana_database_host / grafana_database_port di
           globals.yml dan grafana_database_password di passwords.yml, ATAU set
           enable_ha_grafana=false.
@@ -195,9 +222,8 @@
           - grafana_admin_password | default('') | string != 'admin'
         fail_msg: >-
           grafana_admin_password di /etc/agra/passwords.yml kosong, < 8 karakter,
-          atau 'admin'. {{ _fix_passwords }} Jika grafana.db sudah dibuat dengan
-          password lama, reset via: docker exec -it agra-grafana grafana-cli admin
-          reset-admin-password <password-baru>
+          atau 'admin'. {{ _fix_passwords }} grafana.db yang dibuat dengan
+          password lama disinkronkan otomatis oleh `agra deploy`.
         quiet: true
       when: enable_grafana | default(true) | bool
 
@@ -222,6 +248,15 @@
       when:
         - _is_multinode | bool
         - enable_keepalived | default(true) | bool
+
+    - name: 'Precheck (BACKUP) — backup_retention_count minimal 1'
+      ansible.builtin.assert:
+        that: backup_retention_count | default(7) | int >= 1
+        fail_msg: >-
+          backup_retention_count={{ backup_retention_count | default(7) }}: minimal 1. 0 atau
+          negatif membuat setiap backup menghapus semua backup, termasuk yang baru dibuat.
+          {{ _fix_globals }}
+        quiet: true
 
     - name: 'Precheck (SECRET) — Backup S3 wajib access/secret key'
       ansible.builtin.assert:
@@ -293,10 +328,14 @@
       when: not _needs_tls | bool
 
 - name: 'AGRA PRECHECK 2/3 — Koneksi + bootstrap node (Docker)'
-  hosts: all
+  # --limit dari backup/upgrade/rollback/restore datang sebagai var, bukan
+  # --limit Ansible, supaya play validasi di localhost tetap jalan.
+  hosts: "{{ _agra_precheck_limit | default('all') }}"
   gather_facts: false
   any_errors_fatal: true
   tags: ['always', 'precheck']
+  vars:
+    _pc_bootstrap: "{{ _agra_precheck_bootstrap | default(true) | bool }}"
   tasks:
     - name: 'Precheck (NODE KONEKSI) — Ping semua host'
       ansible.builtin.ping:
@@ -329,7 +368,7 @@
           monitoring_vip_interface='{{ _pc_vip_iface }}' tidak ada di {{ inventory_hostname }}
           (interface: {{ ansible_facts['interfaces'] | join(', ') }}). keepalived memasang
           monitoring_vip di interface ini. Set monitoring_vip_interface per host di
-          host_vars/{{ inventory_hostname }}.yml (bukan globals.yml — RULES.md §14.6).
+          host_vars/{{ inventory_hostname }}.yml (bukan globals.yml, yang berlaku untuk semua host).
         quiet: true
       vars:
         _pc_vip_iface: "{{ monitoring_vip_interface | default(ansible_facts['default_ipv4']['interface'] | default('eth0')) }}"
@@ -342,7 +381,7 @@
     # [monitoring] / [node_exporter] (control node dilewati kecuali AIO).
     # Runtime = Docker Engine di semua distro (ARCHITECTURE.md §3): docker.io di
     # Debian/Ubuntu, docker-ce dari download.docker.com di keluarga RHEL.
-    - name: 'Precheck (BOOTSTRAP NODE) — Update packages + install & verify Docker'
+    - name: 'Precheck (NODE DOCKER) — Bootstrap (agra check) + verify Docker'
       when: >-
         inventory_hostname in (groups['monitoring'] | default([]))
         or inventory_hostname in (groups['node_exporter'] | default([]))
@@ -373,59 +412,73 @@
               podman sendiri boleh tetap terpasang), lalu jalankan `agra check` lagi.
             quiet: true
 
-        - name: 'Bootstrap (Debian) — apt update cache'
-          ansible.builtin.apt:
-            update_cache: true
-            cache_valid_time: 3600
-          when: ansible_facts['os_family'] == 'Debian'
+        - name: 'Bootstrap — Update packages, install & start Docker (hanya agra check)'
+          when: _pc_bootstrap | bool
+          block:
+            - name: 'Bootstrap (Debian) — apt update cache'
+              ansible.builtin.apt:
+                update_cache: true
+                cache_valid_time: 3600
+              when: ansible_facts['os_family'] == 'Debian'
 
-        - name: 'Bootstrap (Debian) — apt safe-upgrade'
-          ansible.builtin.apt:
-            upgrade: safe
-          when: ansible_facts['os_family'] == 'Debian'
+            - name: 'Bootstrap (Debian) — apt safe-upgrade'
+              ansible.builtin.apt:
+                upgrade: safe
+              when: ansible_facts['os_family'] == 'Debian'
 
-        - name: 'Bootstrap (Debian) — Install Docker + prerequisites'
-          ansible.builtin.apt:
-            name: [apt-transport-https, ca-certificates, curl, gnupg, lsb-release, docker.io, python3-docker]
-            state: present
-          when: ansible_facts['os_family'] == 'Debian'
+            - name: 'Bootstrap (Debian) — Install Docker + prerequisites'
+              ansible.builtin.apt:
+                name: [apt-transport-https, ca-certificates, curl, gnupg, lsb-release, docker.io, python3-docker]
+                state: present
+              when: ansible_facts['os_family'] == 'Debian'
 
-        - name: 'Bootstrap (RedHat) — dnf upgrade (paket terpasang)'
-          ansible.builtin.dnf:
-            name: '*'
-            state: latest
-            update_only: true
-            update_cache: true
-          when: ansible_facts['os_family'] == 'RedHat'
+            - name: 'Bootstrap (RedHat) — dnf upgrade (paket terpasang)'
+              ansible.builtin.dnf:
+                name: '*'
+                state: latest
+                update_only: true
+                update_cache: true
+              when: ansible_facts['os_family'] == 'RedHat'
 
-        - name: 'Bootstrap (RedHat) — Repository Docker CE (download.docker.com)'
-          ansible.builtin.yum_repository:
-            name: docker-ce-stable
-            description: Docker CE Stable - $basearch
-            baseurl: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/$releasever/$basearch/stable"
-            gpgkey: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/gpg"
-            gpgcheck: true
-          when: ansible_facts['os_family'] == 'RedHat'
+            - name: 'Bootstrap (RedHat) — Repository Docker CE (download.docker.com)'
+              ansible.builtin.yum_repository:
+                name: docker-ce-stable
+                description: Docker CE Stable - $basearch
+                baseurl: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/$releasever/$basearch/stable"
+                gpgkey: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/gpg"
+                gpgcheck: true
+              when: ansible_facts['os_family'] == 'RedHat'
 
-        # iptables-nft in the same transaction: with EPEL enabled dnf may satisfy
-        # docker-ce's `iptables` with iptables-legacy, whose nat table modern
-        # kernels do not load — dockerd then refuses to start.
-        - name: 'Bootstrap (RedHat) — Install Docker CE'
-          ansible.builtin.dnf:
-            name: [iptables-nft, docker-ce, docker-ce-cli, containerd.io]
-            state: present
-          when: ansible_facts['os_family'] == 'RedHat'
+            # iptables-nft in the same transaction: with EPEL enabled dnf may satisfy
+            # docker-ce's `iptables` with iptables-legacy, whose nat table modern
+            # kernels do not load — dockerd then refuses to start.
+            - name: 'Bootstrap (RedHat) — Install Docker CE'
+              ansible.builtin.dnf:
+                name: [iptables-nft, docker-ce, docker-ce-cli, containerd.io]
+                state: present
+              when: ansible_facts['os_family'] == 'RedHat'
 
-        - name: 'Bootstrap — Start & enable docker.service'
-          ansible.builtin.service:
-            name: docker
-            state: started
-            enabled: true
+            - name: 'Bootstrap — Start & enable docker.service'
+              ansible.builtin.service:
+                name: docker
+                state: started
+                enabled: true
 
         - name: 'Bootstrap — Verify Docker daemon (docker info)'
           ansible.builtin.command:
             argv: [docker, info]
+          register: _pc_docker_info
           changed_when: false
+          failed_when: false
+
+        - name: 'Bootstrap — Docker Engine siap'
+          ansible.builtin.assert:
+            that: _pc_docker_info.rc == 0
+            fail_msg: >-
+              `docker info` gagal di {{ inventory_hostname }}: {{ (_pc_docker_info.stderr | default('', true) or _pc_docker_info.msg | default('')) | trim }}.
+              {{ 'Cek docker.service di node.' if _pc_bootstrap | bool else
+                 'Docker Engine belum siap — jalankan `agra check -i <inventory>` (bootstrap node) dulu.' }}
+            quiet: true
 
         - name: 'Bootstrap (Debian) — Cek /var/run/reboot-required'
           ansible.builtin.stat:
@@ -454,4 +507,4 @@
           - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | length }} node_exporter target(s)"
           - "Grafana database: {{ grafana_database | default('sqlite') }}"
           - "HA: enable_ha_grafana={{ enable_ha_grafana | default(false) }}; keepalived={{ groups['monitoring'] | length > 1 }}"
-          - "Docker siap di semua node bootstrap. Selanjutnya: agra deploy -i <inventory>"
+          - "{{ 'Docker siap di semua node bootstrap. Selanjutnya: agra deploy -i <inventory>' if _agra_precheck_bootstrap | default(true) | bool else 'Validasi saja (tanpa bootstrap node); Docker siap di node yang dicek.' }}"

@@ -28,7 +28,7 @@ def run_genpwd(args: argparse.Namespace) -> int:
     from agra.constants import PASSWORDS_FILE
 
     if args.force and not getattr(args, "yes_i_really_mean_it", False):
-        error("genpwd --force DIBLOKIR: tanpa --yes-i-really-mean-it (RULES §8).")
+        error("genpwd --force DIBLOKIR: tanpa --yes-i-really-mean-it.")
         warn("--force mengganti semua secret: grafana_secret_key baru membuat password datasource dan "
              "data terenkripsi lain di database Grafana tidak terbaca; grafana_database_password baru "
              "harus di-set juga di database eksternal; semua sesi login berakhir.")

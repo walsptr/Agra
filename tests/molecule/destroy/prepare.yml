@@ -1,0 +1,28 @@
+---
+- name: Precheck + test certificate
+  ansible.builtin.import_playbook: ../shared/prepare.yml
+
+# What an app server can have on its own; agra never deployed nginx or
+# keepalived there, so destroy --purge-config must leave these alone.
+- name: The app server's own nginx and keepalived config
+  hosts: agra-app1
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Own config directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [/etc/nginx, /etc/keepalived]
+
+    - name: Own config files
+      ansible.builtin.copy:
+        dest: "{{ item }}"
+        content: "# owned by the app server, not agra\n"
+        mode: "0644"
+      loop:
+        - /etc/nginx/nginx.conf
+        - /etc/keepalived/keepalived.conf
+      loop_control:
+        label: "{{ item }}"

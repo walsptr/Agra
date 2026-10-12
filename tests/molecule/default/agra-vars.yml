@@ -1,6 +1,15 @@
 ---
 # Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
 
+# side_effect.yml writes "reconfigure" here; vars follow it lazily.
+_agra_test_phase: >-
+  {{ lookup('ansible.builtin.file',
+            lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') ~ '/phase',
+            errors='ignore') | default('deploy', true) | trim }}
+# Changed while agra-nginx keeps running: nginx.conf is a single-file mount,
+# so only a restart makes nginx read the new file (PR 17).
+nginx_client_max_body_size: "{{ '26m' if _agra_test_phase == 'reconfigure' else '25m' }}"
+
 # Stand-ins for /etc/agra/passwords.yml.
 grafana_admin_password: molecule-admin-pw
 grafana_secret_key: molecule-secret-key-0123456789

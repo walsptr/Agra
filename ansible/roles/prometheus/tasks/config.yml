@@ -33,24 +33,21 @@
       --storage.tsdb.retention.size={{ prometheus_retention_size }}
       {%- endif %}
       --web.listen-address={{ prometheus_web_listen_address }}
-      {%- if prometheus_web_external_url | length > 0 %}
-      --web.external-url={{ prometheus_web_external_url }}
-      {%- elif _prometheus_subpath | bool %}
-      --web.external-url={{ _prometheus_subpath_url }}
+      {%- if _prometheus_external_url | length > 0 %}
+      --web.external-url={{ _prometheus_external_url }}
       --web.route-prefix=/
       {%- endif %}
       --web.enable-admin-api
       --web.enable-lifecycle
       --log.level={{ prometheus_log_level }}
   vars:
-    # expose_prometheus_via_nginx: nginx strips /prometheus/ (Grafana site), so
-    # Prometheus keeps serving at / (datasource, health checks, backup) and only
-    # its links/redirects carry the prefix. Host = what users type: the same
-    # order as Grafana's root_url.
-    _prometheus_subpath: "{{ (expose_prometheus_via_nginx | default(false) | bool) and (enable_nginx | default(true) | bool) }}"
-    _prometheus_subpath_url: >-
-      {{ 'https' if (enable_https | default(true) | bool) else 'http' }}://{{
-         (grafana_domain | default('') | trim) or (monitoring_vip | default('') | string | trim) or inventory_hostname }}/prometheus/
+    # Prometheus always serves at / — Grafana's datasource, the health checks,
+    # backups and nginx (which strips /prometheus/) all use it there. Only its
+    # links and redirects carry the external URL's path; without
+    # --web.route-prefix=/ it would move every route under that path.
+    # expose_prometheus_via_nginx: /prometheus/ under Grafana's public URL
+    # (vars/public_url.yml).
+    _prometheus_external_url: "{{ prometheus_web_external_url | trim or _agra_prometheus_subpath_url | trim }}"
   changed_when: false
   tags: ['prometheus', 'config']
 

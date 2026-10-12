@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install agra di control node (ARCHITECTURE.md §8.2).
+# Install agra di control node, sebagai operator user (bukan sudo).
 #
 #   ./install.sh                 # venv ~/.local/share/agra/venv + /etc/agra
 #   AGRA_VENV=/opt/agra ./install.sh

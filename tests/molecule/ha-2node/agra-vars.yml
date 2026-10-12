@@ -3,6 +3,13 @@
 
 monitoring_vip: 172.28.0.100
 
+# Non-default ports and host config dir (PR 18): redirects, Grafana's root_url,
+# Prometheus' external URL and the firewall follow the ports; nginx reads its
+# config at the container paths whatever the host dir is.
+nginx_http_port: 8080
+nginx_https_port: 8443
+nginx_config_dir: /opt/agra/nginx
+
 # Opt-in Prometheus under /prometheus/ of the Grafana site (admin API blocked).
 expose_prometheus_via_nginx: true
 

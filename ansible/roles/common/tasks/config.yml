@@ -125,31 +125,40 @@
   tags: ['common', 'firewall']
 
 # node_exporter is scraped by every [prometheus] node, and by nobody else: its
-# metrics are unauthenticated. A local Prometheus scrapes over loopback. Peer
-# address = keepalived_unicast_ip or ansible_host, as for VRRP/alerting gossip.
+# metrics are unauthenticated. A local Prometheus scrapes over loopback.
+# Prometheus scrapes each node at its ansible_host (prometheus file_sd), so the
+# scrape leaves the Prometheus node from whichever of its addresses routes
+# there: allow both its ansible_host and its keepalived_unicast_ip — allowing
+# only the unicast address blocked scrapes when the two networks differ.
 - name: Common - Prometheus nodes that scrape this node_exporter
   ansible.builtin.set_fact:
     _common_scrapers: >-
       {%- set out = [] -%}
       {%- for h in groups['prometheus'] | default([]) if h != inventory_hostname -%}
-      {%- set _ = out.append(hostvars[h]['keepalived_unicast_ip'] | default(hostvars[h]['ansible_host'] | default(h))) -%}
+      {%- set _ = out.append({'host': h, 'addrs': [hostvars[h]['keepalived_unicast_ip'] | default(''),
+                                                   hostvars[h]['ansible_host'] | default(h)]
+                                                  | map('string') | map('trim')
+                                                  | select('match', '^(\\d{1,3}\\.){3}\\d{1,3}$') | unique | list}) -%}
       {%- endfor -%}
-      {{ out | unique }}
+      {{ out }}
   when:
     - enable_node_exporter | default(true) | bool
     - enable_prometheus | default(true) | bool
     - inventory_hostname in groups['node_exporter'] | default([])
   tags: ['common', 'firewall', 'node_exporter']
 
-- name: Common - Scraper addresses are IPv4 (a firewall source cannot be a hostname)
+- name: Common - Every scraper has an IPv4 address (a firewall source cannot be a hostname)
   ansible.builtin.assert:
-    that: item is match('^(\d{1,3}\.){3}\d{1,3}$')
+    that: item.addrs | length > 0
     fail_msg: >-
-      {{ item }} (a [prometheus] node) is not an IPv4 address, so the node_exporter
-      firewall rule on {{ inventory_hostname }} cannot allow it. Set ansible_host,
-      or keepalived_unicast_ip in host_vars/<host>.yml, to the node's IPv4.
+      {{ item.host }} (a [prometheus] node) has no IPv4 address in ansible_host or
+      keepalived_unicast_ip, so the node_exporter firewall rule on {{ inventory_hostname }}
+      cannot allow it. Set ansible_host, or keepalived_unicast_ip in host_vars/<host>.yml,
+      to the node's IPv4.
     quiet: true
   loop: "{{ _common_scrapers | default([]) }}"
+  loop_control:
+    label: "{{ item.host }}"
   when:
     - _common_firewall_detected in ['ufw', 'firewalld']
     - common_firewall_tool != 'none'
@@ -159,7 +168,7 @@
   ansible.builtin.command:
     argv: [ufw, allow, proto, tcp, from, "{{ item }}", to, any, port, "{{ node_exporter_port | default(9100) | string }}",
            comment, agra node_exporter scrape]
-  loop: "{{ _common_scrapers | default([]) }}"
+  loop: "{{ _common_scrapers | default([]) | map(attribute='addrs') | flatten | unique }}"
   register: _common_ufw_scrape
   changed_when: _common_ufw_scrape.stdout is search('Rules? (added|updated)')
   when:
@@ -180,7 +189,7 @@
       exit 2
   args:
     executable: /bin/bash
-  loop: "{{ _common_scrapers | default([]) }}"
+  loop: "{{ _common_scrapers | default([]) | map(attribute='addrs') | flatten | unique }}"
   register: _common_firewalld_scrape
   changed_when: _common_firewalld_scrape.rc == 2
   failed_when: _common_firewalld_scrape.rc not in [0, 2]

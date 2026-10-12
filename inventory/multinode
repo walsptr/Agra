@@ -4,7 +4,7 @@
 # (ansible_host, ansible_connection, ansible_user, ansible_port, ansible_ssh_*)
 # ⛔ JANGAN SET VARS FITUR disini! (monitoring_vip, enable_ha_grafana, grafana_database, dll)
 #    Setting vars fitur disini = PRECHECK TIDAK AKAN MEMBACANYA → assertion FAIL!
-#    Lihat RULES.md §14 untuk penjelasan lengkap.
+#    globals.yml di-inject sebagai extra-vars (precedence tertinggi) dan selalu menang.
 
 [monitoring]
 mon1 ansible_host=10.0.0.11

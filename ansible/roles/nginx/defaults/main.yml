@@ -5,7 +5,9 @@ expose_prometheus_via_nginx: false
 
 nginx_container_name: agra-nginx
 nginx_image: nginx
-nginx_tag: "1.27-alpine"
+# Exact version, not the floating 1.27-alpine: the image must only change
+# through agra upgrade (recorded, rollback-able), never on a re-pull.
+nginx_tag: "1.27.5-alpine"
 
 nginx_config_dir: /etc/nginx
 nginx_sites_available_dir: "{{ nginx_config_dir }}/sites-available"
@@ -20,7 +22,7 @@ nginx_pid_path: /var/run/nginx.pid
 nginx_container_user: "nginx"
 
 # UID/GID numerik pemilik dir runtime (log, cache): user nginx di image
-# nginx:1.27-alpine = 101/101 (`docker run --rm nginx:1.27-alpine id nginx`).
+# nginx:1.27.5-alpine = 101/101 (`docker run --rm nginx:1.27.5-alpine id nginx`).
 # Override di globals.yml hanya untuk image custom dengan UID berbeda.
 nginx_uid: 101
 nginx_gid: 101
@@ -73,3 +75,9 @@ nginx_http_port: 80
 nginx_https_port: 443
 # Loopback-only liveness endpoint (conf.d/agra-healthz.conf) for the keepalived health check.
 nginx_health_port: 18080
+# Also listen on [::]. Default: only when the host has an IPv6 address — a
+# kernel booted with ipv6.disable=1 rejects [::] listens and nginx would not start.
+nginx_listen_ipv6: "{{ ansible_facts['all_ipv6_addresses'] | default([]) | length > 0 }}"
+# Nameservers nginx uses for OCSP stapling (space separated). "" = the host's
+# /etc/resolv.conf nameservers.
+nginx_resolver: ""

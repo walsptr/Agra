@@ -93,7 +93,95 @@ dipasang oleh `agra check`.
 | `agra tls` | `regenerate` cert self-signed + distribusi ke nginx / `info` | `agra tls regenerate -i inventory/multinode -y` |
 | `agra certificates` | `generate` / `info` cert self-signed di control node | `agra certificates info` |
 
-Detail opsi: [docs/commands.md](./docs/commands.md). Dokumentasi lengkap: [docs/index.md](./docs/index.md).
+Opsi lengkap setiap command: `--help`, mis. `agra deploy --help`. `deploy`, `upgrade`,
+`rollback`, `destroy`, `backup create` dan `restore` menerima opsi Ansible
+umum (`-l/--limit`, `-t/--tags`, `-e`, `-v`); `-e` menimpa `globals.yml`
+untuk satu run saja.
+
+## Topologi
+
+Ditentukan oleh grup di inventory, bukan oleh var:
+
+| Grup | Isi |
+|---|---|
+| `[monitoring]` | Node yang menjalankan nginx (+ keepalived jika > 1 host). Host pertama = master: dibackup, di-upgrade terakhir, priority VRRP tertinggi |
+| `[grafana]`, `[prometheus]` | Biasanya `[monitoring:children]` |
+| `[node_exporter]` | Semua host yang dimonitor, termasuk node monitoring |
+
+- **1 host di `[monitoring]`** — all-in-one, tanpa VIP.
+- **2+ host** — keepalived otomatis aktif; `monitoring_vip` wajib. VIP pindah
+  ke node lain jika Grafana, Prometheus, atau nginx di node pemegang VIP tidak
+  sehat. Grafana di tiap node memakai SQLite sendiri, kecuali
+  `enable_ha_grafana: true` (satu database MySQL/PostgreSQL eksternal untuk
+  semua node). Setiap Prometheus men-scrape target yang sama secara independen.
+
+## Konfigurasi
+
+| File | Isi |
+|---|---|
+| `/etc/agra/globals.yml` | Semua var fitur & versi. Di-inject CLI sebagai extra-vars ke setiap playbook, jadi selalu menang atas inventory |
+| `/etc/agra/passwords.yml` | Secret saja (0600). `agra genpwd` mengisi field kosong; kredensial S3 diisi manual |
+| `host_vars/<host>.yml` (di samping inventory) | Hanya `monitoring_vip_interface` dan `keepalived_unicast_ip` |
+| `/etc/agra/config/<service>/` | Override template (opsional), lihat di bawah |
+
+Var yang paling sering diubah (default = nilai di `etc/agra/globals.yml`):
+
+| Var | Default | Keterangan |
+|---|---|---|
+| `enable_grafana` / `enable_prometheus` / `enable_node_exporter` / `enable_nginx` | `true` | Matikan komponen yang tidak dipakai |
+| `enable_https` | `true` | `false` = Grafana di HTTP (`nginx_http_port`) |
+| `nginx_http_port` / `nginx_https_port` | `80` / `443` | |
+| `<service>_tag` | lihat `globals.yml` | Versi image; ganti lewat `agra upgrade` (`--grafana-tag`, `--prometheus-tag`, `--node-exporter-tag`, atau `-e <service>_tag=...`) |
+| `prometheus_retention_time` / `prometheus_retention_size` | `15d` / `""` | |
+| `prometheus_domain` / `expose_prometheus_via_nginx` | `""` / `false` | Prometheus (tanpa auth) hanya keluar lewat nginx jika salah satunya diset |
+| `node_exporter_port` | `9100` | Firewall hanya membukanya untuk node `[prometheus]` |
+| `tls_cert_path` / `tls_key_path` | `/etc/agra/ssl/agra.{crt,key}` | Cert di control node; ganti dengan cert CA-signed jika ada |
+| `backup_include_prometheus_tsdb` | `false` | Ikutkan snapshot TSDB di backup |
+| `backup_retention_count` | `7` | |
+| `backup_s3_enabled` | `false` | Upload backup ke S3/MinIO (`backup_s3_bucket`, `backup_s3_endpoint`, ...) |
+| `common_firewall_tool` | `auto` | `ufw` \| `firewalld` \| `none` |
+
+Komentar di `globals.yml` menjelaskan var lainnya. `agra check` memberi
+warning untuk secret di `globals.yml`, var per-host di `globals.yml`, dan var
+yang sudah tidak dipakai.
+
+**Override template** — file di `/etc/agra/config/<service>/` menggantikan
+seluruh template role dengan nama yang sama (tidak di-merge), mis.
+`/etc/agra/config/prometheus/prometheus.yml.j2` atau
+`/etc/agra/config/grafana/dashboards/*.json`. Mulai dari salinan
+`ansible/roles/<service>/templates/`, lalu `agra deploy`.
+
+## Operasi
+
+- **Upgrade**: `agra upgrade --grafana-tag <versi>` (atau tag lain, atau ubah
+  `globals.yml`). agra membuat backup dulu, lalu meng-upgrade satu host per
+  kali dengan health gate: host yang hanya node_exporter, standby, master
+  terakhir. Gagal di satu host = berhenti; versi current/previous dicatat di
+  `/etc/agra/.installed_versions.yml` untuk `agra rollback`.
+- **Backup**: Grafana (`grafana.db` lewat `sqlite3 .backup`, config,
+  provisioning) dan opsional snapshot TSDB Prometheus dari master, disalin ke
+  `/etc/agra/backups/` di control node dengan checksum. Database Grafana
+  eksternal (MySQL/PostgreSQL) dibackup di sisi database, bukan oleh agra.
+- **Restore**: dari salinan di control node, setelah verifikasi checksum dan
+  safety backup kondisi saat ini.
+- **Destroy**: menghapus container; data dan config tetap ada kecuali
+  `--purge-data` / `--purge-config` / `--purge-all`.
+
+## Development
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev,ansible]"
+pytest                                   # unit, tanpa host
+ruff check agra tests && yamllint . && ansible-lint
+ansible-galaxy collection install -r requirements/collections.yml
+cd tests && molecule test -s default     # butuh Docker
+```
+
+Skenario molecule: `default` (Ubuntu 22.04), `rocky9`, `ha-2node`, `upgrade`,
+`restore`, `destroy`, `plain-http`, `minimal`. CI menjalankan semuanya.
+
+Perubahan per versi: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 

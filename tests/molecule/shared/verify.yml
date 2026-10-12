@@ -131,7 +131,10 @@
   vars:
     _nginx_on: "{{ enable_nginx | default(true) | bool }}"
     _https_on: "{{ _nginx_on | bool and enable_https | default(true) | bool }}"
-    _base: "{{ 'https' if _https_on | bool else 'http' }}://127.0.0.1"
+    _port: "{{ nginx_https_port | default(443) if _https_on | bool else nginx_http_port | default(80) }}"
+    _base: >-
+      {{ 'https' if _https_on | bool else 'http' }}://127.0.0.1{{
+         '' if (_port | int) in [443, 80] else ':' ~ _port }}
   tasks:
     - name: List TCP listeners
       ansible.builtin.command:
@@ -160,13 +163,13 @@
       delay: 5
       when: _nginx_on | bool and enable_grafana | default(true) | bool
 
-    - name: Plain HTTP redirects to HTTPS
+    - name: Plain HTTP redirects to HTTPS, on nginx_https_port
       ansible.builtin.uri:
-        url: http://127.0.0.1/login
+        url: "http://127.0.0.1:{{ nginx_http_port | default(80) }}/login"
         follow_redirects: none
         status_code: 301
       register: _redirect
-      failed_when: _redirect.status != 301 or not _redirect.location | default('') is match('https://')
+      failed_when: _redirect.status != 301 or _redirect.location | default('') != _base | trim ~ '/login'
       when: _https_on | bool
 
     - name: Prometheus is not published unless asked for
@@ -178,6 +181,64 @@
       register: _prom_pub
       failed_when: "'\"status\":\"success\"' in _prom_pub.content | default('')"
       when: _nginx_on | bool and not expose_prometheus_via_nginx | default(false) | bool
+
+    # nginx.conf is mounted as a single file: a re-rendered file only reaches
+    # nginx after a restart (PR 17). What nginx reads must be what agra rendered.
+    - name: The nginx.conf agra-nginx reads
+      ansible.builtin.command:
+        argv: [docker, exec, agra-nginx, sha256sum, /etc/nginx/nginx.conf]
+      register: _conf_live
+      changed_when: false
+      when: _nginx_on | bool
+
+    - name: The nginx.conf rendered on the host
+      ansible.builtin.stat:
+        path: "{{ nginx_config_dir | default('/etc/nginx') }}/nginx.conf"
+        checksum_algorithm: sha256
+      register: _conf_host
+      when: _nginx_on | bool
+
+    - name: Agra-nginx runs the nginx.conf agra rendered
+      ansible.builtin.assert:
+        that:
+          - _conf_live.stdout.split() | first == _conf_host.stat.checksum
+        fail_msg: "{{ inventory_hostname }}: agra-nginx reads an old nginx.conf"
+      when: _nginx_on | bool
+
+    - name: Effective client_max_body_size
+      ansible.builtin.shell:
+        cmd: set -o pipefail; docker exec agra-nginx nginx -T 2>/dev/null | grep -E '^\s*client_max_body_size '
+        executable: /bin/bash
+      register: _body_size
+      changed_when: false
+      when: _nginx_on | bool
+
+    - name: Nginx applies nginx_client_max_body_size
+      ansible.builtin.assert:
+        that:
+          - _body_size.stdout | trim == 'client_max_body_size ' ~ (nginx_client_max_body_size | default('25m')) ~ ';'
+        fail_msg: "{{ inventory_hostname }}: {{ _body_size.stdout | trim }}"
+      when: _nginx_on | bool
+
+    - name: Grafana login through HTTPS sets a Secure session cookie
+      ansible.builtin.uri:
+        url: "{{ _base }}/login"
+        method: POST
+        body_format: json
+        body:
+          user: "{{ grafana_admin_user | default('admin') }}"
+          password: "{{ grafana_admin_password }}"
+        validate_certs: false
+      register: _login
+      no_log: true
+      when: _https_on | bool and enable_grafana | default(true) | bool
+
+    - name: Session cookie is Secure
+      ansible.builtin.assert:
+        that:
+          - _login.set_cookie | default('') is search('grafana_session=[^,]*;\s*Secure')
+        fail_msg: "{{ inventory_hostname }}: Set-Cookie={{ _login.set_cookie | default('') | regex_replace('grafana_session=[^;]+', 'grafana_session=…') }}"
+      when: _https_on | bool and enable_grafana | default(true) | bool
 
 - name: Verify — deploy recorded installed versions on the control node
   hosts: localhost

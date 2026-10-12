@@ -1,0 +1,29 @@
+---
+# Where users reach Grafana and a published Prometheus — one definition for
+# Grafana's root_url, Prometheus' --web.external-url and the deploy summary
+# (DESIGN §8). Host: grafana_domain, else monitoring_vip, else the first
+# [monitoring] node's ansible_host (never inventory_hostname, which is only an
+# inventory alias). Through nginx on its listen port, or Grafana itself without
+# nginx. The port is left out only when it is the scheme's default.
+_agra_public_nginx: "{{ enable_nginx | default(true) | bool }}"
+_agra_public_scheme: "{{ 'https' if _agra_public_nginx | bool and enable_https | default(true) | bool else 'http' }}"
+_agra_public_port: >-
+  {{ (nginx_https_port | default(443) if _agra_public_scheme == 'https' else nginx_http_port | default(80))
+     if _agra_public_nginx | bool else grafana_port | default(3000) }}
+_agra_public_port_suffix: >-
+  {{ '' if (_agra_public_scheme ~ ':' ~ (_agra_public_port | int)) in ['https:443', 'http:80']
+     else ':' ~ (_agra_public_port | int) }}
+_agra_public_host: >-
+  {{ (grafana_domain | default('') | string | trim) or (monitoring_vip | default('') | string | trim)
+     or (hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0])) }}
+_agra_public_url: "{{ _agra_public_scheme }}://{{ _agra_public_host | trim }}{{ _agra_public_port_suffix | trim }}/"
+# Prometheus through nginx: /prometheus/ on Grafana's site, and/or its own
+# domain (preferred for display). "" = not published.
+_agra_prometheus_subpath_url: >-
+  {{ (_agra_public_url | trim) ~ 'prometheus/'
+     if _agra_public_nginx | bool and expose_prometheus_via_nginx | default(false) | bool else '' }}
+_agra_prometheus_public_url: >-
+  {{ (_agra_public_scheme ~ '://' ~ (prometheus_domain | trim) ~ (_agra_public_port_suffix | trim) ~ '/')
+     if _agra_public_nginx | bool and enable_prometheus | default(true) | bool
+        and prometheus_domain | default('') | trim | length > 0
+     else _agra_prometheus_subpath_url | trim }}

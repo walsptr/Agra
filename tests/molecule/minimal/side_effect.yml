@@ -1,0 +1,4 @@
+---
+# `agra backup create` without --include-prometheus-tsdb.
+- name: Backup
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/backup.yml

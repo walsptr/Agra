@@ -7,6 +7,8 @@
 # Urutan: node_exporter-only hosts → standby monitoring → master
 # (groups['monitoring'][0]) terakhir. serial: 1 + max_fail_percentage: 0 +
 # health gate per host: satu host gagal/tidak sehat = upgrade berhenti.
+# Health gate dan pencatatan versi bertag `always`: -t/--tags user tidak bisa
+# melewatinya.
 
 - name: 'AGRA ROLLING — Phase 0 (node_exporter-only hosts, di luar [monitoring])'
   hosts: "{{ groups['node_exporter'] | default([]) | difference(groups['monitoring'] | default([])) }}"
@@ -23,6 +25,7 @@
   post_tasks:
     - name: Health gate
       ansible.builtin.import_tasks: tasks/health_gate.yml
+      tags: ['always']
 
 - name: 'AGRA ROLLING — Phase 1 (STANDBY nodes, groups monitoring[1:])'
   hosts: "{{ groups['monitoring'][1:] | default([]) }}"
@@ -33,6 +36,7 @@
   tags: ['upgrade', 'rollback']
   vars_files:
     - vars/lifecycle.yml
+    - vars/public_url.yml
   roles: &monitoring_roles
     - role: common
     - role: node_exporter
@@ -48,6 +52,7 @@
   post_tasks:
     - name: Health gate
       ansible.builtin.import_tasks: tasks/health_gate.yml
+      tags: ['always']
 
 - name: 'AGRA ROLLING — Phase 2 (MASTER terakhir, groups monitoring[0])'
   hosts: "{{ (groups['monitoring'] | default([]))[:1] }}"
@@ -58,10 +63,12 @@
   tags: ['upgrade', 'rollback']
   vars_files:
     - vars/lifecycle.yml
+    - vars/public_url.yml
   roles: *monitoring_roles
   post_tasks:
     - name: Health gate
       ansible.builtin.import_tasks: tasks/health_gate.yml
+      tags: ['always']
 
 - name: 'AGRA ROLLING — Catat versi + summary'
   hosts: localhost
@@ -74,8 +81,11 @@
   vars:
     agra_record_action: "{{ agra_lifecycle_action | default('upgrade') }}"
   tasks:
+    # always: `agra upgrade -t grafana` still records, or `previous` goes stale
+    # and the next `agra rollback` picks the wrong target.
     - name: Record installed versions
       ansible.builtin.import_tasks: tasks/record_installed_versions.yml
+      tags: ['always']
 
     - name: 'Upgrade — Selesai'
       ansible.builtin.debug:

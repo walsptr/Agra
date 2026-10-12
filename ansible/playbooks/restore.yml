@@ -33,7 +33,7 @@
       ansible.builtin.assert:
         that: restore_confirm | default(false) | bool
         fail_msg: >-
-          Restore diblokir (RULES §8): restore menimpa grafana.db dan config.
+          Restore diblokir: restore menimpa grafana.db dan config.
           Jalankan via CLI dengan --yes-i-really-mean-it.
         quiet: true
 
@@ -42,6 +42,8 @@
 # grafana.db yang hilang/rusak (alasan restore) tidak memblokir restore.
 - name: 'AGRA RESTORE 2/3 — Safety backup sebelum restore'
   ansible.builtin.import_playbook: backup.yml
+  # `agra restore -t restore` must still back up first.
+  tags: ['restore']
   vars:
     backup_apply_retention: false
     backup_is_safety_backup: true
@@ -51,6 +53,8 @@
   gather_facts: false
   become: true
   tags: ['restore']
+  vars_files:
+    - vars/service_paths.yml
   vars:
     _rs_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
     _rs_local_tarball: "{{ restore_local_tarball | default('') }}"
@@ -68,7 +72,7 @@
     _rs_grafana_uid: "{{ grafana_uid | default(472) }}"
     _rs_grafana_gid: "{{ grafana_gid | default(0) }}"
     _rs_grafana_container: "{{ grafana_container_name | default('agra-grafana') }}"
-    _rs_grafana_db: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+    _rs_grafana_db: "{{ _svc_grafana_db }}"
     _rs_manifest_data: >-
       {{ lookup('ansible.builtin.file', _rs_local_manifest) | from_yaml
          if _rs_local_manifest | length > 0
@@ -94,6 +98,16 @@
     - name: 'Restore — Gather facts (master)'
       ansible.builtin.setup:
         gather_subset: ['!all']
+      tags: ['always']
+
+    - name: 'Restore — Safety backup sudah dibuat di run ini'
+      ansible.builtin.assert:
+        that: _bk_completed_name is defined
+        fail_msg: >-
+          Safety backup sebelum restore tidak berjalan (--skip-tags backup / -t?), jadi
+          restore tidak menimpa apa pun. Jalankan `agra restore` tanpa
+          --skip-tags/-t.
+        quiet: true
       tags: ['always']
 
   tasks:
@@ -180,7 +194,7 @@
                 - name: 'Restore Grafana — grafana.ini'
                   ansible.builtin.copy:
                     src: "{{ _rs_src }}/grafana.ini"
-                    dest: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+                    dest: "{{ _svc_grafana_config_dir }}/grafana.ini"
                     remote_src: true
                     owner: "{{ _rs_grafana_uid }}"
                     group: "{{ _rs_grafana_gid }}"
@@ -190,7 +204,7 @@
                 - name: 'Restore Grafana — provisioning'
                   ansible.builtin.copy:
                     src: "{{ _rs_src }}/provisioning/"
-                    dest: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}/"
+                    dest: "{{ _svc_grafana_provisioning_dir }}/"
                     remote_src: true
                     owner: "{{ _rs_grafana_uid }}"
                     group: "{{ _rs_grafana_gid }}"
@@ -236,7 +250,7 @@
         - name: 'Restore Prometheus — Snapshot ke data dir (import manual)'
           ansible.builtin.copy:
             src: "{{ _rs_tmp.path }}/{{ _rs_name }}/prometheus/tsdb-snapshot/"
-            dest: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ _rs_name }}-restored/"
+            dest: "{{ _svc_prometheus_data_dir }}/snapshots/{{ _rs_name }}-restored/"
             remote_src: true
             owner: "{{ prometheus_uid | default(65534) }}"
             group: "{{ prometheus_gid | default(0) }}"
@@ -256,6 +270,6 @@
         msg:
           - "✅ AGRA RESTORE SELESAI dari {{ _rs_tarball }}"
           - "Safety backup kondisi sebelum restore dibuat di {{ _rs_root_dir }} (lihat `agra backup list`)."
-          - "{{ 'Prometheus snapshot disalin ke ' ~ (prometheus_data_dir | default('/var/lib/agra/prometheus')) ~ '/snapshots/' ~ _rs_name ~ '-restored (import manual via promtool).' if _rs_content.results[3].stat.exists else 'Backup tanpa Prometheus TSDB snapshot.' }}"
+          - "{{ 'Prometheus snapshot disalin ke ' ~ _svc_prometheus_data_dir ~ '/snapshots/' ~ _rs_name ~ '-restored (import manual via promtool).' if _rs_content.results[3].stat.exists else 'Backup tanpa Prometheus TSDB snapshot.' }}"
           - "grafana.ini hasil restore memuat secret dari saat backup — jalankan `agra deploy --tags grafana` untuk menyelaraskan dengan /etc/agra/passwords.yml."
           - "{{ '' if (grafana_database | default('sqlite')) == 'sqlite' else '⚠️ grafana_database=' ~ grafana_database ~ ': isi database eksternal tidak di-restore oleh agra (restore dari backup database Anda).' }}"

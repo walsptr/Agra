@@ -1,6 +1,10 @@
 """Docs describe the agra that exists (PR 11): every `agra ...` command in the
 docs parses with the real CLI, every var they name has a SCHEMA.md row and is
-not removed, and relative links resolve."""
+not removed, and relative links resolve.
+
+The published docs (README, CHANGELOG, role READMEs) are checked in every
+checkout; docs/, contexts/ and AGENTS.md only where they exist (not published
+yet, PR 12)."""
 from __future__ import annotations
 
 import contextlib
@@ -14,22 +18,22 @@ import pytest
 from agra.cli import build_parser
 from agra.constants import PROJECT_ROOT as REPO_ROOT, REMOVED_KEYS
 
-# docs/ and contexts/ are not published (PR 12); a clone without them has nothing to check.
-if not (REPO_ROOT / "contexts" / "SCHEMA.md").exists() or not (REPO_ROOT / "docs").is_dir():
-    pytest.skip("docs/ and contexts/ are not in this checkout", allow_module_level=True)
-
-USER_DOCS = sorted(
-    [REPO_ROOT / "README.md"]
-    + list((REPO_ROOT / "docs").glob("*.md"))
+PUBLISHED_DOCS = sorted(
+    [REPO_ROOT / "README.md", REPO_ROOT / "CHANGELOG.md"]
     + list((REPO_ROOT / "ansible" / "roles").glob("*/README.md"))
 )
-ALL_DOCS = USER_DOCS + [REPO_ROOT / "AGENTS.md"] + sorted((REPO_ROOT / "contexts").glob("*.md"))
+HAS_LOCAL_DOCS = (REPO_ROOT / "docs").is_dir()
+USER_DOCS = sorted(PUBLISHED_DOCS + list((REPO_ROOT / "docs").glob("*.md")))
+ALL_DOCS = USER_DOCS + [p for p in [REPO_ROOT / "AGENTS.md"] if p.exists()] + sorted((REPO_ROOT / "contexts").glob("*.md"))
 
-SCHEMA_ROWS = set(re.findall(r"^\|\s*`([a-z_][a-z0-9_]*)`", (REPO_ROOT / "contexts" / "SCHEMA.md").read_text(), re.M))
+SCHEMA_PATH = REPO_ROOT / "contexts" / "SCHEMA.md"
+needs_schema = pytest.mark.skipif(not SCHEMA_PATH.exists(), reason="contexts/SCHEMA.md is not in this checkout")
+SCHEMA_ROWS = set(re.findall(r"^\|\s*`([a-z_][a-z0-9_]*)`", SCHEMA_PATH.read_text(), re.M)) if SCHEMA_PATH.exists() else set()
 VAR_PREFIX = re.compile(
     r"^(?:enable|grafana|prometheus|node_exporter|nginx|keepalived|tls|backup|common|monitoring|expose)_[a-z0-9_]*[a-z0-9]$"
 )
-FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.M | re.S)
+# Fences may be indented (inside a numbered list).
+FENCE = re.compile(r"^[ \t]*```[^\n]*\n(.*?)^[ \t]*```", re.M | re.S)
 INLINE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 # Things agra no longer has: the site playbook, native mode, group_vars
@@ -77,8 +81,10 @@ def test_documented_command_parses(doc, command):
 
 
 def test_command_extraction_finds_commands():
-    assert len(CASES) > 50
-    assert {c for _, c in CASES} >= {"agra deploy -i inventory/all-in-one", "agra backup list --json"}
+    assert {c for d, c in CASES if d == "README.md"} >= {"agra deploy -i inventory/all-in-one", "agra check -i inventory/all-in-one"}
+    if HAS_LOCAL_DOCS:
+        assert len(CASES) > 50
+        assert {c for _, c in CASES} >= {"agra backup list --json"}
 
 
 # docs/add-new-role.md builds a hypothetical role; its vars are not agra's.
@@ -95,6 +101,7 @@ def _var_mentions(text: str):
 VAR_CASES = sorted({(_rel(doc), var) for doc in USER_DOCS for var in _var_mentions(doc.read_text())})
 
 
+@needs_schema
 @pytest.mark.parametrize("doc,var", VAR_CASES)
 def test_documented_var_exists(doc, var):
     assert var not in REMOVED_KEYS, f"{doc} documents removed var {var}: {REMOVED_KEYS[var]}"
@@ -102,7 +109,9 @@ def test_documented_var_exists(doc, var):
 
 
 def test_var_extraction_finds_vars():
-    assert {v for _, v in VAR_CASES} >= {"grafana_tag", "monitoring_vip", "backup_control_node_dir"}
+    assert {v for d, v in VAR_CASES if d == "README.md"} >= {"monitoring_vip", "enable_https", "backup_retention_count"}
+    if HAS_LOCAL_DOCS:
+        assert {v for _, v in VAR_CASES} >= {"grafana_tag", "backup_control_node_dir"}
 
 
 @pytest.mark.parametrize("doc", USER_DOCS, ids=_rel)

@@ -23,6 +23,8 @@
           `agra check` sebelum deploy. Jika menjalankan ansible-playbook
           langsung, tambahkan -e @/etc/agra/globals.yml -e @/etc/agra/passwords.yml.
         quiet: true
+      # Same condition as precheck: without Grafana there is no Grafana secret.
+      when: enable_grafana | default(true) | bool
 
 - name: 'AGRA DEPLOY STEP 1 — Apply common role ke ALL hosts'
   hosts: all
@@ -45,6 +47,8 @@
   gather_facts: true
   become: true
   tags: ['deploy', 'prometheus', 'config']
+  vars_files:
+    - vars/public_url.yml
   roles:
     - role: prometheus
 
@@ -58,6 +62,8 @@
   serial: "{{ 1 if (enable_ha_grafana | default(false) | bool) else '100%' }}"
   max_fail_percentage: 0
   tags: ['deploy', 'grafana', 'config']
+  vars_files:
+    - vars/public_url.yml
   roles:
     - role: grafana
 
@@ -94,24 +100,14 @@
   tags: ['deploy']
   vars_files:
     - vars/lifecycle.yml
+    - vars/public_url.yml
   vars:
     agra_record_action: deploy
-    # Same rules as Grafana's root_url (roles/grafana) and the nginx sites.
-    _gf_host: >-
-      {{ (grafana_domain | default('') | trim) or (monitoring_vip | default('') | string | trim)
-         or hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}
-    _behind_nginx: "{{ enable_nginx | default(true) | bool }}"
-    access_url: >-
-      {{ ('https' if _behind_nginx | bool and enable_https | default(true) | bool else 'http') ~ '://' ~ _gf_host
-         ~ ('' if _behind_nginx | bool else ':' ~ grafana_port | default(3000) | string) ~ '/' }}
+    access_url: "{{ _agra_public_url | trim }}"
+    _grafana_on: "{{ enable_grafana | default(true) | bool }}"
     _prometheus_url: >-
-      {%- if _behind_nginx | bool and prometheus_domain | default('') | trim | length > 0 -%}
-      {{ 'https' if enable_https | default(true) | bool else 'http' }}://{{ prometheus_domain | trim }}/
-      {%- elif _behind_nginx | bool and expose_prometheus_via_nginx | default(false) | bool -%}
-      {{ access_url }}prometheus/
-      {%- else -%}
-      not published (127.0.0.1:{{ prometheus_port | default(9090) }} on each [prometheus] node)
-      {%- endif -%}
+      {{ _agra_prometheus_public_url | trim
+         or 'not published (127.0.0.1:' ~ (prometheus_port | default(9090)) ~ ' on each [prometheus] node)' }}
   tasks:
     - name: Record installed versions
       ansible.builtin.import_tasks: tasks/record_installed_versions.yml
@@ -120,6 +116,7 @@
       ansible.builtin.debug:
         msg:
           - "✅ AGRA DEPLOY SELESAI"
-          - "Grafana URL: {{ access_url | trim }}"
-          - "Admin user: {{ grafana_admin_user | default('admin') }} — password: field grafana_admin_password di /etc/agra/passwords.yml"
+          - "Grafana URL: {{ access_url | trim if _grafana_on | bool else 'tidak di-deploy (enable_grafana: false)' }}"
+          - "{{ 'Admin user: ' ~ grafana_admin_user | default('admin') ~ ' — password: field grafana_admin_password di /etc/agra/passwords.yml'
+               if _grafana_on | bool else '' }}"
           - "Prometheus: {{ _prometheus_url | trim }}"

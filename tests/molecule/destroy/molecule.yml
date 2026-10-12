@@ -1,0 +1,95 @@
+---
+# `agra destroy`: one monitoring node plus an app server that is only in
+# [node_exporter] and has its own /etc/nginx and /etc/keepalived (prepare.yml).
+# side_effect: destroy without purge (containers gone, data and config kept),
+# then --purge-all. verify: agra's data/config gone on mon1, the app server
+# keeps its own nginx/keepalived config. Run from tests/:
+#   cd tests && molecule test -s destroy
+driver:
+  name: docker
+
+platforms:
+  - &node
+    name: agra-mon1
+    image: geerlingguy/docker-ubuntu2204-ansible@sha256:66cb5cb99bd08c40ec7c8d2b1c31efc3359a3e950c05427d1d4bed7b2f33781f
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      # Nested Docker cannot run overlayfs on top of the container overlay.
+      - /var/lib/docker
+      - /var/lib/containerd
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    # host: systemd in the node exits at boot (255) with a private cgroupns
+    # on Docker 28 (GitHub ubuntu-24.04). Rootless podman is the opposite:
+    # nested Docker cannot create cgroups with host, so run it with
+    # MOLECULE_CGROUPNS=private.
+    cgroupns_mode: ${MOLECULE_CGROUPNS:-host}
+    docker_networks:
+      - name: agra-destroy-net
+        ipam_config:
+          - subnet: 172.29.0.0/24
+            gateway: 172.29.0.1
+    networks:
+      - name: agra-destroy-net
+        ipv4_address: 172.29.0.11
+  - <<: *node
+    name: agra-app1
+    networks:
+      - name: agra-destroy-net
+        ipv4_address: 172.29.0.21
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare.yml
+    converge: ../shared/converge.yml
+    side_effect: side_effect.yml
+    verify: verify.yml
+  # Two distinct keys because molecule turns this dict into flags and cannot
+  # repeat one; both become ansible-playbook extra-vars, in this order.
+  options:
+    e: "@${MOLECULE_SCENARIO_DIRECTORY}/../../../etc/agra/globals.yml"
+    extra-vars: "@${MOLECULE_SCENARIO_DIRECTORY}/../default/agra-vars.yml"
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_SCENARIO_DIRECTORY}/../../../ansible/roles"
+  inventory:
+    hosts:
+      all:
+        vars:
+          ansible_python_interpreter: /usr/bin/python3
+        hosts:
+          agra-mon1:
+            ansible_host: 172.29.0.11
+            ansible_docker_host: agra-mon1
+          agra-app1:
+            ansible_host: 172.29.0.21
+            ansible_docker_host: agra-app1
+        children:
+          monitoring:
+            hosts:
+              agra-mon1:
+          grafana:
+            children:
+              monitoring:
+          prometheus:
+            children:
+              monitoring:
+          node_exporter:
+            hosts:
+              agra-mon1:
+              agra-app1:
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - side_effect  # destroy, then destroy --purge-all
+    - verify
+    - destroy

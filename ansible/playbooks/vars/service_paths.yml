@@ -1,0 +1,14 @@
+---
+# Path service di managed host untuk playbook yang tidak menjalankan role
+# (backup, restore, destroy). Role defaults tidak terlihat di sana, jadi
+# turunannya ditulis ulang di sini SEKALI, persis seperti defaults role:
+#   grafana_sqlite_path      = grafana_data_dir/grafana.db
+#   grafana_provisioning_dir = grafana_config_dir/provisioning
+# Override di globals.yml (extra-vars) tetap menang. Nama privat (_svc_*):
+# tidak mendefinisikan ulang var publik (template rekursif, RULES §16.5).
+_svc_grafana_data_dir: "{{ grafana_data_dir | default('/var/lib/agra/grafana') }}"
+_svc_grafana_config_dir: "{{ grafana_config_dir | default('/etc/grafana') }}"
+_svc_grafana_db: "{{ grafana_sqlite_path | default(_svc_grafana_data_dir ~ '/grafana.db') }}"
+_svc_grafana_provisioning_dir: "{{ grafana_provisioning_dir | default(_svc_grafana_config_dir ~ '/provisioning') }}"
+_svc_prometheus_data_dir: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}"
+_svc_prometheus_config_dir: "{{ prometheus_config_dir | default('/etc/prometheus') }}"

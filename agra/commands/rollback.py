@@ -17,9 +17,11 @@ from typing import Dict, List
 from agra.constants import INSTALLED_VERSIONS_FILE
 from agra.utils.colors import warn, info, error, section, BOLD, RESET, RED, YELLOW
 from agra.utils.cli_args import add_inventory_argument
+from agra.commands.check import require_explicit_inventory, run_validation
 from agra.utils.run_playbook import check_extra_vars_conflicts, run_playbook
 from agra.utils.versions import (
     SERVICE_TAG_VARS, load_installed_versions, entry_versions, globals_versions, major_version,
+    partial_rollout_note,
 )
 
 
@@ -48,7 +50,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action=argparse.BooleanOptionalAction,
         default=True,
         dest="precheck",
-        help="Jalankan precheck SEBELUM rollback (default: aktif). --no-precheck TIDAK DISARANKAN.",
+        help="Jalankan precheck validasi (tanpa update OS/Docker) SEBELUM rollback (default: aktif). --no-precheck TIDAK DISARANKAN.",
     )
     p.add_argument("--yes", action="store_true", help="Skip konfirmasi (CI; atau AGRA_NON_INTERACTIVE=1).")
     p.add_argument("-v", "--verbose", action="count", default=0)
@@ -82,6 +84,9 @@ def run_rollback(args: argparse.Namespace) -> int:
     # Rollback hanya mengubah versi yang tampil di rencana: -e <service>_tag
     # akan mengubah service lain tanpa terlihat/terkonfirmasi.
     check_extra_vars_conflicts(args.extra_vars, SERVICE_TAG_VARS.values())
+    if getattr(args, "precheck", True):
+        # Sebelum rencana & konfirmasi: jangan minta ketik ROLLBACK lalu gagal.
+        require_explicit_inventory(args, "agra rollback")
     try:
         recorded = load_installed_versions()
     except PermissionError:
@@ -130,8 +135,7 @@ def run_rollback(args: argparse.Namespace) -> int:
             return 1
 
     if getattr(args, "precheck", True):
-        from agra.commands.check import run_check
-        rc = run_check(args)
+        rc = run_validation(args, "agra rollback")
         if rc != 0:
             error(f"Precheck FAILED (rc={rc}). Rollback dibatalkan.")
             return rc
@@ -140,7 +144,10 @@ def run_rollback(args: argparse.Namespace) -> int:
     if isinstance(user_evar, str):
         user_evar = [user_evar]
 
-    return run_playbook(
+    note = partial_rollout_note(args.limit)
+    if note:
+        warn(note)
+    rc = run_playbook(
         "rollback",
         inventory=args.inventory,
         tags=_split_csv(args.tags) or None,
@@ -152,3 +159,6 @@ def run_rollback(args: argparse.Namespace) -> int:
         description="Rollback rolling ke versi sebelumnya",
         abort_on_nonzero=False,
     )
+    if note and rc == 0:
+        warn(note)
+    return rc

@@ -13,6 +13,8 @@ grafana_tag: "{{ '11.2.1' if _agra_test_new | bool else '11.2.0' }}"
 prometheus_tag: "{{ 'v2.53.1' if _agra_test_new | bool else 'v2.53.0' }}"
 # A changed `docker run` argument must recreate the container (agra.spec label).
 prometheus_retention_time: "{{ '7d' if _agra_test_new | bool else '15d' }}"
+# nginx.conf is a single-file mount: a change must still reach nginx (PR 17).
+nginx_client_max_body_size: "{{ '26m' if _agra_test_new | bool else '25m' }}"
 
 # rollback.yml only sets this before importing upgrade_monitoring.yml; the test
 # imports upgrade_monitoring.yml directly, so it provides the value itself.
@@ -25,7 +27,9 @@ enable_node_exporter: false
 
 
 # Stand-ins for /etc/agra/passwords.yml.
-grafana_admin_password: molecule-admin-pw
+# Changed for the upgrade: grafana.db keeps the old one, so the role resets it
+# through stdin (never argv, PR 17); rollback resets it back.
+grafana_admin_password: "{{ 'molecule-admin-pw-2' if _agra_test_new | bool else 'molecule-admin-pw' }}"
 grafana_secret_key: molecule-secret-key-0123456789
 keepalived_auth_pass: molecule
 

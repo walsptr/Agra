@@ -2,8 +2,7 @@
 
 VRRP virtual IP (`monitoring_vip`) untuk cluster monitoring agra multi-node,
 sebagai container Docker `osixia/keepalived`. Otomatis aktif ketika
-`groups['monitoring'] | length > 1` (topology-driven, ARCHITECTURE §5.1). Desain
-lengkap: contexts/DESIGN.md §4.
+`groups['monitoring'] | length > 1` (ditentukan oleh inventory).
 
 VIP dipegang node sehat dengan priority tertinggi. Node dianggap sehat jika
 SEMUA service yang jalan di node itu menjawab 200: Grafana `/api/health`,
@@ -15,7 +14,7 @@ Prometheus `/-/healthy`, nginx `/healthz` (loopback `127.0.0.1:18080`).
 |---|---|---|
 | `enable_keepalived` | computed (groups len>1) | Set `false` di globals.yml hanya untuk force-disable VIP di multi-node |
 | `monitoring_vip` | `""` (WAJIB jika multi-node) | Virtual IP — akses `https://<monitoring_vip>/` |
-| `monitoring_vip_interface` | interface default host | Per-host → `host_vars/<host>.yml` (RULES §14.6) |
+| `monitoring_vip_interface` | interface default host | Per-host → `host_vars/<host>.yml` (globals.yml berlaku untuk semua host) |
 | `keepalived_unicast_ip` | `ansible_host` | Per-host → `host_vars/<host>.yml`. IPv4 untuk VRRP unicast; wajib diset jika `ansible_host` berupa hostname/IP management |
 | `keepalived_router_id` | `51` | VRRP router ID 1-255, unik per segmen L2 |
 | `keepalived_priority_base` | `150` | Priority `groups['monitoring'][0]` (MASTER); -1 per posisi berikutnya |

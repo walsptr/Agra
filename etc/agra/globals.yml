@@ -18,7 +18,7 @@ grafana_database_ssl_mode: disable
 grafana_image: grafana/grafana-oss
 grafana_tag: "11.2.0"
 grafana_data_dir: /var/lib/agra/grafana
-# ⚠️ SECRET TIDAK BOLEH ADA DI globals.yml! Lihat RULES.md §7:
+# ⚠️ SECRET TIDAK BOLEH ADA DI globals.yml!
 #    grafana_admin_password, grafana_secret_key, dsb hanya boleh disimpan di
 #    /etc/agra/passwords.yml (chmod 0600).
 #    Set via command: `agra genpwd` (mengisi field yang masih kosong).
@@ -55,8 +55,7 @@ node_exporter_textfile_dir: ""
 monitoring_vip: ""
 # monitoring_vip_interface: per-host (default: interface utama host).
 # JANGAN set di sini — globals.yml di-inject sebagai extra-vars dan akan
-# menimpa nilai untuk SEMUA host. Set di inventory host_vars/<host>.yml
-# (RULES.md §14.6).
+# menimpa nilai untuk SEMUA host. Set di inventory host_vars/<host>.yml.
 keepalived_router_id: 51
 keepalived_check_interval: 2
 keepalived_fall_count: 3

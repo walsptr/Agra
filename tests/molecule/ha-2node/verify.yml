@@ -10,7 +10,7 @@
   become: true
   vars:
     _mon1: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] }}"
-    _vip: "https://{{ monitoring_vip }}"
+    _vip: "https://{{ monitoring_vip }}:{{ nginx_https_port }}"
   tasks:
     - name: Firewall is active on every node (otherwise this proves nothing)
       ansible.builtin.command:
@@ -28,6 +28,25 @@
         return_content: true
       register: _vip_gf
       failed_when: _vip_gf.json.database | default('') != 'ok'
+
+    - name: Grafana's root_url is the VIP on the HTTPS port
+      ansible.builtin.uri:
+        url: "{{ _vip }}/api/frontend/settings"
+        url_username: "{{ grafana_admin_user | default('admin') }}"
+        url_password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        return_content: true
+      register: _vip_settings
+      failed_when: _vip_settings.json.appUrl | default('') != _vip ~ '/'
+
+    - name: HTTP on the VIP redirects to HTTPS on nginx_https_port
+      ansible.builtin.uri:
+        url: "http://{{ monitoring_vip }}:{{ nginx_http_port }}/login"
+        follow_redirects: none
+        status_code: 301
+      register: _vip_redirect
+      failed_when: _vip_redirect.location | default('') != _vip ~ '/login'
 
     - name: Opt-in Prometheus works under /prometheus/ (API, and redirects keep the prefix)
       ansible.builtin.uri:

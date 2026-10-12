@@ -1,0 +1,28 @@
+---
+# Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
+enable_https: false
+prometheus_domain: prometheus.agra.test
+
+# Grafana on the MySQL fixture (prepare.yml), not SQLite.
+grafana_database: mysql
+grafana_database_host: 172.29.0.21  # agra-db1
+
+# Backups also go to the S3 fixture (s3mock on agra-db1).
+backup_s3_enabled: true
+backup_s3_bucket: agra-test
+backup_s3_endpoint: http://172.29.0.21:9000
+
+# Stand-ins for /etc/agra/passwords.yml.
+grafana_admin_password: molecule-admin-pw
+grafana_secret_key: molecule-secret-key-0123456789
+keepalived_auth_pass: molecule
+grafana_database_password: molecule-db-pw
+backup_s3_access_key: molecule-s3
+backup_s3_secret_key: molecule-s3-secret
+
+agra_installed_versions_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/installed_versions.yml"
+backup_control_node_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/backups"
+
+# Fixture images, pinned like every image the tests run.
+_fixture_mysql_image: mysql:8.4@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+_fixture_s3_image: adobe/s3mock:4.12.4@sha256:e8d02904541324862264b05c3a262207d36c43e6de8c2cac177eab3c9fd75338

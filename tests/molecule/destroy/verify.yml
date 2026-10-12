@@ -1,0 +1,40 @@
+---
+- name: Verify — agra's data and config are gone from the monitoring node
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Stat agra paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: [/var/lib/agra/grafana, /var/lib/agra/prometheus, /etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/nginx, /etc/keepalived]
+      register: _ds_gone
+
+    - name: All purged
+      ansible.builtin.assert:
+        that: _ds_gone.results | selectattr('stat.exists') | list == []
+        fail_msg: "{{ _ds_gone.results | selectattr('stat.exists') | map(attribute='item') | list }} still exist"
+
+- name: Verify — the app server keeps what agra never deployed
+  hosts: agra-app1
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read its own nginx and keepalived config
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop: [/etc/nginx/nginx.conf, /etc/keepalived/keepalived.conf]
+      register: _ds_own
+
+    - name: Untouched
+      ansible.builtin.assert:
+        that: _ds_own.results | map(attribute='content') | map('b64decode') | unique == ["# owned by the app server, not agra\n"]
+
+    - name: Stat agra's node_exporter config
+      ansible.builtin.stat:
+        path: /etc/node_exporter
+      register: _ds_ne
+
+    - name: node_exporter config purged (agra deployed node_exporter here)
+      ansible.builtin.assert:
+        that: not _ds_ne.stat.exists

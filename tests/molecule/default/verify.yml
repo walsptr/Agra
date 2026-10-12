@@ -1,3 +1,11 @@
 ---
 - name: Shared checks
   ansible.builtin.import_playbook: ../shared/verify.yml
+
+# The precheck backup/upgrade/rollback/restore run (PR 13): validation and
+# `docker info` only, no apt/dnf upgrade. Must pass on a deployed node.
+- name: Precheck without bootstrap (agra backup/upgrade/rollback/restore)
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/precheck.yml
+  vars:
+    _agra_cli_inventory_explicit_confirmed: true
+    _agra_precheck_bootstrap: false

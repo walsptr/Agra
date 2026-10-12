@@ -2,7 +2,7 @@
 
 Helper dipakai semua role service (grafana, prometheus, node_exporter, nginx,
 keepalived) untuk menjalankan satu container — satu-satunya tempat logic
-`docker run` (DESIGN.md §1B). Bukan role yang dipanggil langsung dari playbook.
+`docker run`. Bukan role yang dipanggil langsung dari playbook.
 
 | Variabel | Default | Deskripsi |
 |---|---|---|

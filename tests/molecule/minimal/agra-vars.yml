@@ -1,0 +1,10 @@
+---
+# Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
+enable_nginx: false
+enable_grafana: false
+
+# Stand-ins for /etc/agra/passwords.yml (Grafana is off: none needed).
+keepalived_auth_pass: molecule
+
+agra_installed_versions_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/installed_versions.yml"
+backup_control_node_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/backups"

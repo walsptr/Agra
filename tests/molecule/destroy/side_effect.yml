@@ -1,0 +1,45 @@
+---
+# `agra destroy --yes-i-really-mean-it`: containers only. The destroy_* vars
+# are not in globals.yml, so import vars here are what the CLI's extra-vars
+# would be.
+- name: Destroy without purge
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/destroy.yml
+  vars:
+    destroy_confirm: true
+
+- name: After destroy without purge — containers gone, data and config kept
+  hosts: monitoring:node_exporter
+  gather_facts: false
+  become: true
+  tasks:
+    - name: List agra containers
+      ansible.builtin.command:
+        argv: [docker, ps, -a, --filter, name=agra-, --format, "{{ '{{' }}.Names{{ '}}' }}"]
+      register: _ds_ps
+      changed_when: false
+
+    - name: No agra container left
+      ansible.builtin.assert:
+        that: _ds_ps.stdout_lines == []
+        fail_msg: "{{ inventory_hostname }} still runs {{ _ds_ps.stdout_lines }}"
+
+    - name: Stat data and config
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: [/var/lib/agra/grafana/grafana.db, /etc/grafana/grafana.ini, /etc/prometheus/prometheus.yml, /etc/nginx/nginx.conf]
+      register: _ds_kept
+      when: inventory_hostname in groups['monitoring']
+
+    - name: Data and config kept for the next deploy
+      ansible.builtin.assert:
+        that: _ds_kept.results | rejectattr('stat.exists') | list == []
+        fail_msg: "{{ _ds_kept.results | rejectattr('stat.exists') | map(attribute='item') | list }} missing"
+      when: inventory_hostname in groups['monitoring']
+
+# `agra destroy --yes-i-really-mean-it --purge-all`
+- name: Destroy --purge-all
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/destroy.yml
+  vars:
+    destroy_confirm: true
+    destroy_purge_data: true
+    destroy_purge_config: true

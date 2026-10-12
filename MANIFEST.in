@@ -1,5 +1,5 @@
 # sdist: semua yang dipasang setup.py data_files (lihat setup.py).
-include ansible.cfg requirements.txt install.sh
+include ansible.cfg requirements.txt install.sh CHANGELOG.md
 graft ansible
 graft inventory
 graft etc/agra

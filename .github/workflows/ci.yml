@@ -4,31 +4,78 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, so drift in what the tests pull (apt/dnf packages inside the
+  # nodes, Galaxy collections) shows up without a code change.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # contexts/ and docs/ are not published: only their tests may skip
+  # (tests/unit/conftest.py). Any other skip fails the run.
+  AGRA_STRICT_SKIPS: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  unit-and-lint:
+  lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,ansible]"
-      - run: pytest
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements/ci-constraints.txt
+      - run: pip install -c requirements/ci-constraints.txt -e ".[dev,ansible]"
       - run: ruff check agra tests
       - run: yamllint .
       - run: ansible-lint
+
+  # The CLI supports Python >= 3.10 (pyproject). The oldest and newest run
+  # with whatever pip resolves there; 3.12 runs the pinned CI versions.
+  unit:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements/ci-constraints.txt
+      - name: Install (pinned on 3.12)
+        run: |
+          if [ "${{ matrix.python }}" = "3.12" ]; then
+            pip install -c requirements/ci-constraints.txt -e ".[ansible]" pytest
+          else
+            pip install -e ".[ansible]" pytest
+          fi
+      - run: pytest -rs
 
   # Install non-editable (wheel dari sdist) dan install.sh — CI lain memakai
   # `pip install -e`, yang tidak menangkap file yang tidak ikut terpasang.
   package:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install build
+      - run: pip install -c requirements/ci-constraints.txt build
       - run: python -m build
       - name: wheel ships share/agra, template, and no real passwords.yml
         run: |
@@ -57,18 +104,22 @@ jobs:
           "$GITHUB_WORKSPACE"/install.sh
 
   molecule:
-    needs: unit-and-lint
+    needs: [lint, unit]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        scenario: [default, ha-2node, upgrade, restore, rocky9]
+        scenario: [default, ha-2node, upgrade, restore, rocky9, destroy, plain-http, minimal]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev,ansible]"
-      - run: ansible-galaxy collection install community.docker ansible.posix
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements/ci-constraints.txt
+      - run: pip install -c requirements/ci-constraints.txt -e ".[dev,ansible]"
+      - run: ansible-galaxy collection install -r requirements/collections.yml
       - run: molecule test -s ${{ matrix.scenario }}
         working-directory: tests

@@ -1,13 +1,17 @@
 #!/bin/bash
-# agra combined health check for keepalived vrrp_script (DESIGN.md §4).
+# agra combined health check for keepalived vrrp_script.
 # Runs inside the keepalived container (host network).
 # exit 0 = every service co-located on this node answers HTTP 200
 # exit 1 = at least one does not — the node fails as one unit
 set -u
 
 LOG_FILE="{{ keepalived_log_file }}"
+# Every check runs in parallel with this limit, so the script finishes within
+# about one interval — inside the vrrp_script timeout (interval + 1, see
+# keepalived.conf). Run one after another, three slow services could take
+# three intervals: keepalived kills the script and counts a healthy node as down.
 TIMEOUT="{{ keepalived_check_interval }}"
-STATUS=0
+PIDS=""
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [HEALTHCHECK] $*" >> "${LOG_FILE}" 2>/dev/null
@@ -18,18 +22,22 @@ check() {
     code=$(curl -s -m "${TIMEOUT}" -o /dev/null -w '%{http_code}' "${url}")
     if [ "${code}" != "200" ]; then
         log "FAIL ${name} HTTP=${code} ${url}"
-        STATUS=1
+        return 1
     fi
 }
 
 {% if enable_grafana | default(true) | bool and inventory_hostname in groups['grafana'] | default([]) %}
-check grafana "{{ grafana_health_url }}"
+check grafana "{{ grafana_health_url }}" & PIDS="${PIDS} $!"
 {% endif %}
 {% if enable_prometheus | default(true) | bool and inventory_hostname in groups['prometheus'] | default([]) %}
-check prometheus "{{ prometheus_health_url }}"
+check prometheus "{{ prometheus_health_url }}" & PIDS="${PIDS} $!"
 {% endif %}
 {% if enable_nginx | default(true) | bool %}
-check nginx "{{ nginx_health_url }}"
+check nginx "{{ nginx_health_url }}" & PIDS="${PIDS} $!"
 {% endif %}
 
+STATUS=0
+for pid in ${PIDS}; do
+    wait "${pid}" || STATUS=1
+done
 exit "${STATUS}"

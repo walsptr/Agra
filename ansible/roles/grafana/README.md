@@ -3,8 +3,8 @@
 Grafana di setiap host grup `[grafana]`, sebagai container `agra-grafana`
 (image `grafana/grafana-oss`), listen `127.0.0.1:3000` di belakang nginx. Backend
 database: sqlite (default, file lokal per node), mysql, atau postgresql —
-keduanya database eksternal yang sudah ada (RULES.md §9: agra tidak pernah
-memasang database). Datasource Prometheus lokal (UID `prometheus-main`) dan
+keduanya database eksternal yang sudah ada (agra tidak pernah memasang
+database). Datasource Prometheus lokal (UID `prometheus-main`) dan
 provider dashboard JSON di-provision otomatis.
 
 ## Variabel Utama
@@ -17,7 +17,7 @@ provider dashboard JSON di-provision otomatis.
 | `grafana_database` | `sqlite` | Backend DB: `sqlite` \| `mysql` \| `postgresql` |
 | `grafana_admin_user` | `admin` | Username admin dashboard Grafana |
 | `grafana_tag` | `11.2.0` | Docker image tag (image `grafana/grafana-oss`) |
-| `grafana_server_root_url` | computed | `<scheme>://<grafana_domain \| monitoring_vip \| inventory_hostname>/` |
+| `grafana_server_root_url` | computed | `<scheme>://<grafana_domain \| monitoring_vip \| ansible_host node [monitoring] pertama>[:port]/` (`ansible/playbooks/vars/public_url.yml`) |
 | `grafana_data_dir` | `/var/lib/agra/grafana` | Path persist data Grafana + sqlite DB |
 | `grafana_prometheus_datasource_uid` | `prometheus-main` | UID datasource Prometheus (stabil untuk referensi dashboard JSON) |
 | `grafana_alerting_ha_port` | `9094` | Port gossip alerting antar node saat HA |
@@ -40,11 +40,15 @@ grafana_database_user: "grafana"
 ```
 
 Sinkronisasi file SQLite antar node (rsync) sudah dihapus; role menghapus sisa
-cron/script/SSH key-nya dari host lama (DESIGN §5).
+cron/script/SSH key-nya dari host lama.
 
 Custom dashboard JSON: taruh file `.json` di `/etc/agra/config/grafana/dashboards/` — otomatis tersalin ke provisioning provider setiap deploy. Custom `grafana.ini` override via `/etc/agra/config/grafana/grafana.ini.j2`.
 
-Password admin (`grafana_admin_password`) hanya dipakai saat database Grafana
-pertama kali dibuat; reset setelahnya: `docker exec agra-grafana grafana cli admin reset-admin-password <pw>`.
+Password admin (`grafana_admin_password`) dipakai Grafana hanya saat database
+pertama kali dibuat. Setelah itu, setiap deploy mencoba login dengan password dari
+`passwords.yml` dan, jika gagal, me-reset password admin lewat stdin
+(`grafana-cli admin reset-admin-password --password-from-stdin`), sehingga
+password tidak terlihat di `ps`. Ganti password: ubah `passwords.yml`, lalu `agra deploy`.
 
-Desain: contexts/DESIGN.md §5.
+Cookie sesi Grafana diberi `Secure` (`grafana_cookie_secure`) selama nginx
+melayani HTTPS (`enable_nginx` dan `enable_https`).

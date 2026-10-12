@@ -9,13 +9,15 @@ import argparse
 from typing import Dict, Any
 from agra.utils.colors import warn, info, error, section
 from agra.utils.cli_args import add_inventory_argument
+from agra.commands.check import run_validation
+from agra.utils.versions import partial_rollout_note
 from agra.utils.run_playbook import check_extra_vars_conflicts, run_playbook
 
 
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
     p = subparsers.add_parser(
         "upgrade", aliases=["update", "bump"],
-        help="Rolling upgrade monitoring stack (backup dulu, standby first, master last — DESIGN §7)",
+        help="Rolling upgrade monitoring stack (backup dulu, standby first, master last)",
         description="Precheck → backup otomatis (wajib) → rolling upgrade serial 1 (node_exporter-only → standby → MASTER groups['monitoring'][0] terakhir) dengan health gate per host. 1 node gagal = upgrade ABORT. Versi lama dicatat untuk `agra rollback`.",
     )
     add_inventory_argument(p)
@@ -40,7 +42,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action=argparse.BooleanOptionalAction,
         default=True,
         dest="precheck",
-        help="Jalankan precheck SEBELUM upgrade (default: TRUE / precheck aktif). "
+        help="Jalankan precheck validasi (tanpa update OS/Docker) SEBELUM upgrade (default: TRUE / precheck aktif). "
              "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
     )
     p.add_argument("-v", "--verbose", action="count", default=0)
@@ -73,8 +75,7 @@ def run_upgrade(args: argparse.Namespace) -> int:
 
     precheck_enabled = getattr(args, "precheck", True)
     if precheck_enabled:
-        from agra.commands.check import run_check
-        rc = run_check(args)
+        rc = run_validation(args, "agra upgrade")
         if rc != 0:
             error(f"Precheck FAILED (rc={rc}). Upgrade DIBATALKAN untuk mencegah bad state.")
             warn("Untuk bypass precheck: `agra upgrade --no-precheck` (TIDAK DISARANKAN production).")
@@ -82,7 +83,7 @@ def run_upgrade(args: argparse.Namespace) -> int:
 
     # Backup WAJIB sebelum upgrade (RULES §10). Tanpa --limit/--tags user dan
     # tanpa -e versi baru: backup harus selalu dari master dengan versi saat ini.
-    section("BACKUP SEBELUM UPGRADE (RULES §10)")
+    section("BACKUP SEBELUM UPGRADE (wajib)")
     rc = run_playbook(
         "backup",
         inventory=args.inventory,
@@ -97,7 +98,7 @@ def run_upgrade(args: argparse.Namespace) -> int:
 
     extra_vars = _shortcut_flags_to_evars(args)
 
-    section("ROLLING UPGRADE (standby first → master last — DESIGN §7)")
+    section("ROLLING UPGRADE (standby first → master last)")
     warn("  Urutan: node_exporter-only → standby groups[1..] → MASTER groups[0] terakhir, health gate per host.")
     warn("  max_fail_percentage=0: SATU node gagal = SELURUH upgrade ABORT (tidak lanjut ke node berikutnya).")
     if extra_vars:
@@ -108,7 +109,10 @@ def run_upgrade(args: argparse.Namespace) -> int:
         user_evar = [user_evar]
     merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
 
-    return run_playbook(
+    note = partial_rollout_note(args.limit)
+    if note:
+        warn(note)
+    rc = run_playbook(
         "upgrade",
         inventory=args.inventory,
         tags=tags_flat or None,
@@ -120,3 +124,6 @@ def run_upgrade(args: argparse.Namespace) -> int:
         description="Rolling Upgrade Monitoring",
         abort_on_nonzero=False,
     )
+    if note and rc == 0:
+        warn(note)
+    return rc

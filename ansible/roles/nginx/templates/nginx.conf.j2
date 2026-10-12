@@ -2,7 +2,7 @@ user {{ nginx_container_user }};
 worker_processes {{ nginx_worker_processes }};
 pid {{ nginx_pid_path }};
 
-error_log {{ nginx_log_dir }}/error.log warn;
+error_log {{ _nginx_ct_log_dir }}/error.log warn;
 
 events {
     worker_connections {{ nginx_worker_connections }};
@@ -11,14 +11,14 @@ events {
 }
 
 http {
-    include {{ nginx_config_dir }}/mime.types;
+    include {{ _nginx_ct_config_dir }}/mime.types;
     default_type application/octet-stream;
 
     log_format main '$remote_addr - $remote_user [$time_local] "$request" '
                     '$status $body_bytes_sent "$http_referer" '
                     '"$http_user_agent" "$http_x_forwarded_for"';
 
-    access_log {{ nginx_log_dir }}/access.log main;
+    access_log {{ _nginx_ct_log_dir }}/access.log main;
 
     sendfile on;
     tcp_nopush on;
@@ -42,46 +42,24 @@ http {
     ssl_session_tickets {{ tls_session_tickets }};
     resolver_timeout 5s;
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # SSL CERTIFICATES DITENTUKAN PER SERVER BLOCK DI sites-available/{grafana,prometheus}.conf.j2
-    # (Scalable multi-domain (Grafana + Prometheus dedicated, each cert DAPAT ssl berbeda)
-    # ══════════════════════════════════════════════════════════════════════════
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # SSL STAPLING CONDITIONAL (FIX nginx warn "issuer certificate not found"):
-    # OCSP Stapling HANYA BERMANFAAT dan VALID untuk SERTIFIKAT CA-SIGNED PUBLIC
-    # yang memiliki Intermediate/Root CA Chain.
-    # Default self-signed cert (issuer = dirinya sendiri) TIDAK PUNYA OCSP URL
-    # sehingga ssl_stapling on → nginx WARN "issuer certificate not found".
-    #
-    # LOGIKA PRECEDENCE (EXPLICIT user OVERRIDE selalu menang!):
-    #   1. JIKA user set enable_ssl_stapling=true  di globals.yml → PAKSA ON
-    #   2. JIKA user set enable_ssl_stapling=false di globals.yml → PAKSA OFF
-    #   3. JIKA user TIDAK SET variabel (undefined) → AUTO DETECT:
-    #        ON  JIKA file CA chain (tls_ca_path) ADA di control node dan ter-copy
-    #        OFF JIKA tidak ada (default self-signed)
-    #
-    # CATATAN: SSL certificates SEKARANG didefinisikan PER SERVER BLOCK di
-    # sites-available/*.conf (bukan global), jadi stapling detect hanya berdasarkan
-    # ada/tidaknya CA chain path global (tls_ca_path).
-    # ══════════════════════════════════════════════════════════════════════════
-    {% set _stapling_user_set = (enable_ssl_stapling is defined and enable_ssl_stapling is not none and (enable_ssl_stapling | string | length > 0)) %}
-    {# _nginx_ca_present: di-set tasks/config.yml — true hanya jika file CA chain benar-benar di-copy #}
-    {% if _stapling_user_set %}
-    {% set _stapling = (enable_ssl_stapling | bool) %}
-    {% else %}
-    {% set _stapling = (_nginx_ca_present | default(false) | bool) %}
-    {% endif %}
-    {% if _stapling %}
+    # Certificates are set per server block (sites-available/*.conf.j2).
+    # OCSP stapling (_nginx_stapling, tasks/config.yml): enable_ssl_stapling,
+    # else on only when a CA chain was copied. nginx resolves the OCSP
+    # responder itself, so stapling always comes with a resolver.
+{% if _nginx_stapling | default(false) | bool %}
     ssl_stapling on;
     ssl_stapling_verify on;
-    {% endif %}
+{% if _nginx_ca_present | default(false) | bool %}
+    ssl_trusted_certificate {{ _nginx_ct_ssl_dir }}/agra-ca.crt;
+{% endif %}
+    resolver {{ _nginx_resolvers | join(' ') }} valid=300s{{ '' if _nginx_ipv6 | bool else ' ipv6=off' }};
+{% endif %}
 
     map $http_upgrade $connection_upgrade {
         default upgrade;
         '' close;
     }
 
-    include {{ nginx_sites_enabled_dir }}/*.conf;
-    include {{ nginx_confd_dir }}/*.conf;
+    include {{ _nginx_ct_config_dir }}/sites-enabled/*.conf;
+    include {{ _nginx_ct_config_dir }}/conf.d/*.conf;
 }

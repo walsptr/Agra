@@ -66,7 +66,8 @@ def test_every_defined_var_is_used(key):
     assert _used(key), f"{key} is defined but no task/template/CLI reads it — remove it (and add it to REMOVED_KEYS)"
 
 
-@pytest.mark.parametrize("key", sorted(SCHEMA_ROWS))
+@needs_schema
+@pytest.mark.parametrize("key", sorted(SCHEMA_ROWS) or ["<no SCHEMA.md>"])
 def test_every_schema_row_is_a_live_var(key):
     assert _used(key) or key in DEFINED, f"SCHEMA.md documents {key}, which nothing defines or reads"
 

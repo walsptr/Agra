@@ -3,7 +3,7 @@
 Dijalankan pertama ke **semua** host di inventory (host monitoring dan host
 yang dimonitor). Docker Engine sendiri dipasang oleh `agra check`; role ini
 memastikan `docker.service` berjalan, memasang paket OS dasar, dan mengatur
-firewall per host (DESIGN.md §8B). Container memakai `--network=host` — tidak
+firewall per host. Container memakai `--network=host` — tidak
 ada Docker network khusus.
 
 Firewall (ufw/firewalld, terdeteksi otomatis) hanya membuka:

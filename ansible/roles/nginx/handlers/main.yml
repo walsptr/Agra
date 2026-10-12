@@ -4,15 +4,32 @@
 # (daemon mati, config invalid) WAJIB gagal, bukan `|| true`.
 # Urutan handler = urutan di file ini: syntax check SEBELUM reload/restart,
 # sehingga config invalid menghentikan play sebelum nginx di-reload.
+# `nginx -t` jalan di container sementara dengan mount yang sama
+# (vars/main.yml), bukan di container yang berjalan: container itu masih
+# membaca nginx.conf lama (mount satu file), jadi tidak bisa menguji yang baru.
+# Image belum ada di host (mis. `deploy --tags config` di host baru): belum
+# ada yang bisa diuji, container dibuat — dan diverifikasi — saat deploy penuh.
+- name: nginx syntax check image
+  listen: "nginx syntax check"
+  ansible.builtin.command:
+    argv: [docker, image, inspect, --format, "{{ '{{' }}.Id{{ '}}' }}", "{{ nginx_image }}:{{ nginx_tag }}"]
+  register: _nginx_h_image
+  changed_when: false
+  failed_when: false
+  when:
+    - enable_nginx | default(true) | bool
+
 - name: nginx syntax check
   listen: "nginx syntax check"
   ansible.builtin.command:
-    cmd: docker exec {{ nginx_container_name }} nginx -t
-  register: _h_result
+    argv: >-
+      {{ ['docker', 'run', '--rm', '--network=host', '--entrypoint=nginx']
+         + _nginx_volumes | map('regex_replace', '^', '--volume=') | list
+         + [nginx_image ~ ':' ~ nginx_tag, '-t'] }}
   changed_when: false
-  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
   when:
     - enable_nginx | default(true) | bool
+    - _nginx_h_image.rc | default(1) == 0
 
 - name: restart nginx
   ansible.builtin.debug:

@@ -19,7 +19,8 @@ except ImportError:
 from agra.utils.colors import info, warn, error, section, BOLD, RESET, CYAN, GRAY
 from agra.constants import BACKUP_ROOT_DIR
 from agra.utils.backups import control_backup_dir, tarball_for
-from agra.utils.cli_args import add_inventory_argument
+from agra.utils.cli_args import add_inventory_argument, positive_int
+from agra.commands.check import run_validation
 from agra.utils.run_playbook import run_playbook
 
 
@@ -147,8 +148,8 @@ def cmd_create(args: argparse.Namespace) -> int:
         evars["backup_include_prometheus_tsdb"] = True
     if getattr(args, "backup_dir", None):
         evars["backup_root_dir"] = str(_resolve_backup_dir(args.backup_dir))
-    if getattr(args, "retention", None):
-        evars["backup_retention_count"] = int(args.retention)
+    if getattr(args, "retention", None) is not None:
+        evars["backup_retention_count"] = args.retention
 
     tags_flat = []
     for t in getattr(args, "tags", None) or []:
@@ -156,8 +157,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     precheck_enabled = getattr(args, "precheck", True)
     if precheck_enabled:
-        from agra.commands.check import run_check
-        rc = run_check(args)
+        rc = run_validation(args, "agra backup create")
         if rc != 0:
             error(f"Precheck FAILED (rc={rc}). Backup Create DIBATALKAN untuk mencegah bad state.")
             warn("Untuk bypass precheck: `agra backup create --no-precheck` (TIDAK DISARANKAN production).")
@@ -197,7 +197,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action=argparse.BooleanOptionalAction,
         default=True,
         dest="precheck",
-        help="Jalankan precheck SEBELUM backup create (default: TRUE / precheck aktif). "
+        help="Jalankan precheck validasi (tanpa update OS/Docker) SEBELUM backup create (default: TRUE / precheck aktif). "
              "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
     )
     p.add_argument("-v", "--verbose", action="count", default=0, dest="verbose")
@@ -207,9 +207,9 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
 
     p_create = sub.add_parser("create", help="Run backup playbook (default subcommand).")
     p_create.add_argument("--include-prometheus-tsdb", "--tsdb", action="store_true", dest="include_prometheus_tsdb",
-                          help="Sertakan Prometheus TSDB snapshot via Admin API (RULES §8: via /api/v1/admin/tsdb/snapshot, BUKAN tar folder). WARNING: butuh disk space besar untuk metrics TSDB.")
-    p_create.add_argument("-n", "--retention", type=int, dest="retention",
-                          help="Override backup_retention_count (default keep 7 terbaru).")
+                          help="Sertakan Prometheus TSDB snapshot via Admin API (/api/v1/admin/tsdb/snapshot, BUKAN tar folder). WARNING: butuh disk space besar untuk metrics TSDB.")
+    p_create.add_argument("-n", "--retention", type=positive_int, dest="retention",
+                          help="Override backup_retention_count: jumlah backup terbaru yang disimpan, minimal 1 (default 7).")
     # Opsi yang juga ada di `agra backup` — default milik parent (cli_args.py).
     add_inventory_argument(p_create)
     p_create.add_argument("-d", "--backup-dir", dest="backup_dir", default=argparse.SUPPRESS,
@@ -222,7 +222,7 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
         action=argparse.BooleanOptionalAction,
         default=argparse.SUPPRESS,
         dest="precheck",
-        help="Jalankan precheck SEBELUM backup create (default: TRUE / precheck aktif). "
+        help="Jalankan precheck validasi (tanpa update OS/Docker) SEBELUM backup create (default: TRUE / precheck aktif). "
              "Untuk bypass: --no-precheck (TIDAK DISARANKAN production)."
     )
     p_create.add_argument("-v", "--verbose", action="count", default=argparse.SUPPRESS, dest="verbose")

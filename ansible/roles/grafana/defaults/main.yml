@@ -52,6 +52,10 @@ grafana_server_root_url: ""
 
 grafana_server_serve_from_sub_path: "false"
 grafana_server_protocol: http
+# Session cookies only over HTTPS. Users reach Grafana through nginx, so this
+# follows whether nginx terminates TLS; set false only if Grafana is served
+# over plain HTTP some other way.
+grafana_cookie_secure: "{{ (enable_nginx | default(true) | bool) and (enable_https | default(true) | bool) }}"
 grafana_log_level: info
 # ⚠️ DEFAULT VALUE HANYA FALLBACK JIKA passwords.yml BELUM DI-GENERATE (user pertama deploy tanpa agra genpwd).
 # REAL VALUE SELALU di-load dari /etc/agra/passwords.yml via include_vars di playbook pre_tasks.
