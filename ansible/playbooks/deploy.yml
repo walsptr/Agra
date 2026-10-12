@@ -1,0 +1,125 @@
+---
+# globals.yml + passwords.yml di-inject CLI sebagai extra-vars
+# (-e @/etc/agra/globals.yml -e @/etc/agra/passwords.yml) — playbook ini
+# TIDAK me-load file tersebut sendiri. Lihat contexts/DESIGN.md §1A.
+
+- name: 'AGRA DEPLOY STEP 0 — Guard secrets dari passwords.yml'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['always']
+  tasks:
+    - name: 'Deploy guard — grafana_admin_password & grafana_secret_key wajib terisi (AC-1)'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password | default('') | string | length >= 8
+          - grafana_admin_password | default('') | string != 'admin'
+          - grafana_secret_key | default('') | string | length > 0
+        fail_msg: >-
+          Secret Grafana di /etc/agra/passwords.yml belum valid
+          (grafana_admin_password wajib >= 8 karakter dan bukan 'admin';
+          grafana_secret_key wajib terisi). Jalankan `agra genpwd`, lalu
+          `agra check` sebelum deploy. Jika menjalankan ansible-playbook
+          langsung, tambahkan -e @/etc/agra/globals.yml -e @/etc/agra/passwords.yml.
+        quiet: true
+
+- name: 'AGRA DEPLOY STEP 1 — Apply common role ke ALL hosts'
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'common', 'config']
+  roles:
+    - role: common
+
+- name: 'AGRA DEPLOY STEP 2 — Apply node_exporter ke group node_exporter'
+  hosts: node_exporter
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'node_exporter', 'config']
+  roles:
+    - role: node_exporter
+
+- name: 'AGRA DEPLOY STEP 3 — Apply prometheus ke group prometheus'
+  hosts: prometheus
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'prometheus', 'config']
+  roles:
+    - role: prometheus
+
+- name: 'AGRA DEPLOY STEP 4 — Apply grafana ke group grafana'
+  hosts: grafana
+  gather_facts: true
+  become: true
+  # HA nodes share one database: Grafana migrates its schema under a DB lock at
+  # start and exits if another node holds it. One node at a time — the role
+  # waits for /api/health before the next node starts.
+  serial: "{{ 1 if (enable_ha_grafana | default(false) | bool) else '100%' }}"
+  max_fail_percentage: 0
+  tags: ['deploy', 'grafana', 'config']
+  roles:
+    - role: grafana
+
+- name: 'AGRA DEPLOY STEP 5 — Apply nginx ke group monitoring (jika enable_nginx=true)'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'nginx', 'config']
+  tasks:
+    - name: 'Deploy — Apply role nginx jika enable_nginx=true'
+      ansible.builtin.include_role:
+        name: nginx
+      when:
+        - enable_nginx | default(true) | bool
+
+- name: 'AGRA DEPLOY STEP 6 — Apply keepalived KE SELURUH group monitoring HANYA JIKA groups monitoring > 1'
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  tags: ['deploy', 'keepalived', 'ha', 'config']
+  tasks:
+    - name: 'Deploy — Apply role keepalived HANYA JIKA groups monitoring length > 1'
+      ansible.builtin.include_role:
+        name: keepalived
+      when:
+        - groups['monitoring'] is defined
+        - groups['monitoring'] | length > 1
+
+- name: 'AGRA DEPLOY SUMMARY'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['deploy']
+  vars_files:
+    - vars/lifecycle.yml
+  vars:
+    agra_record_action: deploy
+    # Same rules as Grafana's root_url (roles/grafana) and the nginx sites.
+    _gf_host: >-
+      {{ (grafana_domain | default('') | trim) or (monitoring_vip | default('') | string | trim)
+         or hostvars[groups['monitoring'][0]]['ansible_host'] | default(groups['monitoring'][0]) }}
+    _behind_nginx: "{{ enable_nginx | default(true) | bool }}"
+    access_url: >-
+      {{ ('https' if _behind_nginx | bool and enable_https | default(true) | bool else 'http') ~ '://' ~ _gf_host
+         ~ ('' if _behind_nginx | bool else ':' ~ grafana_port | default(3000) | string) ~ '/' }}
+    _prometheus_url: >-
+      {%- if _behind_nginx | bool and prometheus_domain | default('') | trim | length > 0 -%}
+      {{ 'https' if enable_https | default(true) | bool else 'http' }}://{{ prometheus_domain | trim }}/
+      {%- elif _behind_nginx | bool and expose_prometheus_via_nginx | default(false) | bool -%}
+      {{ access_url }}prometheus/
+      {%- else -%}
+      not published (127.0.0.1:{{ prometheus_port | default(9090) }} on each [prometheus] node)
+      {%- endif -%}
+  tasks:
+    - name: Record installed versions
+      ansible.builtin.import_tasks: tasks/record_installed_versions.yml
+
+    - name: 'Deploy — Summary access URL'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA DEPLOY SELESAI"
+          - "Grafana URL: {{ access_url | trim }}"
+          - "Admin user: {{ grafana_admin_user | default('admin') }} — password: field grafana_admin_password di /etc/agra/passwords.yml"
+          - "Prometheus: {{ _prometheus_url | trim }}"

@@ -1,0 +1,4 @@
+---
+# converge = `agra deploy`. Run twice by molecule's idempotence step.
+- name: Deploy
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/deploy.yml

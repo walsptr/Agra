@@ -1,0 +1,106 @@
+---
+# Ensure one container runs exactly the requested image + spec (DESIGN.md §1B):
+# pull if missing, (re)create when the image, the spec or the running state
+# differs, apply the caller's pending handlers (restart on config change), then
+# check the container stays up. The spec hash lives in label agra.spec, because
+# `docker run` options cannot be changed on an existing container.
+
+- name: Container ({{ agra_container_name }}) - Validate input
+  ansible.builtin.assert:
+    that:
+      - agra_container_name | length > 0
+      - agra_container_image is search(':')
+    fail_msg: "agra_container needs agra_container_name and agra_container_image as <image>:<tag> (got '{{ agra_container_image }}')."
+    quiet: true
+
+- name: Container ({{ agra_container_name }}) - Spec
+  ansible.builtin.set_fact:
+    _agra_ct_spec: "{{ agra_container_options + [agra_container_image] + agra_container_command }}"
+    _agra_ct_hash: "{{ (agra_container_options + [agra_container_image] + agra_container_command) | to_json | hash('sha256') }}"
+
+- name: Container ({{ agra_container_name }}) - Image id (local)
+  ansible.builtin.command:
+    argv: [docker, image, inspect, --format, "{{ '{{' }}.Id{{ '}}' }}", "{{ agra_container_image }}"]
+  register: _agra_ct_img
+  changed_when: false
+  failed_when: false
+
+- name: Container ({{ agra_container_name }}) - Pull image
+  ansible.builtin.command:
+    argv: [docker, pull, "{{ agra_container_image }}"]
+  register: _agra_ct_pull
+  until: _agra_ct_pull is succeeded
+  retries: 5
+  delay: 3
+  changed_when: true
+  when: _agra_ct_img.rc != 0
+
+- name: Container ({{ agra_container_name }}) - Image id (after pull)
+  ansible.builtin.command:
+    argv: [docker, image, inspect, --format, "{{ '{{' }}.Id{{ '}}' }}", "{{ agra_container_image }}"]
+  register: _agra_ct_img_pulled
+  changed_when: false
+  when: _agra_ct_img.rc != 0
+
+- name: Container ({{ agra_container_name }}) - Target image id
+  ansible.builtin.set_fact:
+    _agra_ct_img_id: "{{ (_agra_ct_img_pulled.stdout if _agra_ct_img.rc != 0 else _agra_ct_img.stdout) | trim }}"
+
+- name: Container ({{ agra_container_name }}) - Inspect existing container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{' }}.Image{{ '}}' }} {{ '{{' }}.State.Running{{ '}}' }} {{ '{{' }}index .Config.Labels \"agra.spec\"{{ '}}' }}"
+      - "{{ agra_container_name }}"
+  register: _agra_ct_existing
+  changed_when: false
+  failed_when: _agra_ct_existing.rc != 0 and 'no such' not in (_agra_ct_existing.stderr | lower)
+
+- name: Container ({{ agra_container_name }}) - Decide
+  ansible.builtin.set_fact:
+    _agra_ct_exists: "{{ _agra_ct_existing.rc == 0 }}"
+    _agra_ct_create: >-
+      {{ _agra_ct_existing.rc != 0
+         or _agra_ct_current[0] != _agra_ct_img_id
+         or _agra_ct_current[1] != 'true'
+         or _agra_ct_current[2] != _agra_ct_hash }}
+  vars:
+    _agra_ct_current: "{{ (_agra_ct_existing.stdout | default('')).split() + ['', '', ''] }}"
+
+# Stopped, outdated or mis-specified containers are replaced, never reused:
+# a stopped container with the same name made `docker run` fail before.
+- name: Container ({{ agra_container_name }}) - Remove outdated container
+  ansible.builtin.command:
+    argv: [docker, rm, -f, "{{ agra_container_name }}"]
+  changed_when: true
+  when: _agra_ct_create | bool and _agra_ct_exists | bool
+
+- name: Container ({{ agra_container_name }}) - Create
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'run', '-d', '--name=' ~ agra_container_name, '--label=agra.spec=' ~ _agra_ct_hash] + _agra_ct_spec }}"
+  changed_when: true
+  when: _agra_ct_create | bool
+
+# Restart handlers notified by the caller's config tasks run now, so the check
+# below sees the container with its final config.
+- name: Container ({{ agra_container_name }}) - Apply pending handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Container ({{ agra_container_name }}) - Verify it stays up
+  ansible.builtin.shell:
+    cmd: |
+      set -u
+      state() { docker inspect --format '{{ '{{' }}.State.Status{{ '}}' }} {{ '{{' }}.RestartCount{{ '}}' }}' {{ agra_container_name }}; }
+      before=$(state)
+      sleep {{ agra_container_stable_seconds | int }}
+      after=$(state)
+      echo "before=${before} after=${after}"
+      if [ "${after%% *}" != "running" ] || [ "${before#* }" != "${after#* }" ]; then
+        echo "{{ agra_container_name }} is not staying up; last log lines:"
+        docker logs --tail 20 {{ agra_container_name }} 2>&1
+        exit 1
+      fi
+  changed_when: false
+  when: agra_container_stable_seconds | int > 0

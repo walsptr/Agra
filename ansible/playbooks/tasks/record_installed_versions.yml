@@ -1,0 +1,55 @@
+---
+# Catat versi yang baru saja ter-deploy ke control node
+# (agra_installed_versions_file, default /etc/agra/.installed_versions.yml).
+#
+# Dipanggil dari play `hosts: localhost` di akhir deploy / upgrade / rollback,
+# sehingga hanya tercatat jika SELURUH play sebelumnya sukses. Jika versi
+# berubah, entry `current` lama digeser ke `previous` — inilah target default
+# `agra rollback`. CLI membaca file ini langsung (DESIGN.md §7).
+#
+# Input: agra_record_action (deploy | upgrade | rollback)
+
+- name: Installed versions — stat existing file
+  ansible.builtin.stat:
+    path: "{{ agra_installed_versions_file }}"
+  register: _iv_stat
+
+- name: Installed versions — load existing file
+  ansible.builtin.include_vars:
+    file: "{{ agra_installed_versions_file }}"
+    name: _iv_existing
+  when: _iv_stat.stat.exists
+
+- name: Installed versions — compute new state
+  ansible.builtin.set_fact:
+    _iv_new_versions: >-
+      {%- set out = {} -%}
+      {%- for v in agra_version_vars -%}
+        {%- set val = lookup('ansible.builtin.vars', v, default='') | string | trim -%}
+        {%- if val | length > 0 -%}{%- set _ = out.update({v: val}) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+    _iv_old_current: "{{ (_iv_existing | default({})).get('current') | default({}, true) }}"
+    _iv_old_previous: "{{ (_iv_existing | default({})).get('previous') | default({}, true) }}"
+
+- name: Installed versions — write file
+  ansible.builtin.copy:
+    dest: "{{ agra_installed_versions_file }}"
+    mode: '0640'
+    content: |
+      # Dikelola oleh agra (deploy/upgrade/rollback). Jangan edit manual.
+      # `agra rollback` memakai `previous` sebagai target default.
+      {{ {'current': _iv_current, 'previous': _iv_previous} | to_nice_yaml(indent=2, sort_keys=false) }}
+  vars:
+    _iv_changed: "{{ _iv_old_current.get('versions', {}) != _iv_new_versions }}"
+    # Timestamp hanya diperbarui jika versi berubah → task idempotent.
+    _iv_current: >-
+      {{ {'versions': _iv_new_versions,
+          'action': agra_record_action,
+          'recorded_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')}
+         if _iv_changed | bool else _iv_old_current }}
+    _iv_previous: "{{ _iv_old_current if (_iv_changed | bool and _iv_old_current | length > 0) else _iv_old_previous }}"
+
+- name: Installed versions — summary
+  ansible.builtin.debug:
+    msg: "Versi tercatat di {{ agra_installed_versions_file }}: {{ _iv_new_versions }}"

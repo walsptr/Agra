@@ -1,0 +1,47 @@
+---
+# Runs before anything is (re)started: an invalid config fails the play while the
+# running instance keeps its old in-memory config. With --network=host and the
+# config dir mounted at the same path as the real container, the interface and
+# the scripts resolve exactly as they will at runtime. keepalived 2.0 also returns
+# rc 4 for warnings, so the shipped template must stay warning-free.
+- name: Keepalived (Docker) - Validate keepalived.conf (keepalived -t)
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=host
+      - "--volume={{ keepalived_config_dir }}:{{ keepalived_container_config_dir }}:ro"
+      - --entrypoint=keepalived
+      - "{{ keepalived_image }}:{{ keepalived_tag }}"
+      - -t
+      - -f
+      - "{{ keepalived_container_config_dir }}/keepalived.conf"
+  register: _ka_validate
+  changed_when: false
+  failed_when: _ka_validate.rc != 0
+  tags: ['keepalived', 'docker', 'validate']
+
+# Pull / (re)create / verify (stays up — keepalived exits on fatal config
+# errors and --restart=always would loop it silently): DESIGN.md §1B.
+- name: Keepalived (Docker) - Run container (host network + NET_ADMIN)
+  ansible.builtin.include_role:
+    name: agra_container
+    apply:
+      tags: ['keepalived', 'docker', 'container']
+  vars:
+    agra_container_name: "{{ keepalived_container_name }}"
+    agra_container_image: "{{ keepalived_image }}:{{ keepalived_tag }}"
+    agra_container_options:
+      - --restart=always
+      - --network=host
+      - --cap-add=NET_ADMIN
+      - --cap-add=NET_BROADCAST
+      - --cap-add=NET_RAW
+      - --privileged=true
+      - "--volume={{ keepalived_config_dir }}:{{ keepalived_container_config_dir }}:ro"
+      - "--volume={{ keepalived_log_file }}:{{ keepalived_log_file }}"
+      - --env=KEEPALIVED_AUTOCONF=false
+      - "--env=KEEPALIVED_CONF={{ keepalived_container_config_dir }}/keepalived.conf"
+    agra_container_stable_seconds: 6
+  tags: ['keepalived', 'docker', 'container']

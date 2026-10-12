@@ -1,0 +1,45 @@
+---
+# Earlier agra versions set up a SQLite rsync sync for enable_ha_grafana. It
+# never worked (wrong SSH trust direction, live WAL copies) and was replaced by
+# "HA requires an external DB". Remove what it created; every task is a no-op
+# on hosts that never had it.
+# The cron job lived in its own cron.d file (cron_file: agra-grafana-sync).
+- name: Grafana (cleanup) - Remove rsync cron file, script, logrotate entry and log
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/cron.d/agra-grafana-sync
+    - /usr/local/bin/agra_grafana_rsync.sh
+    - /etc/logrotate.d/agra-grafana-sync
+    - /var/log/agra-grafana-sync.log
+  tags: ['grafana', 'config', 'cleanup']
+
+# The master's public key was trusted for root SSH (forced rsync command) on
+# every standby. Lines are identified by the key comment agra wrote.
+- name: Grafana (cleanup) - Remove the sync key from root authorized_keys
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    regexp: 'agra-grafana-sync@'
+    state: absent
+  tags: ['grafana', 'config', 'cleanup']
+
+- name: Grafana (cleanup) - Read root's ed25519 public key, if any
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_ed25519.pub
+  register: _gf_old_sync_pub
+  failed_when: false
+  tags: ['grafana', 'config', 'cleanup']
+
+# Only a key agra generated (its comment) is removed — never an operator's key.
+- name: Grafana (cleanup) - Remove the keypair agra generated for the sync
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /root/.ssh/id_ed25519
+    - /root/.ssh/id_ed25519.pub
+  when:
+    - _gf_old_sync_pub.content is defined
+    - "'agra-grafana-sync@' in (_gf_old_sync_pub.content | b64decode)"
+  tags: ['grafana', 'config', 'cleanup']

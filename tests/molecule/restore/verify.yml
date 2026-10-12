@@ -1,0 +1,69 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml
+
+- name: Verify — the restored Grafana has the dashboard from the backup
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Dashboard agra-restore-test exists again
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/dashboards/uid/agra-restore-test
+        url_username: "{{ grafana_admin_user | default('admin') }}"
+        url_password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+      no_log: true
+
+    # restore.yml copies the snapshot next to the live TSDB for a manual import.
+    - name: Stat the restored TSDB snapshot
+      ansible.builtin.find:
+        paths: "/var/lib/agra/prometheus/snapshots/{{ lookup('file', lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') ~ '/restored_backup') }}-restored"
+        file_type: any
+        recurse: true
+      register: _rt_snap
+
+    - name: The snapshot was restored, owned by the Prometheus user
+      ansible.builtin.assert:
+        that:
+          - _rt_snap.matched > 0
+          - _rt_snap.files | rejectattr('uid', 'equalto', prometheus_uid | default(65534)) | list == []
+          - _rt_snap.files | rejectattr('gid', 'equalto', prometheus_gid | default(0)) | list == []
+        fail_msg: "{{ _rt_snap.files | map(attribute='path') | list }} {{ _rt_snap.files | map(attribute='uid') | unique }}"
+
+- name: Verify — backups on the control node
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    _rt_name: "{{ lookup('file', lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') ~ '/restored_backup') }}"
+  tasks:
+    - name: Find manifests and tarballs
+      ansible.builtin.find:
+        paths: "{{ backup_control_node_dir }}"
+        patterns: ["agra-backup-*.yml", "agra-backup-*.tar.gz"]
+      register: _rt_files
+
+    - name: Load manifests
+      ansible.builtin.set_fact:
+        _rt_manifests: >-
+          {{ query('ansible.builtin.file', *(_rt_files.files | map(attribute='path') | select('search', '[.]yml$')))
+             | map('from_yaml') | list }}
+
+    - name: Restored backup + safety backup, each with a private tarball
+      ansible.builtin.assert:
+        that:
+          - _rt_manifests | length == 2
+          - _rt_files.files | length == 4
+          - _rt_files.files | rejectattr('mode', 'equalto', '0600') | list == []
+          - _target.components.grafana.database_included
+          - _target.backup_include_prometheus_tsdb
+          - not _target.backup_safety
+          - _safety.backup_safety
+          # grafana.db was gone: the safety backup kept the rest and did not block.
+          - not _safety.components.grafana.database_included
+          - "'grafana/grafana.ini' in _safety.components.grafana.files"
+        fail_msg: "{{ _rt_files.files | map(attribute='path') | list }} / {{ _rt_manifests }}"
+      vars:
+        _target: "{{ _rt_manifests | selectattr('backup_name', 'equalto', _rt_name) | first }}"
+        _safety: "{{ _rt_manifests | rejectattr('backup_name', 'equalto', _rt_name) | first }}"

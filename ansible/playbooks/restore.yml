@@ -1,0 +1,261 @@
+---
+# agra restore — destruktif (RULES §8): CLI wajib --yes-i-really-mean-it,
+# lalu safety backup kondisi saat ini, baru restore di master.
+#
+# Sumber backup: salinan di control node (restore_local_tarball +
+# restore_manifest_path, diisi `agra restore` dari backup_control_node_dir) —
+# di-copy ke master, jadi restore tetap bisa walau tarball di master hilang.
+# Tanpa restore_local_tarball: tarball di master (restore_backup_name /
+# restore_backup_tarball = path di master).
+#
+# Variabel publik (restore_* / backup_root_dir) hanya dibaca, tidak
+# didefinisikan ulang di play (hindari template rekursif) — nilai efektif di
+# nama privat `_rs_*`.
+
+- name: 'AGRA RESTORE 1/3 — Safety assertions'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['restore']
+  tasks:
+    - name: 'Restore (SAFETY 1) — Target backup wajib diisi'
+      ansible.builtin.assert:
+        that: >-
+          (restore_backup_name | default('') | length > 0)
+          or (restore_backup_tarball | default('') | length > 0)
+        fail_msg: >-
+          Restore butuh target: `agra backup list`, lalu
+          `agra restore -n <nama> --yes-i-really-mean-it`.
+        quiet: true
+
+    - name: 'Restore (SAFETY 2) — Konfirmasi eksplisit'
+      ansible.builtin.assert:
+        that: restore_confirm | default(false) | bool
+        fail_msg: >-
+          Restore diblokir (RULES §8): restore menimpa grafana.db dan config.
+          Jalankan via CLI dengan --yes-i-really-mean-it.
+        quiet: true
+
+# Safety backup kondisi saat ini sebelum ditimpa (DESIGN §10). Retensi
+# dimatikan: backup yang akan direstore tidak boleh ikut terhapus. Mode safety:
+# grafana.db yang hilang/rusak (alasan restore) tidak memblokir restore.
+- name: 'AGRA RESTORE 2/3 — Safety backup sebelum restore'
+  ansible.builtin.import_playbook: backup.yml
+  vars:
+    backup_apply_retention: false
+    backup_is_safety_backup: true
+
+- name: 'AGRA RESTORE 3/3 — Restore di master'
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tags: ['restore']
+  vars:
+    _rs_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
+    _rs_local_tarball: "{{ restore_local_tarball | default('') }}"
+    _rs_local_manifest: "{{ restore_manifest_path | default('') }}"
+    _rs_tarball: >-
+      {{ _rs_root_dir ~ '/' ~ (_rs_local_tarball | basename)
+         if _rs_local_tarball | length > 0
+         else restore_backup_tarball
+         if (restore_backup_tarball | default('') | length > 0)
+         else _rs_root_dir ~ '/' ~ restore_backup_name ~ '.tar.gz' }}
+    # Nama direktori di dalam tarball = nama backup = basename tarball.
+    _rs_name: "{{ _rs_tarball | basename | regex_replace('\\.tar\\.gz$', '') }}"
+    _rs_manifest: "{{ _rs_tarball | regex_replace('\\.tar\\.gz$', '.yml') }}"
+    _rs_has_grafana: "{{ (enable_grafana | default(true) | bool) and inventory_hostname in groups['grafana'] | default([]) }}"
+    _rs_grafana_uid: "{{ grafana_uid | default(472) }}"
+    _rs_grafana_gid: "{{ grafana_gid | default(0) }}"
+    _rs_grafana_container: "{{ grafana_container_name | default('agra-grafana') }}"
+    _rs_grafana_db: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+    _rs_manifest_data: >-
+      {{ lookup('ansible.builtin.file', _rs_local_manifest) | from_yaml
+         if _rs_local_manifest | length > 0
+         else (_rs_manifest_raw.content | b64decode | from_yaml)
+         if _rs_manifest_raw.content is defined else {} }}
+    _rs_expected_sha: "{{ _rs_manifest_data.backup_tarball_sha256 | default('') }}"
+
+  pre_tasks:
+    - name: 'Restore — Master wajib termasuk dalam run'
+      ansible.builtin.assert:
+        that: groups['monitoring'][0] in ansible_play_hosts_all
+        fail_msg: >-
+          Restore hanya berjalan di master {{ groups['monitoring'][0] }}, tetapi host itu
+          tidak termasuk dalam run ini (--limit?). Jalankan tanpa --limit.
+        quiet: true
+      tags: ['always']
+
+    - name: 'Restore — Hanya di MASTER (groups monitoring[0])'
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != groups['monitoring'][0]
+      tags: ['always']
+
+    - name: 'Restore — Gather facts (master)'
+      ansible.builtin.setup:
+        gather_subset: ['!all']
+      tags: ['always']
+
+  tasks:
+    - name: 'Restore — Copy tarball dari control node ke master'
+      ansible.builtin.copy:
+        src: "{{ _rs_local_tarball }}"
+        dest: "{{ _rs_tarball }}"
+        owner: root
+        group: root
+        mode: '0600'
+      when: _rs_local_tarball | length > 0
+
+    - name: 'Restore — Stat tarball (sha256)'
+      ansible.builtin.stat:
+        path: "{{ _rs_tarball }}"
+        checksum_algorithm: sha256
+      register: _rs_tar_stat
+
+    - name: 'Restore — Tarball wajib ada'
+      ansible.builtin.assert:
+        that: _rs_tar_stat.stat.exists
+        fail_msg: "Backup tarball {{ _rs_tarball }} tidak ditemukan di {{ inventory_hostname }}. Cek `agra backup list`."
+        quiet: true
+
+    # Manifest: salinan control node (dibaca sebagai operator), else di master.
+    - name: 'Restore — Baca manifest di master (jika ada)'
+      ansible.builtin.slurp:
+        src: "{{ _rs_manifest }}"
+      register: _rs_manifest_raw
+      failed_when: false
+      when: _rs_local_manifest | length == 0
+
+    - name: 'Restore — Verifikasi sha256 tarball vs manifest'
+      ansible.builtin.assert:
+        that: _rs_tar_stat.stat.checksum == _rs_expected_sha
+        fail_msg: "Checksum tarball {{ _rs_tarball }} tidak cocok dengan manifest — file rusak atau diubah."
+        quiet: true
+      when: _rs_expected_sha | length == 64
+
+    - name: 'Restore — WARNING tanpa manifest (checksum tidak diverifikasi)'
+      ansible.builtin.debug:
+        msg: "⚠️ Tidak ada manifest untuk {{ _rs_name }} — integritas tarball tidak bisa diverifikasi."
+      when: _rs_expected_sha | length != 64
+
+    - name: 'Restore — Ekstrak + terapkan'
+      block:
+        - name: 'Restore — Temp dir'
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: agra-restore-
+          register: _rs_tmp
+
+        - name: 'Restore — Untar'
+          ansible.builtin.unarchive:
+            src: "{{ _rs_tarball }}"
+            dest: "{{ _rs_tmp.path }}"
+            remote_src: true
+
+        - name: 'Restore — Stat isi backup'
+          ansible.builtin.stat:
+            path: "{{ _rs_tmp.path }}/{{ _rs_name }}/{{ item }}"
+          loop: [grafana/grafana.ini, grafana/grafana.db, grafana/provisioning, prometheus/tsdb-snapshot]
+          register: _rs_content
+
+        - name: 'Restore Grafana'
+          when: _rs_has_grafana | bool
+          vars:
+            _rs_src: "{{ _rs_tmp.path }}/{{ _rs_name }}/grafana"
+            _rs_have: "{{ dict(_rs_content.results | map(attribute='item') | zip(_rs_content.results | map(attribute='stat.exists'))) }}"
+          block:
+            - name: 'Restore Grafana — Backup wajib berisi grafana.ini'
+              ansible.builtin.assert:
+                that: _rs_have['grafana/grafana.ini']
+                fail_msg: "Backup {{ _rs_name }} tidak berisi grafana/grafana.ini."
+                quiet: true
+
+            - name: 'Restore Grafana — Stop container'
+              ansible.builtin.command:
+                argv: [docker, stop, "{{ _rs_grafana_container }}"]
+              changed_when: true
+
+            - name: 'Restore Grafana — Restore (container dijamin di-start ulang)'
+              block:
+                - name: 'Restore Grafana — grafana.ini'
+                  ansible.builtin.copy:
+                    src: "{{ _rs_src }}/grafana.ini"
+                    dest: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+                    remote_src: true
+                    owner: "{{ _rs_grafana_uid }}"
+                    group: "{{ _rs_grafana_gid }}"
+                    mode: '0640'
+                    backup: true
+
+                - name: 'Restore Grafana — provisioning'
+                  ansible.builtin.copy:
+                    src: "{{ _rs_src }}/provisioning/"
+                    dest: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}/"
+                    remote_src: true
+                    owner: "{{ _rs_grafana_uid }}"
+                    group: "{{ _rs_grafana_gid }}"
+                    directory_mode: '0750'
+                    mode: preserve
+                  when: _rs_have['grafana/provisioning']
+
+                # grafana.ini memakai wal = true: WAL/SHM lama akan di-replay
+                # ke DB hasil restore dan merusaknya — hapus sebelum copy.
+                - name: 'Restore Grafana — Hapus WAL/SHM lama'
+                  ansible.builtin.file:
+                    path: "{{ _rs_grafana_db }}{{ item }}"
+                    state: absent
+                  loop: ['-wal', '-shm']
+                  when: _rs_have['grafana/grafana.db']
+
+                - name: 'Restore Grafana — grafana.db'
+                  ansible.builtin.copy:
+                    src: "{{ _rs_src }}/grafana.db"
+                    dest: "{{ _rs_grafana_db }}"
+                    remote_src: true
+                    owner: "{{ _rs_grafana_uid }}"
+                    group: "{{ _rs_grafana_gid }}"
+                    mode: '0640'
+                    backup: true
+                  when: _rs_have['grafana/grafana.db']
+
+              always:
+                - name: 'Restore Grafana — Start container'
+                  ansible.builtin.command:
+                    argv: [docker, start, "{{ _rs_grafana_container }}"]
+                  changed_when: true
+
+                - name: 'Restore Grafana — Tunggu /api/health'
+                  ansible.builtin.uri:
+                    url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/health"
+                    status_code: 200
+                  register: _rs_health
+                  until: _rs_health.status == 200
+                  retries: 30
+                  delay: 5
+
+        - name: 'Restore Prometheus — Snapshot ke data dir (import manual)'
+          ansible.builtin.copy:
+            src: "{{ _rs_tmp.path }}/{{ _rs_name }}/prometheus/tsdb-snapshot/"
+            dest: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ _rs_name }}-restored/"
+            remote_src: true
+            owner: "{{ prometheus_uid | default(65534) }}"
+            group: "{{ prometheus_gid | default(0) }}"
+            directory_mode: '0755'
+            mode: preserve
+          when: _rs_content.results[3].stat.exists
+
+      always:
+        - name: 'Restore — Hapus temp dir'
+          ansible.builtin.file:
+            path: "{{ _rs_tmp.path }}"
+            state: absent
+          when: _rs_tmp.path is defined
+
+    - name: 'Restore — SUMMARY'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA RESTORE SELESAI dari {{ _rs_tarball }}"
+          - "Safety backup kondisi sebelum restore dibuat di {{ _rs_root_dir }} (lihat `agra backup list`)."
+          - "{{ 'Prometheus snapshot disalin ke ' ~ (prometheus_data_dir | default('/var/lib/agra/prometheus')) ~ '/snapshots/' ~ _rs_name ~ '-restored (import manual via promtool).' if _rs_content.results[3].stat.exists else 'Backup tanpa Prometheus TSDB snapshot.' }}"
+          - "grafana.ini hasil restore memuat secret dari saat backup — jalankan `agra deploy --tags grafana` untuk menyelaraskan dengan /etc/agra/passwords.yml."
+          - "{{ '' if (grafana_database | default('sqlite')) == 'sqlite' else '⚠️ grafana_database=' ~ grafana_database ~ ': isi database eksternal tidak di-restore oleh agra (restore dari backup database Anda).' }}"

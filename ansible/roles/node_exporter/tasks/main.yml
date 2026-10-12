@@ -1,0 +1,12 @@
+---
+# Not `meta: end_host`: in a play that runs several roles (upgrade/rollback) it
+# would end the host for the whole play — skipping every later role and the
+# health gate while the run still "succeeds".
+- name: Node Exporter - Deploy when enabled
+  when: enable_node_exporter | default(true) | bool
+  block:
+    - name: Node Exporter - Include shared config tasks
+      ansible.builtin.include_tasks: config.yml
+
+    - name: Node Exporter - Include docker deployment tasks (Docker-only mode)
+      ansible.builtin.include_tasks: docker.yml

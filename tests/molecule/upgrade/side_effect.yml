@@ -1,0 +1,29 @@
+---
+# One lifecycle step, as `agra upgrade` / `agra rollback` run it after precheck:
+# backup, then the rolling playbook. A stopped container must be recreated.
+- name: Advance test phase (deploy → upgrade → rollback)
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Write next phase
+      ansible.builtin.copy:
+        dest: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/phase"
+        content: "{{ {'deploy': 'upgrade', 'upgrade': 'rollback'}[_agra_test_phase] }}\n"
+        mode: '0644'
+
+- name: Stop nginx — the lifecycle run must bring it back
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Stop agra-nginx
+      ansible.builtin.command:
+        argv: [docker, stop, agra-nginx]
+      changed_when: true
+
+- name: Backup (agra upgrade always backs up first)
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/backup.yml
+
+- name: Rolling upgrade / rollback
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/upgrade_monitoring.yml

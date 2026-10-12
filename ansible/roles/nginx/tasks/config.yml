@@ -1,0 +1,176 @@
+---
+- name: Nginx (Config) - Ensure CONFIG/READONLY dirs exist (root-owned, site+ssl config)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ '0750' if 'ssl' in item else '0755' }}"
+  loop:
+    - "{{ nginx_config_dir }}"
+    - "{{ nginx_sites_available_dir }}"
+    - "{{ nginx_sites_enabled_dir }}"
+    - "{{ nginx_confd_dir }}"
+    - "{{ nginx_config_dir }}/ssl"
+  tags: ['nginx', 'config', 'dirs', 'configdirs']
+
+- name: Nginx (Config) - Ensure RUNTIME WRITABLE dirs exist (log cache, nginx worker UID inside container butuh nulis disini)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nginx_uid }}"
+    group: "{{ nginx_gid }}"
+    mode: "{{ nginx_dir_mode }}"
+  loop:
+    - "{{ nginx_log_dir }}"
+    - "{{ nginx_cache_dir }}"
+  tags: ['nginx', 'config', 'dirs', 'writabledirs', 'runtime']
+
+# ── SSL: copy cert dari CONTROL NODE ke managed host ──────────────────────
+# tls_*_path = path SUMBER di control node (default /etc/agra/ssl/*, hasil
+# `agra certificates generate`, atau cert CA-signed custom). Dibaca sebagai
+# operator user pemilik /etc/agra — stat tanpa become, copy src= dibaca
+# action plugin di control node (DESIGN.md §8A). Tujuan di managed host tetap:
+# {{ nginx_config_dir }}/ssl/{agra,grafana,prometheus}.{crt,key}.
+- name: Nginx (SSL) - Copy cert/key dari control node
+  when: enable_https | default(true) | bool
+  tags: ['nginx', 'config', 'ssl']
+  vars:
+    _nginx_ssl_files: >-
+      {{ [
+           {'src': tls_cert_path, 'dst': 'agra.crt', 'mode': '0644', 'required': true},
+           {'src': tls_key_path, 'dst': 'agra.key', 'mode': '0600', 'required': true},
+           {'src': tls_ca_path, 'dst': 'agra-ca.crt', 'mode': '0644', 'required': false},
+           {'src': tls_dhparam_path, 'dst': 'dhparam.pem', 'mode': '0644', 'required': false},
+           {'src': tls_grafana_cert_path, 'dst': 'grafana.crt', 'mode': '0644', 'required': true},
+           {'src': tls_grafana_key_path, 'dst': 'grafana.key', 'mode': '0600', 'required': true},
+           {'src': tls_prometheus_cert_path, 'dst': 'prometheus.crt', 'mode': '0644', 'required': true},
+           {'src': tls_prometheus_key_path, 'dst': 'prometheus.key', 'mode': '0600', 'required': true},
+         ] | rejectattr('src', 'none') | selectattr('src', 'truthy') | list }}
+  block:
+    - name: Nginx (SSL) - Stat sumber cert di control node
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+        get_checksum: false
+      loop: "{{ _nginx_ssl_files }}"
+      loop_control:
+        label: "{{ item.src }}"
+      register: _nginx_ssl_src
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Nginx (SSL) - Cert/key wajib ada dan terbaca di control node
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.readable
+        fail_msg: >-
+          {{ item.item.src }} {{ 'tidak terbaca oleh user saat ini — sudo chown -R "$USER:$USER" /etc/agra'
+          if item.stat.exists else 'tidak ditemukan — jalankan `agra certificates generate`, atau set
+          tls_cert_path/tls_key_path di globals.yml ke cert CA-signed' }}.
+        quiet: true
+      loop: "{{ _nginx_ssl_src.results }}"
+      loop_control:
+        label: "{{ item.item.src }}"
+      when: item.item.required
+      run_once: true
+
+    - name: Nginx (SSL) - Copy ke {{ nginx_config_dir }}/ssl
+      ansible.builtin.copy:
+        src: "{{ item.item.src }}"
+        dest: "{{ nginx_config_dir }}/ssl/{{ item.item.dst }}"
+        owner: root
+        group: root
+        mode: "{{ item.item.mode }}"
+      loop: "{{ _nginx_ssl_src.results }}"
+      loop_control:
+        label: "{{ item.item.dst }}"
+      when: item.stat.exists
+      notify: ['reload nginx']
+
+    - name: Nginx (SSL) - Catat apakah CA chain tersedia (ssl_stapling auto)
+      ansible.builtin.set_fact:
+        _nginx_ca_present: >-
+          {{ _nginx_ssl_src.results | selectattr('item.dst', 'equalto', 'agra-ca.crt')
+             | selectattr('stat.exists') | list | length > 0 }}
+
+- name: Nginx (Config) - Render nginx.conf via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/nginx.conf.j2', 'nginx.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_config_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'conf']
+
+- name: Nginx (Config) - Render grafana site available via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/grafana.conf.j2', 'sites-available/grafana.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_sites_available_dir }}/grafana.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'site', 'grafana']
+
+- name: Nginx (Config) - Render prometheus site available via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/sites-available/prometheus.conf.j2', 'sites-available/prometheus.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_sites_available_dir }}/prometheus.conf"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'site', 'prometheus']
+
+- name: Nginx (Config) - Render loopback /healthz server via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/nginx/conf.d/agra-healthz.conf.j2', 'conf.d/agra-healthz.conf.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ nginx_confd_dir }}/agra-healthz.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: ['reload nginx', 'nginx syntax check']
+  tags: ['nginx', 'config', 'healthz']
+
+- name: Nginx (Config) - Enable grafana site (symlink to sites-enabled)
+  ansible.builtin.file:
+    src: "{{ nginx_sites_available_dir }}/grafana.conf"
+    dest: "{{ nginx_sites_enabled_dir }}/grafana.conf"
+    state: link
+    force: true
+  notify: ['reload nginx']
+  tags: ['nginx', 'config', 'site', 'grafana']
+
+- name: Nginx (Config) - Enable prometheus site (symlink to sites-enabled)
+  ansible.builtin.file:
+    src: "{{ nginx_sites_available_dir }}/prometheus.conf"
+    dest: "{{ nginx_sites_enabled_dir }}/prometheus.conf"
+    state: link
+    force: true
+  notify: ['reload nginx']
+  tags: ['nginx', 'config', 'site', 'prometheus']
+
+- name: Nginx (Config) - Remove deprecated agra-monitoring.conf from sites-available
+  ansible.builtin.file:
+    path: "{{ nginx_sites_available_dir }}/agra-monitoring.conf"
+    state: absent
+  tags: ['nginx', 'config', 'site', 'cleanup']
+
+- name: Nginx (Config) - Remove deprecated agra-monitoring.conf symlink from sites-enabled
+  ansible.builtin.file:
+    path: "{{ nginx_sites_enabled_dir }}/agra-monitoring.conf"
+    state: absent
+  tags: ['nginx', 'config', 'site', 'cleanup']
+
+- name: Nginx (Config) - Disable default.conf from conf.d jika ada
+  ansible.builtin.file:
+    path: "{{ nginx_confd_dir }}/default.conf"
+    state: absent
+  notify: ['reload nginx']
+  tags: ['nginx', 'config', 'site']

@@ -1,0 +1,98 @@
+---
+# Two monitoring nodes behind monitoring_vip + one plain node_exporter target.
+# Run from tests/:  cd tests && molecule test -s ha-2node
+# Vars are injected like the CLI does — see default/molecule.yml.
+driver:
+  name: docker
+
+platforms:
+  - &node
+    name: agra-mon1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /var/lib/docker
+      - /var/lib/containerd
+    cgroupns_mode: private  # own cgroup tree for nested Docker (cgroup v2)
+    docker_networks:
+      - name: agra-ha-net
+        ipam_config:
+          - subnet: 172.28.0.0/24
+            gateway: 172.28.0.1
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.11
+  - <<: *node
+    name: agra-mon2
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.12
+  - <<: *node
+    name: agra-app1
+    networks:
+      - name: agra-ha-net
+        ipv4_address: 172.28.0.21
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare.yml
+    converge: ../shared/converge.yml
+    verify: verify.yml
+  options:
+    e: "@${MOLECULE_SCENARIO_DIRECTORY}/../../../etc/agra/globals.yml"
+    extra-vars: "@${MOLECULE_SCENARIO_DIRECTORY}/agra-vars.yml"
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_SCENARIO_DIRECTORY}/../../../ansible/roles"
+  inventory:
+    # ansible_host is the address other nodes and Prometheus use;
+    # ansible_docker_host keeps the docker connection on the container name.
+    # monitoring_vip_interface is per-host, so it lives here (RULES.md §14.6).
+    hosts:
+      all:
+        vars:
+          ansible_python_interpreter: /usr/bin/python3
+        hosts:
+          agra-mon1:
+            ansible_host: 172.28.0.11
+            ansible_docker_host: agra-mon1
+            monitoring_vip_interface: eth0
+          agra-mon2:
+            ansible_host: 172.28.0.12
+            ansible_docker_host: agra-mon2
+            monitoring_vip_interface: eth0
+          agra-app1:
+            ansible_host: 172.28.0.21
+            ansible_docker_host: agra-app1
+        children:
+          monitoring:
+            hosts:
+              agra-mon1:
+              agra-mon2:
+          grafana:
+            children:
+              monitoring:
+          prometheus:
+            children:
+              monitoring:
+          node_exporter:
+            hosts:
+              agra-mon1:
+              agra-mon2:
+              agra-app1:
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy

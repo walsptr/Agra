@@ -1,0 +1,14 @@
+---
+# Not `meta: end_host`: in a play that runs several roles (upgrade/rollback) it
+# would end the host for the whole play — skipping every later role and the
+# health gate while the run still "succeeds".
+- name: Keepalived - Deploy when enabled
+  when: (enable_keepalived | default(false) | bool) and (groups['monitoring'] | default([]) | length > 1)
+  block:
+    # monitoring_vip and monitoring_vip_interface are validated by precheck
+    # (`agra check`, RULES §4), not halfway through a deploy.
+    - name: Keepalived - Include shared config tasks
+      ansible.builtin.include_tasks: config.yml
+
+    - name: Keepalived - Include docker deployment tasks (Docker-only mode)
+      ansible.builtin.include_tasks: docker.yml

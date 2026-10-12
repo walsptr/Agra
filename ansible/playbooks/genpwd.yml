@@ -1,0 +1,127 @@
+---
+# agra genpwd — isi field secret yang kosong di /etc/agra/passwords.yml.
+#
+# Berjalan di control node sebagai operator user (TANPA become): /etc/agra
+# dimiliki operator user (ARCHITECTURE.md §8.2), jadi file dibaca & ditulis
+# langsung. CLI menjalankan playbook ini dengan load_etc_vars=False karena
+# playbook inilah yang membuat passwords.yml.
+- name: 'AGRA — Generate random passwords ke /etc/agra/passwords.yml'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['genpwd']
+
+  vars:
+    agra_etc_dir: /etc/agra
+    passwords_file: "{{ agra_etc_dir }}/passwords.yml"
+    genpwd_force: false
+    genpwd_confirm: false
+    # Secret yang DIBUAT agra — WAJIB sinkron dengan SCHEMA.md §8. Kredensial
+    # yang diterbitkan pihak lain (backup_s3_access_key/secret_key dari
+    # provider S3) tidak di-generate: nilai acak lolos precheck tapi tidak
+    # pernah valid. Field itu tetap ada (kosong) dan diisi operator.
+    genpwd_fields:
+      - { key: grafana_admin_password, length: 16 }
+      - { key: grafana_database_password, length: 16 }
+      - { key: grafana_secret_key, length: 32 }
+      # keepalived VRRP auth_pass type PASS dibatasi 8 karakter.
+      - { key: keepalived_auth_pass, length: 8 }
+    genpwd_operator_fields: [backup_s3_access_key, backup_s3_secret_key]
+
+  tasks:
+    # --force mengganti SEMUA secret: grafana_secret_key baru membuat data
+    # terenkripsi di database Grafana (password datasource, dsb.) tidak bisa
+    # dibaca, dan grafana_database_password baru tidak cocok dengan database
+    # eksternal. Destruktif → konfirmasi eksplisit (RULES §8).
+    - name: Assert --force dikonfirmasi
+      ansible.builtin.assert:
+        that: not genpwd_force | bool or genpwd_confirm | bool
+        fail_msg: >-
+          genpwd --force mengganti semua secret (termasuk grafana_secret_key dan
+          grafana_database_password). Jalankan: agra genpwd --force --yes-i-really-mean-it
+        quiet: true
+
+    - name: Stat /etc/agra
+      ansible.builtin.stat:
+        path: "{{ agra_etc_dir }}"
+      register: _etc_stat
+
+    - name: Assert /etc/agra exists and is writable by the current user
+      ansible.builtin.assert:
+        that:
+          - _etc_stat.stat.exists
+          - _etc_stat.stat.isdir
+          - _etc_stat.stat.writeable
+        fail_msg: >-
+          {{ agra_etc_dir }} tidak ada atau tidak bisa ditulis oleh user saat ini.
+          Jalankan ./install.sh, atau perbaiki ownership:
+          sudo chown -R "$USER:$USER" {{ agra_etc_dir }}
+        quiet: true
+
+    - name: Stat existing passwords.yml
+      ansible.builtin.stat:
+        path: "{{ passwords_file }}"
+      register: _pwd_stat
+
+    - name: Assert existing passwords.yml is readable
+      ansible.builtin.assert:
+        that: _pwd_stat.stat.readable
+        fail_msg: >-
+          {{ passwords_file }} tidak bisa dibaca oleh user saat ini.
+          Perbaiki ownership: sudo chown -R "$USER:$USER" {{ agra_etc_dir }}
+        quiet: true
+      when: _pwd_stat.stat.exists
+
+    - name: Load existing passwords.yml
+      ansible.builtin.include_vars:
+        file: "{{ passwords_file }}"
+        name: _pwd_existing
+      when: _pwd_stat.stat.exists
+      no_log: true
+
+    # Key yang tidak dikelola genpwd tetap dipertahankan apa adanya.
+    - name: Compute final passwords (retain filled fields, generate empty ones)
+      ansible.builtin.set_fact:
+        _pwd_final: >-
+          {%- set out = dict(_pwd_existing | default({})) -%}
+          {%- for f in genpwd_fields -%}
+            {%- if genpwd_force | bool or (out.get(f.key) | default('', true) | string | trim | length == 0) -%}
+              {%- set _ = out.update({f.key: lookup('ansible.builtin.password', '/dev/null length=' ~ f.length ~ ' chars=ascii_letters,digits')}) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- for k in genpwd_operator_fields if k not in out -%}
+            {%- set _ = out.update({k: ''}) -%}
+          {%- endfor -%}
+          {{ out }}
+        _pwd_status: >-
+          {%- set out = [] -%}
+          {%- for f in genpwd_fields -%}
+            {%- set filled = (_pwd_existing | default({})).get(f.key) | default('', true) | string | trim | length > 0 -%}
+            {%- set _ = out.append(f.key ~ ': ' ~ ('RETAIN' if filled and not genpwd_force | bool else 'NEW')) -%}
+          {%- endfor -%}
+          {%- for k in genpwd_operator_fields -%}
+            {%- set filled = (_pwd_existing | default({})).get(k) | default('', true) | string | trim | length > 0 -%}
+            {%- set _ = out.append(k ~ ': ' ~ ('RETAIN' if filled else 'KOSONG — isi manual dari provider S3 jika backup_s3_enabled')) -%}
+          {%- endfor -%}
+          {{ out }}
+      no_log: true
+
+    - name: Write passwords.yml (mode 0600, backup previous version)
+      ansible.builtin.copy:
+        dest: "{{ passwords_file }}"
+        mode: '0600'
+        backup: true
+        content: |
+          # /etc/agra/passwords.yml — AGRA SECRETS (plaintext, mode 0600). JANGAN commit.
+          # Dikelola oleh `agra genpwd`. Field yang sudah terisi tidak ditimpa kecuali --force.
+          {{ _pwd_final | to_nice_yaml(explicit_start=true, width=4096, indent=2, sort_keys=false) }}
+      no_log: true
+      register: _pwd_write
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "{{ passwords_file }} {{ 'diperbarui' if _pwd_write.changed else 'tidak berubah' }}{{ ' (backup: ' ~ _pwd_write.backup_file ~ ')' if _pwd_write.backup_file is defined else '' }}"
+          - "{{ _pwd_status }}"
+          - "Selanjutnya: agra check -i <inventory> lalu agra deploy -i <inventory>"

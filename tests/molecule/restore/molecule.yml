@@ -1,0 +1,66 @@
+---
+# Backup → lose the Grafana database → restore, as an operator would run
+# `agra backup create` then `agra restore -n <name> --yes-i-really-mean-it`.
+# Run from tests/:  cd tests && molecule test -s restore
+# Vars are injected like the CLI does — see default/molecule.yml.
+driver:
+  name: docker
+
+platforms:
+  - name: agra-mon1
+    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      # Nested Docker cannot run overlayfs on top of the container overlay.
+      - /var/lib/docker
+      - /var/lib/containerd
+    cgroupns_mode: private  # own cgroup tree for nested Docker (cgroup v2)
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    side_effect: side_effect.yml
+    verify: verify.yml
+  # Two distinct keys because molecule turns this dict into flags and cannot
+  # repeat one; both become ansible-playbook extra-vars, in this order.
+  options:
+    e: "@${MOLECULE_SCENARIO_DIRECTORY}/../../../etc/agra/globals.yml"
+    extra-vars: "@${MOLECULE_SCENARIO_DIRECTORY}/agra-vars.yml"
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_SCENARIO_DIRECTORY}/../../../ansible/roles"
+  inventory:
+    hosts:
+      all:
+        vars:
+          ansible_python_interpreter: /usr/bin/python3
+        children:
+          monitoring:
+            hosts:
+              agra-mon1:
+          grafana:
+            children:
+              monitoring:
+          prometheus:
+            children:
+              monitoring:
+          node_exporter:
+            hosts:
+              agra-mon1:
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - side_effect  # backup, wreck, restore
+    - verify
+    - destroy

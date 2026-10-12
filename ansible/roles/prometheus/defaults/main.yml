@@ -1,0 +1,28 @@
+---
+enable_prometheus: true
+prometheus_port: 9090
+prometheus_retention_time: 15d
+prometheus_retention_size: ""
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+prometheus_data_dir: /var/lib/agra/prometheus
+prometheus_image: prom/prometheus
+prometheus_tag: v2.53.0
+
+expose_prometheus_via_nginx: false
+prometheus_config_dir: /etc/prometheus
+prometheus_file_sd_dir: "{{ prometheus_config_dir }}/file_sd"
+prometheus_rules_dir: "{{ prometheus_config_dir }}/rules"
+prometheus_log_level: info
+prometheus_container_name: agra-prometheus
+prometheus_web_external_url: ""
+# Loopback only, with or without nginx: Prometheus has no auth and the admin
+# API (TSDB snapshot/delete) + lifecycle API (/-/quit) are always on. Grafana
+# and backups use 127.0.0.1; public access goes through nginx
+# (prometheus_domain / expose_prometheus_via_nginx), which blocks those APIs.
+prometheus_web_listen_address: "127.0.0.1:{{ prometheus_port }}"
+prometheus_uid: 65534
+prometheus_gid: 0
+prometheus_docker_user: "{{ prometheus_uid }}:{{ prometheus_gid }}"
+prometheus_dir_mode: "2770"
+prometheus_file_mode: "0640"

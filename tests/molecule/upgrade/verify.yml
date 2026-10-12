@@ -1,0 +1,42 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml
+
+- name: Verify — running images and spec match the current phase
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Inspect image and command of the containers
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{% raw %}{{.Config.Image}} {{json .Args}}{% endraw %}", "{{ item }}"]
+      loop: [agra-grafana, agra-prometheus]
+      register: _ins
+      changed_when: false
+
+    - name: Grafana and Prometheus run the expected tags and retention
+      ansible.builtin.assert:
+        that:
+          - _ins.results[0].stdout.split(' ', 1)[0] == grafana_image ~ ':' ~ grafana_tag
+          - _ins.results[1].stdout.split(' ', 1)[0] == prometheus_image ~ ':' ~ prometheus_tag
+          - ('--storage.tsdb.retention.time=' ~ prometheus_retention_time) in _ins.results[1].stdout
+        fail_msg: "phase={{ _agra_test_phase }}: {{ _ins.results | map(attribute='stdout') | list }}"
+
+- name: Verify — version history
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Load installed versions file
+      ansible.builtin.include_vars:
+        file: "{{ agra_installed_versions_file }}"
+        name: _iv
+
+    - name: previous holds the version that was just replaced
+      ansible.builtin.assert:
+        that:
+          - _iv.previous.versions.grafana_tag == _expected_previous
+        fail_msg: "phase={{ _agra_test_phase }}: {{ _iv }}"
+      vars:
+        _expected_previous: "{{ {'upgrade': '11.2.0', 'rollback': '11.2.1'}[_agra_test_phase] }}"
+      when: _agra_test_phase != 'deploy'

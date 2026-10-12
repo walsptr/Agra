@@ -1,0 +1,35 @@
+---
+# Container yang belum ada (mis. `deploy --tags config` di host baru) bukan
+# error — akan dibuat dengan config baru saat deploy penuh. Error lain
+# (daemon mati, config invalid) WAJIB gagal, bukan `|| true`.
+- name: restart prometheus
+  ansible.builtin.debug:
+    msg: "Restart prometheus triggered"
+  changed_when: true
+  notify:
+    - restart prometheus docker
+
+- name: reload prometheus
+  ansible.builtin.debug:
+    msg: "Reload prometheus triggered (lifecycle API)"
+  changed_when: true
+  notify:
+    - reload prometheus docker
+
+- name: restart prometheus docker
+  ansible.builtin.command:
+    cmd: docker restart {{ prometheus_container_name }}
+  register: _h_result
+  changed_when: _h_result.rc == 0
+  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
+  when:
+    - enable_prometheus | default(true) | bool
+
+# --web.enable-lifecycle selalu aktif (tasks/config.yml) — 403 = error nyata.
+- name: reload prometheus docker
+  ansible.builtin.uri:
+    url: "http://{{ prometheus_web_listen_address | regex_replace('^0\\.0\\.0\\.0', '127.0.0.1') }}/-/reload"
+    method: POST
+    status_code: [200, 204]
+  when:
+    - enable_prometheus | default(true) | bool

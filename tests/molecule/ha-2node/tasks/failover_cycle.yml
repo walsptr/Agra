@@ -1,0 +1,57 @@
+---
+# One failover round trip: make the master unhealthy by stopping `_service`,
+# expect the VIP on the first backup only, restore, expect it back on the
+# master (preemption). Included once per host in play `monitoring`.
+- name: "Failover ({{ _service }}) — stop it on the master"
+  ansible.builtin.command:
+    argv: [docker, stop, "{{ _service }}"]
+  changed_when: true
+  when: inventory_hostname == _master
+
+- name: "Failover ({{ _service }}) — VIP ends up on the backup, not on the master"
+  block:
+    - name: "Failover ({{ _service }}) — wait for the VIP on the backup"
+      ansible.builtin.command:
+        argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+      register: _fo_addr
+      changed_when: false
+      until: (monitoring_vip ~ '/') in _fo_addr.stdout
+      retries: 30
+      delay: 1
+      when: inventory_hostname == _backup
+
+    - name: "Failover ({{ _service }}) — wait for the master to release it"
+      ansible.builtin.command:
+        argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+      register: _fo_addr
+      changed_when: false
+      until: (monitoring_vip ~ '/') not in _fo_addr.stdout
+      retries: 30
+      delay: 1
+      when: inventory_hostname == _master
+  always:
+    - name: "Failover ({{ _service }}) — start it again on the master"
+      ansible.builtin.command:
+        argv: [docker, start, "{{ _service }}"]
+      changed_when: true
+      when: inventory_hostname == _master
+
+- name: "Failover ({{ _service }}) — VIP returns to the healthy master"
+  ansible.builtin.command:
+    argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+  register: _fo_addr
+  changed_when: false
+  until: (monitoring_vip ~ '/') in _fo_addr.stdout
+  retries: 60
+  delay: 1
+  when: inventory_hostname == _master
+
+- name: "Failover ({{ _service }}) — backup released it"
+  ansible.builtin.command:
+    argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+  register: _fo_addr
+  changed_when: false
+  until: (monitoring_vip ~ '/') not in _fo_addr.stdout
+  retries: 30
+  delay: 1
+  when: inventory_hostname == _backup

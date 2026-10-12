@@ -1,0 +1,65 @@
+---
+# All-in-one on the RHEL family (Rocky Linux 9): precheck installs docker-ce
+# from download.docker.com (ARCHITECTURE.md §3), then the same deploy and
+# checks as `default`, whose vars and verify it reuses.
+# Run from tests/:  cd tests && molecule test -s rocky9
+driver:
+  name: docker
+
+platforms:
+  - name: agra-rhel1
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    pre_build_image: true
+    command: /usr/sbin/init
+    privileged: true
+    volumes:
+      # Nested Docker cannot run overlayfs on top of the container overlay.
+      - /var/lib/docker
+      - /var/lib/containerd
+    cgroupns_mode: private  # own cgroup tree for nested Docker (cgroup v2)
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: ../shared/prepare.yml
+    converge: ../shared/converge.yml
+    verify: ../default/verify.yml
+  # Two distinct keys because molecule turns this dict into flags and cannot
+  # repeat one; both become ansible-playbook extra-vars, in this order.
+  options:
+    e: "@${MOLECULE_SCENARIO_DIRECTORY}/../../../etc/agra/globals.yml"
+    extra-vars: "@${MOLECULE_SCENARIO_DIRECTORY}/../default/agra-vars.yml"
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_SCENARIO_DIRECTORY}/../../../ansible/roles"
+  inventory:
+    hosts:
+      all:
+        vars:
+          ansible_python_interpreter: /usr/bin/python3
+        children:
+          monitoring:
+            hosts:
+              agra-rhel1:
+          grafana:
+            children:
+              monitoring:
+          prometheus:
+            children:
+              monitoring:
+          node_exporter:
+            hosts:
+              agra-rhel1:
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - verify
+    - destroy

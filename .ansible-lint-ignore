@@ -1,0 +1,3 @@
+# Baseline of violations that existed when lint was introduced (PR 1).
+# Each line is one file + rule; remove it when that file is fixed.
+ansible/playbooks/destroy.yml run-once[task]

@@ -1,0 +1,15 @@
+---
+# Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
+
+# Stand-ins for /etc/agra/passwords.yml.
+grafana_admin_password: molecule-admin-pw
+grafana_secret_key: molecule-secret-key-0123456789
+keepalived_auth_pass: molecule
+
+# HTTPS stays on (the default); the certificate comes from shared/prepare.yml.
+tls_cert_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.crt"
+tls_key_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.key"
+
+# Keep the control node's real /etc/agra untouched.
+agra_installed_versions_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/installed_versions.yml"
+backup_control_node_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/backups"

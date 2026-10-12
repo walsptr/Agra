@@ -1,0 +1,53 @@
+---
+# Health gate per-host untuk rolling upgrade/rollback (DESIGN.md §7 langkah 5).
+# Dijalankan sebagai post_tasks di play `serial: 1` — jika host ini tidak sehat,
+# play gagal dan (max_fail_percentage: 0) host berikutnya TIDAK disentuh.
+
+- name: Health gate — Grafana /api/health
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/health"
+    status_code: 200
+  register: _hg_grafana
+  until: _hg_grafana.status == 200
+  retries: "{{ agra_health_gate_retries }}"
+  delay: "{{ agra_health_gate_delay }}"
+  when:
+    - enable_grafana | default(true) | bool
+    - inventory_hostname in groups['grafana'] | default([])
+
+- name: Health gate — Prometheus /-/healthy
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/-/healthy"
+    status_code: 200
+  register: _hg_prometheus
+  until: _hg_prometheus.status == 200
+  retries: "{{ agra_health_gate_retries }}"
+  delay: "{{ agra_health_gate_delay }}"
+  when:
+    - enable_prometheus | default(true) | bool
+    - inventory_hostname in groups['prometheus'] | default([])
+
+- name: Health gate — Node Exporter /metrics
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ node_exporter_port | default(9100) }}/metrics"
+    status_code: 200
+    return_content: false
+  register: _hg_node_exporter
+  until: _hg_node_exporter.status == 200
+  retries: "{{ agra_health_gate_retries }}"
+  delay: "{{ agra_health_gate_delay }}"
+  when:
+    - enable_node_exporter | default(true) | bool
+    - inventory_hostname in groups['node_exporter'] | default([])
+
+- name: Health gate — Nginx /healthz (loopback)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nginx_health_port | default(18080) }}/healthz"
+    status_code: 200
+  register: _hg_nginx
+  until: _hg_nginx.status == 200
+  retries: "{{ agra_health_gate_retries }}"
+  delay: "{{ agra_health_gate_delay }}"
+  when:
+    - enable_nginx | default(true) | bool
+    - inventory_hostname in groups['monitoring'] | default([])

@@ -1,0 +1,114 @@
+---
+# Test fixtures first, then the shared prepare (= `agra check`).
+#
+# PostgreSQL on agra-app1 stands in for the operator's existing database:
+# agra itself never installs one (RULES §9), so the test provides it.
+
+# Every node runs an active ufw with the Ubuntu default (deny incoming), so the
+# deploy has to open exactly what the stack needs: VRRP, Grafana alerting
+# gossip, node_exporter scrapes from Prometheus nodes, nginx 80/443.
+- name: Fixture — active host firewall (ufw, deny incoming)
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install ufw
+      ansible.builtin.apt:
+        name: ufw
+        update_cache: true
+    - name: Enable ufw
+      ansible.builtin.command:
+        argv: [ufw, --force, enable]
+      register: _ufw_enable
+      changed_when: "'active and enabled' in _ufw_enable.stdout"
+
+- name: Fixture — external PostgreSQL for HA Grafana (agra-app1)
+  hosts: agra-app1
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install Docker for the fixture
+      ansible.builtin.apt:
+        name: docker.io
+        update_cache: true
+    - name: Start Docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+    - name: Check fixture container
+      ansible.builtin.command:
+        argv: [docker, inspect, molecule-postgres]
+      register: _pg
+      changed_when: false
+      failed_when: false
+    - name: Run PostgreSQL 16 (host network, port 5432)
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - -d
+          - --name=molecule-postgres
+          - --network=host
+          - --env=POSTGRES_USER={{ grafana_database_user }}
+          - --env=POSTGRES_DB={{ grafana_database_name }}
+          - --env=POSTGRES_PASSWORD={{ grafana_database_password }}
+          - postgres:16-alpine
+      when: _pg.rc != 0
+      changed_when: true
+      no_log: true
+    # The operator's database is reachable from the Grafana nodes; agra does
+    # not manage its firewall (the ufw fixture below is active on every node).
+    - name: Open PostgreSQL to the Grafana nodes
+      ansible.builtin.command:
+        argv: [ufw, allow, proto, tcp, from, "{{ hostvars[item]['ansible_host'] }}", to, any, port, '5432']
+      loop: "{{ groups['grafana'] }}"
+      register: _pg_ufw
+      changed_when: "'Skipping' not in _pg_ufw.stdout"
+    - name: Wait until PostgreSQL accepts connections
+      ansible.builtin.command:
+        argv: [docker, exec, molecule-postgres, pg_isready, -U, "{{ grafana_database_user }}"]
+      register: _ready
+      until: _ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+# What the removed SQLite rsync sync left on hosts deployed by older agra
+# versions; converge must remove it without touching anything else.
+- name: Fixture — leftovers of the old SQLite rsync sync
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Root .ssh
+      ansible.builtin.file:
+        path: /root/.ssh
+        state: directory
+        mode: '0700'
+    - name: Old sync keypair on the former master
+      ansible.builtin.copy:
+        dest: "/root/.ssh/{{ item.name }}"
+        content: "{{ item.content }}"
+        mode: '0600'
+      loop:
+        - {name: id_ed25519, content: "dummy private key\n"}
+        - {name: id_ed25519.pub, content: "ssh-ed25519 AAAAdummy agra-grafana-sync@agra-mon1\n"}
+      loop_control:
+        label: "{{ item.name }}"
+      when: inventory_hostname == groups['monitoring'][0]
+    - name: Root authorized_keys with the sync key plus an unrelated key
+      ansible.builtin.copy:
+        dest: /root/.ssh/authorized_keys
+        content: |
+          ssh-ed25519 AAAAoperator operator@laptop
+          command="rsync --server --sender -logDtprze.iLsfxC . /var/lib/agra/grafana/",no-pty ssh-ed25519 AAAAdummy agra-grafana-sync@agra-mon1
+        mode: '0600'
+    - name: Old rsync cron job (cron.d file, as the old role wrote it)
+      ansible.builtin.cron:
+        name: agra-grafana-sqlite-rsync-sync
+        user: root
+        job: /usr/local/bin/agra_grafana_rsync.sh >> /var/log/agra-grafana-sync.log 2>&1
+        cron_file: agra-grafana-sync
+
+- name: Shared prepare
+  ansible.builtin.import_playbook: ../shared/prepare.yml

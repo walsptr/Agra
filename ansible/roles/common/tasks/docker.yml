@@ -1,0 +1,28 @@
+---
+# Docker is installed by `agra check` (precheck bootstrap: docker.io on Debian,
+# docker-ce from download.docker.com on RHEL — ARCHITECTURE.md §3). Deploy does
+# not install a runtime; it requires the Docker engine, running.
+- name: Common (Docker) - Locate the docker CLI
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v docker']
+  register: _common_docker_bin
+  changed_when: false
+  failed_when: false
+  tags: ['common', 'docker']
+
+- name: Common (Docker) - Docker must be installed (by agra check)
+  ansible.builtin.assert:
+    that: _common_docker_bin.rc == 0
+    fail_msg: >-
+      docker tidak ada di {{ inventory_hostname }}. Jalankan `agra check -i <inventory>`
+      dulu — precheck memasang Docker di setiap node.
+    quiet: true
+  tags: ['common', 'docker']
+
+# podman-docker has no docker.service: a podman-only host fails here, loudly.
+- name: Common (Docker) - Start and enable docker service
+  ansible.builtin.service:
+    name: "{{ common_docker_service_name }}"
+    state: started
+    enabled: true
+  tags: ['common', 'docker', 'service']

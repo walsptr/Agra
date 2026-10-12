@@ -1,0 +1,18 @@
+---
+# Default vars lifecycle (deploy/upgrade/rollback) — dimuat via vars_files.
+# Bisa di-override dari /etc/agra/globals.yml (extra-vars menang). SCHEMA.md §11.
+
+# File catatan versi ter-deploy di control node (dibaca `agra rollback`).
+agra_installed_versions_file: /etc/agra/.installed_versions.yml
+
+# Variabel versi yang dicatat & bisa di-rollback.
+agra_version_vars:
+  - grafana_tag
+  - prometheus_tag
+  - node_exporter_tag
+  - nginx_tag
+  - keepalived_tag
+
+# Health gate rolling upgrade: total tunggu = retries x delay detik per endpoint.
+agra_health_gate_retries: 30
+agra_health_gate_delay: 5

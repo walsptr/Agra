@@ -1,0 +1,359 @@
+---
+# agra backup — dijalankan di master (groups['monitoring'][0]). Dipanggil
+# langsung (`agra backup create`), sebelum upgrade, dan sebelum restore.
+#
+# Setiap langkah WAJIB sukses: backup yang "berhasil" tapi kosong lebih
+# berbahaya daripada backup yang gagal (upgrade bergantung padanya, RULES §10).
+# Hasilnya (tarball + manifest) di-fetch ke control node
+# (backup_control_node_dir), tempat `agra backup list` / `agra restore` membaca.
+#
+# Variabel publik (CLI -e / globals.yml / import_playbook vars) TIDAK
+# didefinisikan ulang di sini — nilai efektif dihitung ke nama privat `_bk_*`
+# (menghindari template rekursif `x: "{{ x | default(..) }}"`).
+- name: 'AGRA — Backup (Grafana + Prometheus TSDB snapshot opsional + manifest + S3 opsional)'
+  hosts: monitoring
+  # Facts hanya dari master (setup di bawah): standby yang mati tidak boleh
+  # menggagalkan backup — dan dengan itu `agra upgrade`.
+  gather_facts: false
+  become: true
+  tags: ['backup']
+  vars:
+    _bk_root_dir: "{{ backup_root_dir | default('/var/lib/agra/backups') }}"
+    _bk_ctrl_dir: "{{ backup_control_node_dir | default('/etc/agra/backups') }}"
+    _bk_include_tsdb: "{{ backup_include_prometheus_tsdb | default(false) | bool }}"
+    _bk_retention_count: "{{ backup_retention_count | default(7) | int }}"
+    _bk_apply_retention: "{{ backup_apply_retention | default(true) | bool }}"
+    # Safety backup sebelum restore: simpan apa yang ada. State yang rusak
+    # (grafana.db hilang) adalah alasan restore, bukan alasan memblokirnya.
+    _bk_safety: "{{ backup_is_safety_backup | default(false) | bool }}"
+    _bk_s3_enabled: "{{ backup_s3_enabled | default(false) | bool }}"
+    _bk_s3_prefix: "{{ backup_s3_prefix | default('agra-backups') }}"
+    _bk_has_grafana: "{{ (enable_grafana | default(true) | bool) and inventory_hostname in groups['grafana'] | default([]) }}"
+    _bk_grafana_sqlite: "{{ _bk_has_grafana | bool and (grafana_database | default('sqlite')) == 'sqlite' }}"
+    _bk_grafana_sqlite_path: "{{ grafana_sqlite_path | default('/var/lib/agra/grafana/grafana.db') }}"
+    _bk_timestamp: "{{ ansible_facts['date_time'].iso8601_basic_short }}"
+    _bk_name: "agra-backup-{{ inventory_hostname }}-{{ _bk_timestamp }}"
+    _bk_stage_dir: "{{ _bk_root_dir }}/{{ _bk_name }}"
+    _bk_tarball: "{{ _bk_root_dir }}/{{ _bk_name }}.tar.gz"
+    _bk_manifest: "{{ _bk_root_dir }}/{{ _bk_name }}.yml"
+    # What exists on the master (stat below); only valid once _bk_gf_src is registered.
+    _bk_gf_have: >-
+      {{ {'ini': false, 'provisioning': false, 'db': false} if not _bk_has_grafana | bool else
+         {'ini': _bk_gf_src.results[0].stat.exists,
+          'provisioning': _bk_gf_src.results[1].stat.exists,
+          'db': _bk_grafana_sqlite | bool and _bk_gf_src.results[2].stat.exists
+                and _bk_gf_src.results[2].stat.size > 0} }}
+    _bk_gf_missing: >-
+      {{ (['grafana.ini'] if not _bk_gf_have.ini else [])
+         + (['provisioning'] if not _bk_gf_have.provisioning else [])
+         + (['grafana.db'] if _bk_grafana_sqlite | bool and not _bk_gf_have.db else []) }}
+    _bk_components: >-
+      {{ (['grafana/grafana.ini'] if _bk_gf_have.ini else [])
+         + (['grafana/provisioning'] if _bk_gf_have.provisioning else [])
+         + (['grafana/grafana.db'] if _bk_gf_have.db else [])
+         + (['prometheus/tsdb-snapshot'] if _bk_include_tsdb | bool else []) }}
+
+  pre_tasks:
+    # --limit tanpa master = play tanpa backup yang tetap "sukses".
+    - name: 'Backup — Master wajib termasuk dalam run'
+      ansible.builtin.assert:
+        that: groups['monitoring'][0] in ansible_play_hosts_all
+        fail_msg: >-
+          Backup hanya berjalan di master {{ groups['monitoring'][0] }}, tetapi host itu
+          tidak termasuk dalam run ini (--limit?). Jalankan tanpa --limit.
+        quiet: true
+      tags: ['always']
+
+    # meta tidak membuka koneksi: standby berhenti di sini tanpa disentuh.
+    - name: 'Backup — Hanya di MASTER (groups monitoring[0])'
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != groups['monitoring'][0]
+      tags: ['always']
+
+    - name: 'Backup — Gather facts (master)'
+      ansible.builtin.setup:
+        gather_subset: ['!all', 'date_time']
+      tags: ['always']
+
+  tasks:
+    - name: 'Backup — Ensure backup root + stage dir'
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+      loop:
+        - "{{ _bk_root_dir }}"
+        - "{{ _bk_stage_dir }}"
+        - "{{ _bk_stage_dir }}/grafana"
+
+    # ── Grafana ─────────────────────────────────────────────────────────
+    - name: 'Backup Grafana — config + provisioning + database'
+      when: _bk_has_grafana | bool
+      block:
+        - name: 'Backup Grafana — Stat sumber'
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+            - "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}"
+            - "{{ _bk_grafana_sqlite_path }}"
+          register: _bk_gf_src
+
+        - name: 'Backup Grafana — Sumber wajib ada (kecuali safety backup)'
+          ansible.builtin.assert:
+            that: _bk_gf_missing | length == 0
+            fail_msg: >-
+              Tidak ada untuk di-backup di {{ inventory_hostname }}: {{ _bk_gf_missing | join(', ') }}.
+              Deploy dulu (`agra deploy`), atau restore dari backup lama.
+            quiet: true
+          when: not _bk_safety | bool
+
+        - name: 'Backup Grafana — WARNING safety backup tidak lengkap'
+          ansible.builtin.debug:
+            msg: "⚠️ Safety backup tanpa: {{ _bk_gf_missing | join(', ') }} (tidak ada / kosong di {{ inventory_hostname }})."
+          when: _bk_safety | bool and _bk_gf_missing | length > 0
+
+        - name: 'Backup Grafana — Copy grafana.ini'
+          ansible.builtin.copy:
+            src: "{{ grafana_config_dir | default('/etc/grafana') }}/grafana.ini"
+            dest: "{{ _bk_stage_dir }}/grafana/grafana.ini"
+            remote_src: true
+            mode: '0600'
+          when: _bk_gf_have.ini
+
+        - name: 'Backup Grafana — Copy provisioning'
+          ansible.builtin.copy:
+            src: "{{ grafana_provisioning_dir | default('/etc/grafana/provisioning') }}/"
+            dest: "{{ _bk_stage_dir }}/grafana/provisioning/"
+            remote_src: true
+            directory_mode: '0750'
+            mode: preserve
+          when: _bk_gf_have.provisioning
+
+        # sqlite3 .backup = snapshot konsisten meski Grafana sedang menulis
+        # (copy file mentah bisa menghasilkan DB korup). sqlite3 dipasang
+        # oleh role common. sqlite3 membuat DB kosong jika sumber tidak ada —
+        # karena itu hanya dijalankan jika file ada dan tidak kosong.
+        - name: 'Backup Grafana — sqlite3 .backup (point-in-time konsisten)'
+          ansible.builtin.command:
+            argv:
+              - sqlite3
+              - "{{ _bk_grafana_sqlite_path }}"
+              - ".backup '{{ _bk_stage_dir }}/grafana/grafana.db'"
+          when: _bk_gf_have.db
+          changed_when: true
+
+        - name: 'Backup Grafana — Verifikasi integritas grafana.db'
+          ansible.builtin.command:
+            argv: [sqlite3, "{{ _bk_stage_dir }}/grafana/grafana.db", "PRAGMA integrity_check;"]
+          register: _bk_integrity
+          changed_when: false
+          failed_when: _bk_integrity.stdout | trim != 'ok'
+          when: _bk_gf_have.db
+
+    # ── Prometheus TSDB (opsional, snapshot API resmi — RULES §8) ────────
+    - name: 'Backup Prometheus — TSDB snapshot'
+      when: _bk_include_tsdb | bool
+      block:
+        - name: 'Backup Prometheus — Trigger snapshot via Admin API'
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/api/v1/admin/tsdb/snapshot"
+            method: POST
+            status_code: 200
+            return_content: true
+          register: _bk_prom_snap
+
+        - name: 'Backup Prometheus — Copy snapshot ke stage'
+          ansible.builtin.copy:
+            src: "{{ _bk_snap_src }}/"
+            dest: "{{ _bk_stage_dir }}/prometheus/tsdb-snapshot/"
+            remote_src: true
+            directory_mode: '0750'
+            mode: preserve
+          vars:
+            _bk_snap_src: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
+
+      always:
+        # Snapshot di data dir Prometheus memakan disk — selalu hapus.
+        - name: 'Backup Prometheus — Hapus snapshot dari data dir'
+          ansible.builtin.file:
+            path: "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}/snapshots/{{ (_bk_prom_snap.content | from_json).data.name }}"
+            state: absent
+          when: _bk_prom_snap.content is defined
+
+    # Tarball tanpa isi bukan backup (RULES §16.4) — kecuali safety backup,
+    # yang memang menyimpan apa pun yang tersisa.
+    - name: 'Backup — Isi backup tidak boleh kosong'
+      ansible.builtin.assert:
+        that: _bk_components | length > 0
+        fail_msg: >-
+          Tidak ada komponen untuk di-backup di {{ inventory_hostname }}: Grafana tidak
+          berjalan di master (enable_grafana / grup [grafana]) dan TSDB tidak diminta
+          (--tsdb).
+        quiet: true
+      when: not _bk_safety | bool
+
+    # ── Tarball + manifest ──────────────────────────────────────────────
+    - name: 'Backup — Pack stage dir ke tarball'
+      ansible.builtin.command:
+        argv: [tar, czf, "{{ _bk_tarball }}", -C, "{{ _bk_root_dir }}", "{{ _bk_name }}"]
+        creates: "{{ _bk_tarball }}"
+
+    - name: 'Backup — Permission tarball'
+      ansible.builtin.file:
+        path: "{{ _bk_tarball }}"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: 'Backup — Checksum tarball'
+      ansible.builtin.stat:
+        path: "{{ _bk_tarball }}"
+        checksum_algorithm: sha256
+      register: _bk_tar_stat
+
+    - name: 'Backup — Tarball wajib ada dan tidak kosong'
+      ansible.builtin.assert:
+        that:
+          - _bk_tar_stat.stat.exists
+          - _bk_tar_stat.stat.size > 0
+        fail_msg: "Tarball backup {{ _bk_tarball }} tidak ada atau kosong."
+        quiet: true
+
+    - name: 'Backup — Generate manifest'
+      ansible.builtin.copy:
+        dest: "{{ _bk_manifest }}"
+        owner: root
+        group: root
+        mode: '0640'
+        content: |
+          # agra backup manifest — dibaca `agra backup list` / `agra restore`
+          {{ {
+               'backup_name': _bk_name,
+               'backup_host': inventory_hostname,
+               'backup_timestamp': _bk_timestamp,
+               'backup_date_human': ansible_facts['date_time'].iso8601,
+               'backup_safety': _bk_safety | bool,
+               'ansible_version': ansible_version.full,
+               'backup_tarball_path': _bk_tarball,
+               'backup_tarball_size_bytes': _bk_tar_stat.stat.size,
+               'backup_tarball_sha256': _bk_tar_stat.stat.checksum,
+               'backup_include_prometheus_tsdb': _bk_include_tsdb | bool,
+               'versions': {
+                 'grafana_tag': grafana_tag | default(''),
+                 'prometheus_tag': prometheus_tag | default(''),
+                 'node_exporter_tag': node_exporter_tag | default(''),
+               },
+               'components': {
+                 'grafana': {
+                   'included': _bk_has_grafana | bool,
+                   'files': _bk_components | select('match', 'grafana/') | list,
+                   'database_mode': grafana_database | default('sqlite'),
+                   'database_included': _bk_gf_have.db | default(false) | bool,
+                 },
+                 'prometheus': {
+                   'include_tsdb_snapshot': _bk_include_tsdb | bool,
+                   'retention_time': prometheus_retention_time | default(''),
+                 },
+                 'inventory': {
+                   'monitoring_nodes': groups['monitoring'] | default([]),
+                   'node_exporter_nodes': groups['node_exporter'] | default([]),
+                 },
+               },
+               'restore_instructions': 'agra restore -n ' ~ _bk_name ~ ' --yes-i-really-mean-it',
+             } | to_nice_yaml(indent=2, sort_keys=false) }}
+
+    - name: 'Backup — Hapus stage dir'
+      ansible.builtin.file:
+        path: "{{ _bk_stage_dir }}"
+        state: absent
+
+    # ── Salin ke control node ───────────────────────────────────────────
+    # `agra backup list` / `agra restore` membaca di sini — tanpa langkah ini
+    # backup di master remote tidak terlihat oleh CLI. fetch memverifikasi
+    # checksum hasil salinan. Isi tarball memuat secret (grafana.ini): 0600.
+    - name: 'Backup — Direktori backup di control node'
+      ansible.builtin.file:
+        path: "{{ _bk_ctrl_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: false
+
+    - name: 'Backup — Fetch tarball + manifest ke control node'
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "{{ _bk_ctrl_dir }}/"
+        flat: true
+      loop: ["{{ _bk_tarball }}", "{{ _bk_manifest }}"]
+
+    - name: 'Backup — Permission salinan di control node'
+      ansible.builtin.file:
+        path: "{{ _bk_ctrl_dir }}/{{ item | basename }}"
+        mode: '0600'
+      loop: ["{{ _bk_tarball }}", "{{ _bk_manifest }}"]
+      delegate_to: localhost
+      become: false
+
+    # ── Retensi ─────────────────────────────────────────────────────────
+    # Dilewati saat safety backup sebelum restore (backup_apply_retention:
+    # false) agar backup yang sedang direstore tidak ikut terhapus.
+    - name: 'Backup — Retensi (simpan {{ _bk_retention_count }} terbaru)'
+      when: _bk_apply_retention | bool
+      block:
+        - name: 'Backup Retention — Cari manifest (master)'
+          ansible.builtin.find:
+            paths: "{{ _bk_root_dir }}"
+            patterns: "agra-backup-*.yml"
+          register: _bk_manifests
+
+        - name: 'Backup Retention — Hapus manifest + tarball lama (master)'
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: >-
+            {{ (_bk_manifests.files | sort(attribute='mtime', reverse=true))[_bk_retention_count | int:]
+               | map(attribute='path')
+               | map('regex_replace', '\.yml$', '') | product(['.yml', '.tar.gz']) | map('join') | list }}
+
+        - name: 'Backup Retention — Cari manifest (control node)'
+          ansible.builtin.find:
+            paths: "{{ _bk_ctrl_dir }}"
+            patterns: "agra-backup-*.yml"
+          register: _bk_ctrl_manifests
+          delegate_to: localhost
+          become: false
+
+        - name: 'Backup Retention — Hapus manifest + tarball lama (control node)'
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: >-
+            {{ (_bk_ctrl_manifests.files | sort(attribute='mtime', reverse=true))[_bk_retention_count | int:]
+               | map(attribute='path')
+               | map('regex_replace', '\.yml$', '') | product(['.yml', '.tar.gz']) | map('join') | list }}
+          delegate_to: localhost
+          become: false
+
+    # ── S3 (opsional) ───────────────────────────────────────────────────
+    # include_tasks (dinamis): collection amazon.aws + boto3 hanya dibutuhkan
+    # jika S3 aktif — backup lokal tetap jalan di instalasi ansible-core murni.
+    - name: 'Backup (S3) — Upload tarball + manifest'
+      ansible.builtin.include_tasks: tasks/backup_s3.yml
+      when: _bk_s3_enabled | bool
+
+    - name: 'Backup — SUMMARY'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA BACKUP SELESAI (master={{ inventory_hostname }}{{ ', safety backup' if _bk_safety | bool else '' }})"
+          - "Tarball : {{ _bk_tarball }} ({{ (_bk_tar_stat.stat.size / 1048576) | round(1) }} MB, sha256 {{ _bk_tar_stat.stat.checksum[:12] }}…)"
+          - "Control node: {{ _bk_ctrl_dir }}/{{ _bk_name }}.{tar.gz,yml}"
+          - "Isi: {{ _bk_components | join(', ') or '(kosong)' }} · S3: {{ _bk_s3_enabled }}"
+          - "{{ _bk_external_db_note if _bk_has_grafana | bool and not _bk_grafana_sqlite | bool else '' }}"
+      vars:
+        _bk_external_db_note: >-
+          ⚠️ grafana_database={{ grafana_database }}: dashboard/user/alert ada di database
+          eksternal dan TIDAK termasuk backup ini — backup database tersebut di sisi
+          database (pg_dump/mysqldump); database di luar scope agra (PRD §4).

@@ -1,0 +1,97 @@
+---
+- name: 'AGRA — Destroy Monitoring Services (DEFAULT TIDAK PURGE APAPUN; opt-in purge via destroy_purge_data=true / destroy_purge_config=true)'
+  # Semua host yang menjalankan container agra (node_exporter-only host juga).
+  hosts: "monitoring:node_exporter"
+  gather_facts: true
+  become: true
+  tags: ['destroy']
+
+  # Nama privat: hindari template rekursif `x: "{{ x | default(..) }}"`.
+  vars:
+    _ds_confirm: "{{ destroy_confirm | default(false) | bool }}"
+    _ds_purge_data: "{{ destroy_purge_data | default(false) | bool }}"
+    _ds_purge_config: "{{ destroy_purge_config | default(false) | bool }}"
+
+  pre_tasks:
+    - name: 'Destroy (SAFETY LAYER 2) — ASSERT destroy_confirm=true'
+      ansible.builtin.assert:
+        that:
+          - _ds_confirm
+        fail_msg: >-
+          ❌ DESTROY DIBLOKIR (RULES §8): destroy_confirm=false.
+          Operasi destroy BERSIFAT DESTRUKTIF (menghapus container/service monitoring).
+          Untuk benar-benar menjalankan: gunakan CLI `agra destroy --yes-i-really-mean-it`
+          (flag ini akan set destroy_confirm=true ke playbook ini).
+
+    - name: 'Destroy — Info run; destroy_purge_data + destroy_purge_config status'
+      ansible.builtin.debug:
+        msg:
+          - "⚠️ MENJALANKAN DESTROY: destroy_purge_data={{ _ds_purge_data }}, destroy_purge_config={{ _ds_purge_config }}"
+          - "  purge_data=true     : data_dir service (grafana.db, prometheus tsdb, node_exporter textfile_dir) AKAN DIHAPUS (TIDAK bisa recovery)"
+          - "  purge_data=false    : data_dir DITAHAN (aman redeploy nanti tanpa kehilangan data)"
+          - "  purge_config=true   : config workdirs (/etc/grafana, /etc/prometheus, /etc/node_exporter, /etc/nginx, /etc/keepalived) AKAN DIHAPUS (TIDAK bisa recovery). /etc/agra (globals, passwords, ssl) TIDAK PERNAH dihapus"
+          - "  purge_config=false  : config /etc/<service> DITAHAN (aman redeploy nanti tanpa reconfig)"
+          - "  KEDUA PURGE FALSE   : HANYA hapus container/systemd unit. FULL state ditahan (mode upgrade re-install tanpa kehilangan apapun)."
+      run_once: true
+
+  tasks:
+    # rm -f sends SIGKILL: keepalived (host network) cannot remove the VIP, which
+    # then stays on the interface until reboot. A normal stop lets it release.
+    - name: 'Destroy — Stop keepalived gracefully (releases monitoring_vip)'
+      ansible.builtin.command:
+        argv: [docker, stop, --time, "15", "{{ keepalived_container_name | default('agra-keepalived') }}"]
+      register: _ds_ka_stop
+      changed_when: _ds_ka_stop.rc == 0
+      failed_when: _ds_ka_stop.rc != 0 and 'no such container' not in (_ds_ka_stop.stderr | lower)
+
+    # Container yang memang tidak ada bukan error ("No such container").
+    # Error lain (daemon mati, permission) WAJIB gagal.
+    - name: 'Destroy — Remove agra containers'
+      ansible.builtin.command:
+        argv: [docker, rm, -f, "{{ item }}"]
+      loop:
+        - "{{ grafana_container_name | default('agra-grafana') }}"
+        - "{{ prometheus_container_name | default('agra-prometheus') }}"
+        - "{{ node_exporter_container_name | default('agra-node-exporter') }}"
+        - "{{ nginx_container_name | default('agra-nginx') }}"
+        - "{{ keepalived_container_name | default('agra-keepalived') }}"
+      register: _ds_rm
+      changed_when: _ds_rm.rc == 0 and _ds_rm.stdout | trim | length > 0
+      failed_when: _ds_rm.rc != 0 and 'no such container' not in (_ds_rm.stderr | lower)
+
+    - name: 'Destroy (PURGE TIPE 1 DATA) — Delete service data directories JIKA destroy_purge_data=true'
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ grafana_data_dir | default('/var/lib/agra/grafana') }}"
+        - "{{ prometheus_data_dir | default('/var/lib/agra/prometheus') }}"
+        - "{{ node_exporter_textfile_dir | default('') }}"
+      when:
+        - _ds_purge_data
+        - item | length > 0
+
+    - name: 'Destroy (PURGE TIPE 2 CONFIG) — Delete service config workdirs JIKA destroy_purge_config=true'
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop:
+        - { path: "{{ grafana_config_dir | default('/etc/grafana') }}", desc: "grafana config (/etc/grafana: grafana.ini + provisioning)" }
+        - { path: "{{ prometheus_config_dir | default('/etc/prometheus') }}", desc: "prometheus config (/etc/prometheus: prometheus.yml + file_sd + rules)" }
+        - { path: "{{ node_exporter_config_dir | default('/etc/node_exporter') }}", desc: "node_exporter config (/etc/node_exporter: node_exporter.default)" }
+        - { path: "{{ nginx_config_dir | default('/etc/nginx') }}", desc: "nginx config (/etc/nginx: sites-available conf.d ssl self-signed certs agra)" }
+        - { path: "{{ keepalived_config_dir | default('/etc/keepalived') }}", desc: "keepalived config (/etc/keepalived: keepalived.conf + vrrp_script healthcheck)" }
+      when:
+        - _ds_purge_config
+      register: purge_config_result
+      loop_control:
+        label: "{{ item.desc }} → path={{ item.path }}"
+
+    - name: 'Destroy — Info after run'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA DESTROY COMPLETE"
+          - "Purge data    (database/tsdb/textfile): {{ _ds_purge_data }}"
+          - "Purge config  (/etc/<service> lengkap): {{ _ds_purge_config }}"
+          - "  Config purged list (jika purge_config=true): grafana, prometheus, node_exporter, nginx (/etc/nginx), keepalived (/etc/keepalived). /etc/agra tidak disentuh"
+          - "Keepalived VIP sudah dilepas. Docker Engine dan image agra TIDAK dihapus; data/config hanya dihapus dengan --purge-*."

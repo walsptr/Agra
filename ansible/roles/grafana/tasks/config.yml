@@ -1,0 +1,81 @@
+---
+# /etc/agra TIDAK dikelola di managed host — di all-in-one itu adalah direktori
+# control node milik operator user (ARCHITECTURE.md §8.2).
+- name: Grafana (Config) - Ensure parent data dir root:root 2775 (jika deploy --tags grafana tanpa common)
+  ansible.builtin.file:
+    path: "{{ common_home_dir | default('/var/lib/agra') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '2775'
+  tags: ['grafana', 'config', 'dirs', 'autocorrect', 'sha:e6360b0']
+
+- name: Grafana (Config) - Ensure dirs exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_dir_mode }}"
+    recurse: false
+  loop:
+    - "{{ grafana_config_dir }}"
+    - "{{ grafana_data_dir }}"
+    - "{{ grafana_data_dir }}/log"
+    - "{{ grafana_data_dir }}/plugins"
+    - "{{ grafana_provisioning_dir }}/datasources"
+    - "{{ grafana_provisioning_dir }}/dashboards"
+    - "{{ grafana_provisioning_dir }}/notifiers"
+    - "{{ grafana_provisioning_dir }}/plugins"
+  tags: ['grafana', 'config', 'dirs', 'data']
+
+- name: Grafana (Config) - Render grafana.ini via first_found
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/grafana.ini.j2', 'grafana.ini.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_config_dir }}/grafana.ini"
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_mode }}"
+  diff: false  # berisi admin_password, secret_key, database password
+  notify: ['restart grafana']
+  tags: ['grafana', 'config']
+
+- name: Grafana (Config) - Render provisioning datasource prometheus-main
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/datasources/prometheus.yml.j2', 'provisioning/datasources/prometheus.yml.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_provisioning_dir }}/datasources/prometheus.yml"
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
+  notify: ['restart grafana']
+  tags: ['grafana', 'config', 'provisioning']
+
+- name: Grafana (Config) - Render provisioning dashboards provider
+  ansible.builtin.template:
+    src: "{{ lookup('first_found', {'files': ['/etc/agra/config/grafana/provisioning/dashboards/all.yml.j2', 'provisioning/dashboards/all.yml.j2'], 'paths': [role_path + '/templates']}) }}"
+    dest: "{{ grafana_provisioning_dir }}/dashboards/all.yml"
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
+  notify: ['restart grafana']
+  tags: ['grafana', 'config', 'provisioning']
+
+- name: Grafana (Config) - Copy user dashboard JSON from override dir ke provisioning dashboards (jika ada)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ grafana_provisioning_dir }}/dashboards/"
+    owner: "{{ grafana_uid }}"
+    group: "{{ grafana_gid }}"
+    mode: "{{ grafana_file_public_mode }}"
+  # with_fileglob membaca di CONTROL NODE, jadi copy juga dari control node
+  # (sebelumnya remote_src: true → gagal di multi-node, disembunyikan ignore_errors).
+  with_fileglob:
+    - "{{ grafana_dashboards_override_dir }}/*.json"
+  notify: ['restart grafana']
+  tags: ['grafana', 'config', 'dashboards']
+
+- name: Grafana (Config) - Recursive chown data_dir + config_dir ke grafana_uid:grafana_gid (safety existing deploy)
+  ansible.builtin.command:
+    cmd: chown -R {{ grafana_uid }}:{{ grafana_gid }} {{ grafana_config_dir }} {{ grafana_data_dir }}
+  changed_when: false
+  tags: ['grafana', 'config', 'ownership']

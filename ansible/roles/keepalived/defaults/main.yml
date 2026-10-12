@@ -1,0 +1,45 @@
+---
+# SCHEMA §5 — Keepalived (HA monitoring cluster)
+# PENTING: enable_keepalived HANYA untuk force-disable secara manual; normalnya otomatis
+# dari inventory: groups['monitoring']|length > 1 (ARCHITECTURE §5.1, DESIGN §4)
+enable_keepalived: "{{ groups['monitoring'] | default([]) | length > 1 }}"
+
+monitoring_vip: ""
+monitoring_vip_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+
+keepalived_router_id: 51
+keepalived_vrrp_instance: VI_MONITORING_01
+# VRRP auth_pass (type PASS, max 8 chars). Placeholder, not a secret: the real
+# value comes from passwords.yml (`agra genpwd`); precheck rejects this default.
+keepalived_auth_pass: "A9ra!P4s"
+keepalived_check_interval: 2
+keepalived_fall_count: 3
+keepalived_rise_count: 2
+keepalived_script_name: chk_agra_monitoring
+keepalived_log_file: /var/log/agra-keepalived.log
+# Host dir with keepalived.conf + scripts, mounted as a whole (not per file, so
+# re-rendered files reach the running container) at keepalived_container_config_dir.
+keepalived_config_dir: /etc/keepalived
+keepalived_container_config_dir: /usr/local/etc/keepalived
+keepalived_container_name: agra-keepalived
+
+# Priority (DESIGN §4): groups['monitoring'][0] = base (MASTER), then -1 per
+# position. A failing health check adds keepalived_weight; its magnitude must be
+# larger than the spread between nodes (len(monitoring) - 1) so an unhealthy node
+# always ends below every healthy one. precheck asserts both.
+keepalived_priority_base: 150
+keepalived_weight: -50
+keepalived_priority: "{{ keepalived_priority_base | int - groups['monitoring'].index(inventory_hostname) }}"
+
+keepalived_state: "{{ 'MASTER' if groups['monitoring'][0] == inventory_hostname else 'BACKUP' }}"
+
+# Per-host (host_vars, RULES §14.6): IPv4 used for VRRP unicast (src + peers).
+# Not defined here on purpose — peers read it via hostvars; fallback ansible_host.
+# keepalived_unicast_ip: 10.0.0.11
+
+grafana_health_url: "http://127.0.0.1:{{ grafana_port | default(3000) }}/api/health"
+prometheus_health_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}/-/healthy"
+nginx_health_url: "http://127.0.0.1:{{ nginx_health_port | default(18080) }}/healthz"
+
+keepalived_image: osixia/keepalived
+keepalived_tag: "2.0.20"

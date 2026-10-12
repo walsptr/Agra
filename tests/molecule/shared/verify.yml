@@ -1,0 +1,199 @@
+---
+# Checks shared by every scenario. Nothing here may use ignore_errors: a
+# verify step that cannot fail tests nothing (RULES.md §16.1).
+
+- name: Verify — containers and service endpoints on every host
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    _in_monitoring: "{{ inventory_hostname in groups['monitoring'] | default([]) }}"
+    _expected: >-
+      {{ (['agra-node-exporter'] if _ne_on else [])
+         + (['agra-prometheus'] if _prom_on else [])
+         + (['agra-grafana'] if _gf_on else [])
+         + (['agra-nginx'] if _in_monitoring and enable_nginx | default(true) | bool else [])
+         + (['agra-keepalived'] if _in_monitoring and groups['monitoring'] | length > 1 else []) }}
+    _monitoring_only: [agra-prometheus, agra-grafana, agra-nginx, agra-keepalived]
+    _ne_enabled: "{{ enable_node_exporter | default(true) | bool }}"
+    _ne_on: "{{ _ne_enabled and inventory_hostname in groups['node_exporter'] | default([]) }}"
+    _prom_on: "{{ enable_prometheus | default(true) | bool and inventory_hostname in groups['prometheus'] | default([]) }}"
+    _gf_on: "{{ enable_grafana | default(true) | bool and inventory_hostname in groups['grafana'] | default([]) }}"
+  tasks:
+    - name: List running containers (a restart loop is not running)
+      ansible.builtin.command:
+        argv: [docker, ps, --filter, status=running, --format, "{% raw %}{{.Names}}{% endraw %}"]
+      register: _running
+      changed_when: false
+
+    - name: Expected containers run, and only monitoring hosts run the monitoring stack
+      ansible.builtin.assert:
+        that:
+          - _expected | difference(_running.stdout_lines) | length == 0
+          - _in_monitoring or (_running.stdout_lines | intersect(_monitoring_only) | length == 0)
+          - _ne_on or 'agra-node-exporter' not in _running.stdout_lines
+        fail_msg: >-
+          {{ inventory_hostname }}: expected {{ _expected }}, running {{ _running.stdout_lines }}
+
+    - name: Node Exporter serves metrics
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_exporter_port | default(9100) }}/metrics"
+        return_content: true
+      register: _ne
+      until: _ne.status == 200 and 'node_exporter_build_info' in _ne.content
+      retries: 12
+      delay: 5
+      when: _ne_on | bool
+
+    - name: Prometheus is healthy
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/-/healthy"
+      register: _prom
+      until: _prom.status == 200
+      retries: 12
+      delay: 5
+      when: _prom_on | bool
+
+    - name: Prometheus scrapes every node_exporter host and all are up
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/targets?state=active"
+        return_content: true
+      register: _targets
+      vars:
+        _ne_targets: "{{ _targets.json.data.activeTargets | selectattr('labels.job', 'equalto', 'node_exporter') | list }}"
+      until:
+        - _targets.status == 200
+        - _ne_targets | length == groups['node_exporter'] | length
+        - _ne_targets | rejectattr('health', 'equalto', 'up') | list | length == 0
+      retries: 20
+      delay: 6
+      when: _prom_on | bool and _ne_enabled | bool
+
+    # One self-scrape job with one target, and nothing it scrapes is down.
+    - name: Prometheus scrapes itself exactly once and every active target is up
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/targets?state=active"
+        return_content: true
+      register: _all_targets
+      vars:
+        _active: "{{ _all_targets.json.data.activeTargets }}"
+      until:
+        - _all_targets.status == 200
+        - _active | selectattr('labels.job', 'equalto', 'prometheus') | list | length == 1
+        - _active | rejectattr('health', 'equalto', 'up') | list | length == 0
+      retries: 20
+      delay: 6
+      when: _prom_on | bool
+
+    - name: Grafana is healthy with a working database
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/health"
+        return_content: true
+      register: _gf
+      until: _gf.status == 200 and _gf.json.database | default('') == 'ok'
+      retries: 24
+      delay: 5
+      when: _gf_on | bool
+
+    - name: Grafana admin login uses the password from passwords.yml
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/user"
+        url_username: "{{ grafana_admin_user | default('admin') }}"
+        url_password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+      no_log: true
+      when: _gf_on | bool
+
+    - name: Grafana has the provisioned Prometheus datasource
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/datasources"
+        url_username: "{{ grafana_admin_user | default('admin') }}"
+        url_password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        return_content: true
+      register: _ds
+      no_log: true
+      when: _gf_on | bool
+
+    - name: Prometheus datasource is present
+      ansible.builtin.assert:
+        that:
+          - _ds.json | selectattr('type', 'equalto', 'prometheus') | list | length > 0
+        fail_msg: "{{ inventory_hostname }}: no prometheus datasource provisioned in Grafana"
+      when: _gf_on | bool
+
+# Exposure defaults (ARCHITECTURE.md §6): nothing without auth leaves the node,
+# Grafana only through nginx, HTTPS with or without a domain.
+- name: Verify — exposure on monitoring nodes
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  vars:
+    _nginx_on: "{{ enable_nginx | default(true) | bool }}"
+    _https_on: "{{ _nginx_on | bool and enable_https | default(true) | bool }}"
+    _base: "{{ 'https' if _https_on | bool else 'http' }}://127.0.0.1"
+  tasks:
+    - name: List TCP listeners
+      ansible.builtin.command:
+        argv: [ss, -Hltn]
+      register: _ss
+      changed_when: false
+
+    - name: Prometheus and (behind nginx) Grafana listen on loopback only; no 30080/30090
+      ansible.builtin.assert:
+        that:
+          - _listen | select('search', ':9090$') | list == ['127.0.0.1:9090']
+          - not _nginx_on | bool or _listen | select('search', ':3000$') | list == ['127.0.0.1:3000']
+          - _listen | select('search', ':300[89]0$') | list == []
+        fail_msg: "{{ inventory_hostname }} listeners: {{ _listen }}"
+      vars:
+        _listen: "{{ _ss.stdout_lines | map('split') | map(attribute=3) | list }}"
+
+    - name: Grafana answers through nginx at the root path
+      ansible.builtin.uri:
+        url: "{{ _base }}/api/health"
+        validate_certs: false
+        return_content: true
+      register: _via_nginx
+      until: _via_nginx.status == 200 and _via_nginx.json.database | default('') == 'ok'
+      retries: 12
+      delay: 5
+      when: _nginx_on | bool and enable_grafana | default(true) | bool
+
+    - name: Plain HTTP redirects to HTTPS
+      ansible.builtin.uri:
+        url: http://127.0.0.1/login
+        follow_redirects: none
+        status_code: 301
+      register: _redirect
+      failed_when: _redirect.status != 301 or not _redirect.location | default('') is match('https://')
+      when: _https_on | bool
+
+    - name: Prometheus is not published unless asked for
+      ansible.builtin.uri:
+        url: "{{ _base }}/prometheus/api/v1/status/buildinfo"
+        validate_certs: false
+        status_code: [200, 302, 404]
+        return_content: true
+      register: _prom_pub
+      failed_when: "'\"status\":\"success\"' in _prom_pub.content | default('')"
+      when: _nginx_on | bool and not expose_prometheus_via_nginx | default(false) | bool
+
+- name: Verify — deploy recorded installed versions on the control node
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Load installed versions file
+      ansible.builtin.include_vars:
+        file: "{{ agra_installed_versions_file }}"
+        name: _iv
+
+    - name: Current entry matches globals.yml
+      ansible.builtin.assert:
+        that:
+          - _iv.current.action == agra_test_expected_action | default('deploy')
+          - _iv.current.versions.grafana_tag == grafana_tag | string
+          - _iv.current.versions.prometheus_tag == prometheus_tag | string
+          - _iv.current.versions.node_exporter_tag == node_exporter_tag | string
+        fail_msg: "Unexpected installed versions record: {{ _iv }}"

@@ -1,0 +1,37 @@
+---
+# Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
+# Vars are templated lazily, so values below follow the phase file written by
+# side_effect.yml: deploy → upgrade → rollback.
+_agra_test_phase: >-
+  {{ lookup('ansible.builtin.file',
+            lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') ~ '/phase',
+            errors='ignore') | default('deploy', true) | trim }}
+_agra_test_new: "{{ _agra_test_phase == 'upgrade' }}"
+
+# Patch upgrades: no schema/TSDB migrations, so rolling back is safe.
+grafana_tag: "{{ '11.2.1' if _agra_test_new | bool else '11.2.0' }}"
+prometheus_tag: "{{ 'v2.53.1' if _agra_test_new | bool else 'v2.53.0' }}"
+# A changed `docker run` argument must recreate the container (agra.spec label).
+prometheus_retention_time: "{{ '7d' if _agra_test_new | bool else '15d' }}"
+
+# rollback.yml only sets this before importing upgrade_monitoring.yml; the test
+# imports upgrade_monitoring.yml directly, so it provides the value itself.
+agra_lifecycle_action: "{{ 'rollback' if _agra_test_phase == 'rollback' else 'upgrade' }}"
+agra_test_expected_action: "{{ _agra_test_phase }}"
+
+# A disabled service used to `meta: end_host` the whole upgrade play: every
+# later role (prometheus, grafana, nginx) and the health gate were skipped.
+enable_node_exporter: false
+
+
+# Stand-ins for /etc/agra/passwords.yml.
+grafana_admin_password: molecule-admin-pw
+grafana_secret_key: molecule-secret-key-0123456789
+keepalived_auth_pass: molecule
+
+# HTTPS stays on (the default); the certificate comes from shared/prepare.yml.
+tls_cert_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.crt"
+tls_key_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.key"
+
+agra_installed_versions_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/installed_versions.yml"
+backup_control_node_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/backups"

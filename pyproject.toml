@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agra"
+version = "0.1.0"
+description = "Ansible deployment + lifecycle management monitoring stack (Grafana + Prometheus + Node Exporter, Kolla-Ansible pattern)"
+readme = "README.md"
+license = "MIT"
+# ansible-core >= 2.16 (dependency) butuh Python >= 3.10 di control node.
+requires-python = ">=3.10"
+authors = [{name = "Agra Contributors"}]
+keywords = ["ansible", "grafana", "prometheus", "monitoring", "deployment", "kolla"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+]
+# Playbook hanya memakai ansible.builtin, jadi ansible-core cukup. CLI
+# menjalankan ansible-playbook dari venv yang sama (agra.utils.run_playbook).
+dependencies = [
+    "PyYAML>=6.0",
+    "ansible-core>=2.16",
+]
+
+[project.optional-dependencies]
+ansible = ["ansible-core>=2.16"]
+full = ["ansible>=2.16", "PyYAML>=6.0"]
+dev = ["pytest>=8", "ruff>=0.6", "yamllint>=1.35", "ansible-lint>=24", "molecule>=24", "molecule-plugins[docker]>=24"]
+
+[project.scripts]
+# ======= INI YANG PENTING: entry point command `agra` =======
+# Setelah pip install (editable atau tidak) → exec `agra` langsung jalan
+agra = "agra.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/walsptr/Agra"
+Documentation = "https://github.com/walsptr/Agra#readme"
+Source = "https://github.com/walsptr/Agra"
+Issues = "https://github.com/walsptr/Agra/issues"
+
+[tool.setuptools.packages.find]
+include = ["agra*"]
+exclude = ["tests*", "ansible*", "etc*", "inventory*", "contexts*"]
+
+# ansible/, inventory/, etc/agra/ dipasang ke <prefix>/share/agra via
+# data_files di setup.py (bukan package data).
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["."]
+addopts = "-ra"
+xfail_strict = true
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = [".venv", "tests/molecule"]
+
+[tool.ruff.lint]
+# Gate on real defects only (syntax errors, undefined names, unused imports/vars).
+select = ["E9", "F"]

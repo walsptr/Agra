@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-and-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,ansible]"
+      - run: pytest
+      - run: ruff check agra tests
+      - run: yamllint .
+      - run: ansible-lint
+
+  # Install non-editable (wheel dari sdist) dan install.sh — CI lain memakai
+  # `pip install -e`, yang tidak menangkap file yang tidak ikut terpasang.
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - name: wheel ships share/agra, template, and no real passwords.yml
+        run: |
+          unzip -l dist/*.whl | grep -q 'share/agra/ansible/playbooks/deploy.yml'
+          unzip -l dist/*.whl | grep -q 'share/agra/etc/agra/passwords.yml.example'
+          ! unzip -l dist/*.whl | grep -E 'passwords\.yml$'
+      - name: wheel install works outside the repo, ansible from the venv
+        working-directory: /tmp
+        run: |
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /tmp/wheel-venv/bin/agra --version
+          env -i HOME="$HOME" PATH=/usr/bin:/bin /tmp/wheel-venv/bin/python -I -c "
+          import agra.constants as c
+          assert str(c.PROJECT_ROOT) == '/tmp/wheel-venv/share/agra', c.PROJECT_ROOT
+          assert all(p.exists() for p in c.PLAYBOOKS.values())
+          from agra.utils.run_playbook import run_playbook
+          raise SystemExit(run_playbook('deploy', inventory=str(c.DEFAULT_INVENTORY),
+                                        extra_args=['--syntax-check'], load_etc_vars=False))"
+      - name: install.sh (venv, PEP 668 runner, from another directory)
+        working-directory: /tmp
+        run: |
+          "$GITHUB_WORKSPACE"/install.sh
+          ~/.local/bin/agra --version
+          test "$(stat -c %a /etc/agra/passwords.yml)" = 600
+          "$GITHUB_WORKSPACE"/install.sh
+
+  molecule:
+    needs: unit-and-lint
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [default, ha-2node, upgrade, restore, rocky9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,ansible]"
+      - run: ansible-galaxy collection install community.docker ansible.posix
+      - run: molecule test -s ${{ matrix.scenario }}
+        working-directory: tests

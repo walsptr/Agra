@@ -1,0 +1,15 @@
+---
+common_home_dir: /var/lib/agra
+
+# Per OS family: RHEL names differ (cronie, gnupg2, no lsb-release) and
+# installing `curl` conflicts with the preinstalled curl-minimal.
+common_os_packages: "{{ _common_os_packages[ansible_facts['os_family']] | default(_common_os_packages['Debian']) }}"
+_common_os_packages:
+  Debian: [python3-pip, rsync, openssl, curl, ca-certificates, gnupg, lsb-release, cron, acl,
+           sqlite3]  # sqlite3 CLI: backup Grafana konsisten (`.backup`) + integrity check
+  RedHat: [python3-pip, rsync, openssl, ca-certificates, gnupg2, cronie, acl, sqlite]
+
+common_firewall_tool: auto
+common_firewall_ports_tcp: []
+
+common_docker_service_name: docker

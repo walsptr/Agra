@@ -1,0 +1,26 @@
+---
+# Layered on top of etc/agra/globals.yml (see molecule.yml). Test-only values.
+
+monitoring_vip: 172.28.0.100
+
+# Opt-in Prometheus under /prometheus/ of the Grafana site (admin API blocked).
+expose_prometheus_via_nginx: true
+
+# HA Grafana = both nodes on one external PostgreSQL (fixture on agra-app1,
+# see prepare.yml) + unified-alerting gossip.
+enable_ha_grafana: true
+grafana_database: postgresql
+grafana_database_host: 172.28.0.21
+
+# Stand-ins for /etc/agra/passwords.yml.
+grafana_admin_password: molecule-admin-pw
+grafana_secret_key: molecule-secret-key-0123456789
+keepalived_auth_pass: molecule
+grafana_database_password: molecule-db-pw
+
+# HTTPS stays on (the default); the certificate comes from shared/prepare.yml.
+tls_cert_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.crt"
+tls_key_path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl/agra.key"
+
+agra_installed_versions_file: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/installed_versions.yml"
+backup_control_node_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/backups"

@@ -1,0 +1,191 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml
+
+# Seen from agra-app1: a host outside [monitoring]/[prometheus] behind every
+# node's active ufw (prepare.yml). It reaches only nginx, never the services.
+- name: Verify — exposure from another host, through the firewall
+  hosts: agra-app1
+  gather_facts: false
+  become: true
+  vars:
+    _mon1: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] }}"
+    _vip: "https://{{ monitoring_vip }}"
+  tasks:
+    - name: Firewall is active on every node (otherwise this proves nothing)
+      ansible.builtin.command:
+        argv: [ufw, status]
+      register: _ufw
+      changed_when: false
+      failed_when: "'Status: active' not in _ufw.stdout"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['all'] }}"
+
+    - name: Grafana over HTTPS on the VIP, without grafana_domain
+      ansible.builtin.uri:
+        url: "{{ _vip }}/api/health"
+        validate_certs: false
+        return_content: true
+      register: _vip_gf
+      failed_when: _vip_gf.json.database | default('') != 'ok'
+
+    - name: Opt-in Prometheus works under /prometheus/ (API, and redirects keep the prefix)
+      ansible.builtin.uri:
+        url: "{{ _vip }}{{ item.path }}"
+        validate_certs: false
+        follow_redirects: none
+        status_code: "{{ item.status }}"
+        return_content: true
+      register: _vip_prom
+      failed_when: >-
+        _vip_prom.status != item.status
+        or (item.status == 302 and _vip_prom.location | default('') is not search('/prometheus/graph$'))
+        or (item.status == 200 and '"status":"success"' not in _vip_prom.content | default(''))
+      loop:
+        - {path: '/prometheus/api/v1/query?query=up', status: 200}
+        - {path: /prometheus/, status: 302}
+
+    - name: Prometheus admin and lifecycle APIs are refused through nginx
+      ansible.builtin.uri:
+        url: "{{ _vip }}{{ item }}"
+        method: POST
+        validate_certs: false
+        status_code: 403
+      loop:
+        - /prometheus/api/v1/admin/tsdb/snapshot
+        - '/prometheus/api/v1/admin/tsdb/delete_series?match[]=up'
+        - /prometheus/-/quit
+        - /prometheus/-/reload
+
+    - name: Grafana, Prometheus and node_exporter ports are closed to this host
+      ansible.builtin.wait_for:
+        host: "{{ _mon1 }}"
+        port: "{{ item }}"
+        state: stopped
+        timeout: 15
+      loop: [3000, 9090, 9100]
+
+- name: Verify — node_exporter is open to Prometheus nodes
+  hosts: monitoring
+  gather_facts: false
+  tasks:
+    - name: The second Prometheus node reaches the master's node_exporter
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] }}"
+        port: "{{ node_exporter_port | default(9100) }}"
+        timeout: 15
+      when: inventory_hostname == groups['monitoring'][1]
+
+- name: Verify — monitoring_vip is held by exactly one node, the master
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wait for the master to hold the VIP
+      ansible.builtin.command:
+        argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+      register: _addr
+      changed_when: false
+      until: (monitoring_vip ~ '/') in _addr.stdout
+      retries: 15
+      delay: 2
+      when: inventory_hostname == groups['monitoring'][0]
+
+    - name: Read VIP state on every monitoring node
+      ansible.builtin.command:
+        argv: [ip, -4, -o, addr, show, dev, "{{ monitoring_vip_interface }}"]
+      register: _vip_state
+      changed_when: false
+
+    - name: Exactly one holder, and it is groups['monitoring'][0]
+      ansible.builtin.assert:
+        that:
+          - _holders == [groups['monitoring'][0]]
+        fail_msg: "VIP {{ monitoring_vip }} holders: {{ _holders }} (expected only {{ groups['monitoring'][0] }})"
+      vars:
+        _holders: >-
+          {{ ansible_play_hosts
+             | map('extract', hostvars)
+             | selectattr('_vip_state.stdout', 'search', (monitoring_vip ~ '/') | regex_escape)
+             | map(attribute='inventory_hostname') | list }}
+      run_once: true  # noqa: run-once[task] — linear strategy; one assert over all hosts
+
+- name: Verify — HA Grafana shares state through the external database
+  hosts: grafana
+  gather_facts: false
+  become: true
+  vars:
+    _auth: &gf_auth
+      url_username: "{{ grafana_admin_user | default('admin') }}"
+      url_password: "{{ grafana_admin_password }}"
+      force_basic_auth: true
+  tasks:
+    - name: Create a dashboard through the first node
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/dashboards/db
+        method: POST
+        body_format: json
+        body: {dashboard: {uid: agra-ha-test, title: agra HA test}, overwrite: true}
+        <<: *gf_auth
+      no_log: true
+      when: inventory_hostname == groups['grafana'][0]
+
+    - name: Every node sees it
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/dashboards/uid/agra-ha-test
+        <<: *gf_auth
+      register: _dash
+      until: _dash.status == 200
+      retries: 10
+      delay: 2
+      no_log: true
+
+    # The embedded alertmanager's /api/v2/status always says cluster "disabled";
+    # the memberlist metric is the real membership count.
+    - name: Alerting nodes form one cluster (an alert fires once)
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/metrics
+        return_content: true
+      register: _am
+      until: >-
+        _am.status == 200 and
+        (_am.content | regex_search('^alertmanager_cluster_members (\\d+)', '\\1', multiline=True) | default(['0'], true) | first | int)
+        == groups['grafana'] | length
+      retries: 30
+      delay: 3
+
+- name: Verify — leftovers of the old SQLite rsync sync are gone
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read root authorized_keys and cron.d
+      ansible.builtin.command:
+        argv: [sh, -c, 'cat /root/.ssh/authorized_keys; echo ---; cat /etc/cron.d/* 2>/dev/null; echo ---; ls /root/.ssh']
+      register: _left
+      changed_when: false
+
+    - name: Sync key, cron job and generated keypair removed; operator key kept
+      ansible.builtin.assert:
+        that:
+          - "'agra-grafana-sync@' not in _left.stdout"
+          - "'agra_grafana_rsync' not in _left.stdout"
+          - "'operator@laptop' in _left.stdout"
+          - "'id_ed25519' not in _left.stdout"
+        fail_msg: "{{ inventory_hostname }}: {{ _left.stdout_lines }}"
+
+# Failover is the whole point of keepalived: an unhealthy master must lose the
+# VIP to a healthy backup, and get it back once healthy (DESIGN.md §4).
+- name: Verify — VIP follows health (Grafana, then nginx, on the master)
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  vars:
+    _master: "{{ groups['monitoring'][0] }}"
+    _backup: "{{ groups['monitoring'][1] }}"
+  tasks:
+    - name: Failover round trip
+      ansible.builtin.include_tasks: tasks/failover_cycle.yml
+      loop: [agra-grafana, agra-nginx]
+      loop_control:
+        loop_var: _service

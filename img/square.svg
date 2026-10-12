@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">agra icon</title>
+  <desc id="desc">Simbol radar-ping oranye agra, versi square untuk favicon/avatar</desc>
+  <circle cx="60" cy="60" r="10" fill="#D8531E"/>
+  <circle cx="60" cy="60" r="27" fill="none" stroke="#D8531E" stroke-width="6" opacity="0.55"/>
+  <circle cx="60" cy="60" r="44" fill="none" stroke="#D8531E" stroke-width="6" opacity="0.28"/>
+</svg>

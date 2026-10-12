@@ -1,0 +1,306 @@
+---
+- name: Common - OS package cache update (Debian)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+  changed_when: false
+  tags: ['common', 'packages']
+
+- name: Common - OS package cache update (RedHat)
+  ansible.builtin.dnf:
+    update_cache: true
+  when: ansible_facts['os_family'] == 'RedHat'
+  changed_when: false
+  tags: ['common', 'packages']
+
+- name: Common - Ensure base persist directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '2775'
+  loop:
+    - "{{ common_home_dir }}"
+  tags: ['common', 'dirs']
+
+- name: Common - Install OS common packages
+  ansible.builtin.package:
+    name: "{{ common_os_packages }}"
+    state: present
+  tags: ['common', 'packages']
+
+- name: Common - Detect firewall tool (via POSIX commands, TIDAK USAH fact ansible_facts.services)
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      # User explicit override via common_firewall_tool var
+      if [ "{{ common_firewall_tool }}" != "auto" ]; then
+        printf '%s' "{{ common_firewall_tool }}"
+        exit 0
+      fi
+      # Priority 1: UFW (Debian/Ubuntu default)
+      if command -v ufw >/dev/null 2>&1; then
+        # rc != 0 (ufw rusak) menggagalkan task via set -e — bukan diam-diam "none".
+        ufw_status="$(ufw status)"
+        case "$ufw_status" in
+          "Status: active"*) printf '%s' "ufw"; exit 0 ;;
+        esac
+      fi
+      # Priority 2: firewalld (RHEL/CentOS/Fedora default) — `--state` rc 0 = running
+      if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+        printf '%s' "firewalld"
+        exit 0
+      fi
+      # Tidak ada firewall yang terdeteksi / aktif -> skip
+      printf '%s' "none"
+  args:
+    executable: /bin/bash
+  register: _firewall_detect_raw
+  changed_when: false
+  failed_when: _firewall_detect_raw.rc != 0
+  tags: ['common', 'firewall']
+
+- name: Common - Parse firewall detection ke fact _common_firewall_detected
+  ansible.builtin.set_fact:
+    _common_firewall_detected: "{{ _firewall_detect_raw.stdout | trim | lower }}"
+  changed_when: false
+  tags: ['common', 'firewall']
+
+# Public ports, only on the hosts that serve them: nginx (80, 443 with
+# enable_https) on [monitoring]; Grafana's own port only when nginx is off.
+# Prometheus is never opened (loopback only, no auth — roles/prometheus).
+- name: Common - Collect public ports of this host
+  ansible.builtin.set_fact:
+    _common_ports_tcp: >-
+      {{ ['22']
+         + ([nginx_http_port | default(80) | string] if _common_nginx_here | bool else [])
+         + ([nginx_https_port | default(443) | string]
+            if _common_nginx_here | bool and enable_https | default(true) | bool else [])
+         + ([grafana_port | default(3000) | string]
+            if enable_grafana | default(true) | bool and not enable_nginx | default(true) | bool
+               and inventory_hostname in groups['grafana'] | default([]) else [])
+         + (common_firewall_ports_tcp | map('string') | list) }}
+  vars:
+    _common_nginx_here: "{{ enable_nginx | default(true) | bool and inventory_hostname in groups['monitoring'] | default([]) }}"
+  tags: ['common', 'firewall']
+
+- name: Common - Open public ports (ufw)
+  ansible.builtin.command:
+    argv: [ufw, allow, proto, tcp, from, any, to, any, port, "{{ item }}", comment, "agra monitoring port {{ item }}"]
+  loop: "{{ _common_ports_tcp | unique }}"
+  register: _common_ufw_ports
+  changed_when: _common_ufw_ports.stdout is search('Rules? (added|updated)')
+  when:
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']
+
+# Default zone (the one the node's interfaces are in), like the rich rules
+# below — not a hardcoded `public` that may not be the active zone.
+- name: Common - Open public ports (firewalld, default zone)
+  ansible.builtin.shell:
+    cmd: |
+      FW_PORT="{{ item }}/tcp"
+      rc=0
+      if ! firewall-cmd --permanent --query-port="${FW_PORT}" >/dev/null 2>&1; then
+        firewall-cmd --permanent --add-port="${FW_PORT}" >/dev/null || exit 1
+        rc=2
+      fi
+      if ! firewall-cmd --query-port="${FW_PORT}" >/dev/null 2>&1; then
+        firewall-cmd --add-port="${FW_PORT}" >/dev/null || exit 1
+        rc=2
+      fi
+      exit ${rc}
+  args:
+    executable: /bin/bash
+  loop: "{{ _common_ports_tcp | unique }}"
+  register: _common_firewalld_ports
+  changed_when: _common_firewalld_ports.rc == 2
+  failed_when: _common_firewalld_ports.rc not in [0, 2]
+  when:
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']
+
+# node_exporter is scraped by every [prometheus] node, and by nobody else: its
+# metrics are unauthenticated. A local Prometheus scrapes over loopback. Peer
+# address = keepalived_unicast_ip or ansible_host, as for VRRP/alerting gossip.
+- name: Common - Prometheus nodes that scrape this node_exporter
+  ansible.builtin.set_fact:
+    _common_scrapers: >-
+      {%- set out = [] -%}
+      {%- for h in groups['prometheus'] | default([]) if h != inventory_hostname -%}
+      {%- set _ = out.append(hostvars[h]['keepalived_unicast_ip'] | default(hostvars[h]['ansible_host'] | default(h))) -%}
+      {%- endfor -%}
+      {{ out | unique }}
+  when:
+    - enable_node_exporter | default(true) | bool
+    - enable_prometheus | default(true) | bool
+    - inventory_hostname in groups['node_exporter'] | default([])
+  tags: ['common', 'firewall', 'node_exporter']
+
+- name: Common - Scraper addresses are IPv4 (a firewall source cannot be a hostname)
+  ansible.builtin.assert:
+    that: item is match('^(\d{1,3}\.){3}\d{1,3}$')
+    fail_msg: >-
+      {{ item }} (a [prometheus] node) is not an IPv4 address, so the node_exporter
+      firewall rule on {{ inventory_hostname }} cannot allow it. Set ansible_host,
+      or keepalived_unicast_ip in host_vars/<host>.yml, to the node's IPv4.
+    quiet: true
+  loop: "{{ _common_scrapers | default([]) }}"
+  when:
+    - _common_firewall_detected in ['ufw', 'firewalld']
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'node_exporter']
+
+- name: Common - Allow node_exporter scrape from Prometheus nodes (ufw)
+  ansible.builtin.command:
+    argv: [ufw, allow, proto, tcp, from, "{{ item }}", to, any, port, "{{ node_exporter_port | default(9100) | string }}",
+           comment, agra node_exporter scrape]
+  loop: "{{ _common_scrapers | default([]) }}"
+  register: _common_ufw_scrape
+  changed_when: _common_ufw_scrape.stdout is search('Rules? (added|updated)')
+  when:
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'node_exporter']
+
+- name: Common - Allow node_exporter scrape from Prometheus nodes (firewalld rich rule, default zone)
+  ansible.builtin.shell:
+    cmd: |
+      RULE='rule family="ipv4" source address="{{ item }}" port port="{{ node_exporter_port | default(9100) }}" protocol="tcp" accept'
+      if firewall-cmd --permanent --query-rich-rule="${RULE}" >/dev/null 2>&1 \
+         && firewall-cmd --query-rich-rule="${RULE}" >/dev/null 2>&1; then
+        exit 0
+      fi
+      firewall-cmd --permanent --add-rich-rule="${RULE}" >/dev/null || exit 1
+      firewall-cmd --add-rich-rule="${RULE}" >/dev/null || exit 1
+      exit 2
+  args:
+    executable: /bin/bash
+  loop: "{{ _common_scrapers | default([]) }}"
+  register: _common_firewalld_scrape
+  changed_when: _common_firewalld_scrape.rc == 2
+  failed_when: _common_firewalld_scrape.rc not in [0, 2]
+  when:
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'node_exporter']
+
+# VRRP (IP protocol 112) between monitoring nodes. Blocked adverts mean every
+# node believes it is alone and claims the VIP (split-brain). Peers are the
+# same unicast addresses keepalived.conf uses (keepalived_unicast_ip, else
+# ansible_host).
+- name: Common - VRRP peers of this monitoring node
+  ansible.builtin.set_fact:
+    _common_vrrp_peers: >-
+      {%- set out = [] -%}
+      {%- for h in groups['monitoring'] | default([]) if h != inventory_hostname -%}
+      {%- set _ = out.append(hostvars[h]['keepalived_unicast_ip'] | default(hostvars[h]['ansible_host'] | default(h))) -%}
+      {%- endfor -%}
+      {{ out }}
+  when:
+    - inventory_hostname in groups['monitoring'] | default([])
+    - groups['monitoring'] | length > 1
+    - enable_keepalived | default(true) | bool
+  tags: ['common', 'firewall', 'vrrp']
+
+# ufw 0.36 (Ubuntu 22.04) rejects `proto vrrp`, so the rule goes into
+# before.rules as raw iptables (-p 112), applied by the `reload ufw` handler.
+- name: Common - Allow VRRP from monitoring peers (ufw before.rules)
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    marker: "# {mark} agra VRRP from monitoring peers"
+    insertbefore: "^COMMIT"
+    block: |
+      {% for ip in _common_vrrp_peers %}
+      -A ufw-before-input -p 112 -s {{ ip }} -j ACCEPT
+      {% endfor %}
+  notify: ['reload ufw']
+  when:
+    - _common_vrrp_peers is defined
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'vrrp']
+
+- name: Common - Allow VRRP from monitoring peers (firewalld rich rule, default zone)
+  ansible.builtin.shell:
+    cmd: |
+      RULE='rule family="ipv4" source address="{{ item }}" protocol value="vrrp" accept'
+      if firewall-cmd --permanent --query-rich-rule="${RULE}" >/dev/null 2>&1 \
+         && firewall-cmd --query-rich-rule="${RULE}" >/dev/null 2>&1; then
+        exit 0
+      fi
+      firewall-cmd --permanent --add-rich-rule="${RULE}" >/dev/null || exit 1
+      firewall-cmd --add-rich-rule="${RULE}" >/dev/null || exit 1
+      exit 2
+  args:
+    executable: /bin/bash
+  loop: "{{ _common_vrrp_peers | default([]) }}"
+  register: _common_firewalld_vrrp
+  changed_when: _common_firewalld_vrrp.rc == 2
+  failed_when: _common_firewalld_vrrp.rc not in [0, 2]
+  when:
+    - _common_vrrp_peers is defined
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'vrrp']
+
+# Grafana unified-alerting HA gossip (TCP+UDP grafana_alerting_ha_port) between
+# [grafana] nodes when enable_ha_grafana — blocked gossip = duplicate alerts.
+- name: Common - Grafana alerting HA peers of this node
+  ansible.builtin.set_fact:
+    _common_gf_ha_peers: >-
+      {%- set out = [] -%}
+      {%- for h in groups['grafana'] | default([]) if h != inventory_hostname -%}
+      {%- set _ = out.append(hostvars[h]['keepalived_unicast_ip'] | default(hostvars[h]['ansible_host'] | default(h))) -%}
+      {%- endfor -%}
+      {{ out }}
+  when:
+    - enable_grafana | default(true) | bool
+    - enable_ha_grafana | default(false) | bool
+    - inventory_hostname in groups['grafana'] | default([])
+    - groups['grafana'] | length > 1
+  tags: ['common', 'firewall', 'grafana']
+
+- name: Common - Allow Grafana alerting HA from peers (ufw)
+  ansible.builtin.command:
+    argv: [ufw, allow, from, "{{ item }}", to, any, port, "{{ grafana_alerting_ha_port | default(9094) | string }}",
+           comment, agra grafana alerting HA]
+  loop: "{{ _common_gf_ha_peers | default([]) }}"
+  register: _common_ufw_gf_ha
+  changed_when: "'Skipping' not in _common_ufw_gf_ha.stdout"
+  when:
+    - _common_gf_ha_peers is defined
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'grafana']
+
+- name: Common - Allow Grafana alerting HA from peers (firewalld rich rules, default zone)
+  ansible.builtin.shell:
+    cmd: |
+      rc=0
+      for PROTO in tcp udp; do
+        RULE='rule family="ipv4" source address="{{ item }}" port port="{{ grafana_alerting_ha_port | default(9094) }}" protocol="'"${PROTO}"'" accept'
+        if firewall-cmd --permanent --query-rich-rule="${RULE}" >/dev/null 2>&1 \
+           && firewall-cmd --query-rich-rule="${RULE}" >/dev/null 2>&1; then
+          continue
+        fi
+        firewall-cmd --permanent --add-rich-rule="${RULE}" >/dev/null || exit 1
+        firewall-cmd --add-rich-rule="${RULE}" >/dev/null || exit 1
+        rc=2
+      done
+      exit ${rc}
+  args:
+    executable: /bin/bash
+  loop: "{{ _common_gf_ha_peers | default([]) }}"
+  register: _common_firewalld_gf_ha
+  changed_when: _common_firewalld_gf_ha.rc == 2
+  failed_when: _common_firewalld_gf_ha.rc not in [0, 2]
+  when:
+    - _common_gf_ha_peers is defined
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'grafana']

@@ -1,0 +1,39 @@
+---
+# promtool comes from the target image: `docker run` pulls it if missing.
+- name: Prometheus (Docker) - Validate prometheus.yml via docker run promtool
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - "--volume={{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro"
+      - --entrypoint=/bin/promtool
+      - "{{ prometheus_image }}:{{ prometheus_tag }}"
+      - check
+      - config
+      - "{{ prometheus_config_dir }}/prometheus.yml"
+  changed_when: false
+  tags: ['prometheus', 'docker', 'validate']
+
+# Pull / (re)create / verify: shared helper (DESIGN.md §1B).
+- name: Prometheus (Docker) - Run container
+  ansible.builtin.include_role:
+    name: agra_container
+    apply:
+      tags: ['prometheus', 'docker', 'container']
+  vars:
+    agra_container_name: "{{ prometheus_container_name }}"
+    agra_container_image: "{{ prometheus_image }}:{{ prometheus_tag }}"
+    agra_container_options:
+      - --restart=always
+      - --network=host
+      - "--user={{ prometheus_docker_user }}"
+      - "--volume={{ prometheus_config_dir }}:{{ prometheus_config_dir }}:ro"
+      - "--volume={{ prometheus_data_dir }}:{{ prometheus_data_dir }}:rw"
+      - "--health-cmd=wget -qO- http://{{ prometheus_web_listen_address }}/-/healthy || exit 1"
+      - --health-interval=30s
+      - --health-timeout=10s
+      - --health-retries=3
+      - --health-start-period=30s
+    agra_container_command: "{{ _prometheus_extra_args | split }}"
+  tags: ['prometheus', 'docker', 'container']

@@ -1,0 +1,22 @@
+---
+# Pull / (re)create / verify: shared helper (DESIGN.md §1B).
+- name: Node Exporter (Docker) - Run container
+  ansible.builtin.include_role:
+    name: agra_container
+    apply:
+      tags: ['node_exporter', 'docker', 'container']
+  vars:
+    agra_container_name: "{{ node_exporter_container_name }}"
+    agra_container_image: "{{ node_exporter_image }}:{{ node_exporter_tag }}"
+    agra_container_options: >-
+      {{ ['--restart=always', '--pid=host', '--network=host', '--user=root',
+          '--volume=/proc:/host/proc:ro', '--volume=/sys:/host/sys:ro', '--volume=/:/rootfs:ro',
+          '--volume=' ~ node_exporter_config_dir ~ ':/etc/node_exporter:ro']
+         + (['--volume=' ~ node_exporter_textfile_dir ~ ':' ~ node_exporter_textfile_dir ~ ':ro']
+            if node_exporter_textfile_dir | length > 0 else [])
+         + ['--health-cmd=wget -qO- http://localhost:' ~ node_exporter_port ~ '/metrics || exit 1',
+            '--health-interval=30s', '--health-timeout=5s', '--health-retries=3', '--health-start-period=10s'] }}
+    agra_container_command: >-
+      {{ ['--path.procfs=/host/proc', '--path.sysfs=/host/sys', '--path.rootfs=/rootfs']
+         + (_node_exporter_extra_args | split) }}
+  tags: ['node_exporter', 'docker', 'container']

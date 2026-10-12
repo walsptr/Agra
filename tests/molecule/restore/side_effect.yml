@@ -1,0 +1,82 @@
+---
+# What `agra backup create` and then `agra restore -n <name>` do, after the
+# master lost its Grafana database. The restore must:
+#   - not be blocked by its own safety backup (grafana.db is missing),
+#   - restore from the control node's copy (the master's tarball is gone).
+- name: A dashboard that only the backup will remember
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Create dashboard agra-restore-test
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/dashboards/db
+        method: POST
+        body_format: json
+        body: {dashboard: {uid: agra-restore-test, title: agra restore test}, overwrite: true}
+        url_username: "{{ grafana_admin_user | default('admin') }}"
+        url_password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+      no_log: true
+
+# backup_include_prometheus_tsdb is on in agra-vars.yml (extra-vars: play vars
+# here would lose to globals.yml), as `agra backup create --include-prometheus-tsdb`.
+- name: Backup
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/backup.yml
+
+- name: Pick the backup the way `agra backup list` shows it (control node)
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Find manifests
+      ansible.builtin.find:
+        paths: "{{ backup_control_node_dir }}"
+        patterns: "agra-backup-*.yml"
+      register: _rt_found
+
+    - name: Exactly one backup so far
+      ansible.builtin.assert:
+        that: _rt_found.files | length == 1
+        fail_msg: "{{ _rt_found.files | map(attribute='path') | list }}"
+
+    - name: Remember it
+      ansible.builtin.set_fact:
+        _rt_name: "{{ _rt_found.files[0].path | basename | regex_replace('\\.yml$', '') }}"
+
+    - name: Record the name for verify
+      ansible.builtin.copy:
+        dest: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/restored_backup"
+        content: "{{ _rt_name }}\n"
+        mode: '0644'
+
+- name: Lose the Grafana database (and the master's copy of the backup)
+  hosts: monitoring
+  gather_facts: false
+  become: true
+  vars:
+    _rt_name: "{{ hostvars['localhost']['_rt_name'] }}"
+  tasks:
+    - name: Stop Grafana
+      ansible.builtin.command:
+        argv: [docker, stop, agra-grafana]
+      changed_when: true
+
+    - name: Delete grafana.db and the backup on the master
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/agra/grafana/grafana.db
+        - /var/lib/agra/grafana/grafana.db-wal
+        - /var/lib/agra/grafana/grafana.db-shm
+        - "/var/lib/agra/backups/{{ _rt_name }}.tar.gz"
+        - "/var/lib/agra/backups/{{ _rt_name }}.yml"
+
+- name: Restore (as `agra restore -n <name> --yes-i-really-mean-it` passes it)
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/restore.yml
+  vars:
+    restore_confirm: true
+    restore_backup_name: "{{ hostvars['localhost']['_rt_name'] }}"
+    restore_local_tarball: "{{ backup_control_node_dir }}/{{ hostvars['localhost']['_rt_name'] }}.tar.gz"
+    restore_manifest_path: "{{ backup_control_node_dir }}/{{ hostvars['localhost']['_rt_name'] }}.yml"

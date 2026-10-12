@@ -1,0 +1,20 @@
+---
+# Upload backup ke S3 — butuh collection amazon.aws + python boto3 di master.
+# Dipanggil dari backup.yml hanya jika backup_s3_enabled.
+- name: 'Backup (S3) — Upload tarball + manifest'
+  # no_log: environment berisi secret key.
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ backup_s3_access_key }}"
+    AWS_SECRET_ACCESS_KEY: "{{ backup_s3_secret_key }}"
+    AWS_DEFAULT_REGION: "{{ backup_s3_region | default('us-east-1', true) }}"
+  no_log: true
+  amazon.aws.s3_object:
+    bucket: "{{ backup_s3_bucket }}"
+    endpoint_url: "{{ backup_s3_endpoint | default(omit, true) }}"
+    object: "{{ _bk_s3_prefix }}/{{ item | basename }}"
+    src: "{{ item }}"
+    mode: put
+    permission: private
+  loop:
+    - "{{ _bk_tarball }}"
+    - "{{ _bk_manifest }}"

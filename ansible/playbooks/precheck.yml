@@ -1,0 +1,457 @@
+---
+# agra check — validasi konfigurasi + bootstrap node (Kolla bootstrap-servers).
+#
+# globals.yml + passwords.yml di-inject CLI sebagai extra-vars, mekanisme yang
+# SAMA dengan deploy, sehingga yang divalidasi di sini = yang dipakai deploy.
+# Playbook ini TIDAK mem-parse ulang file tersebut (RULES.md §14.4, §15).
+#
+# Urutan: validasi config (murah, di control node) DULU, baru ping + bootstrap
+# node (apt/dnf upgrade + Docker) — config salah gagal sebelum node disentuh.
+
+- name: 'AGRA PRECHECK 1/3 — Validasi konfigurasi (control node)'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['always', 'precheck']
+  vars:
+    _monitoring_hosts: "{{ groups['monitoring'] | default([]) }}"
+    _is_multinode: "{{ _monitoring_hosts | length > 1 }}"
+    _grafana_database: "{{ grafana_database | default('sqlite') }}"
+    _tls_cert_path: "{{ tls_cert_path | default('/etc/agra/ssl/agra.crt', true) }}"
+    _tls_key_path: "{{ tls_key_path | default('/etc/agra/ssl/agra.key', true) }}"
+    _needs_tls: "{{ (enable_nginx | default(true) | bool) and (enable_https | default(true) | bool) }}"
+    _fix_globals: "Perbaiki di /etc/agra/globals.yml (bukan inventory [group:vars] — RULES.md §14)."
+    _fix_passwords: "Jalankan `agra genpwd` (field kosong diisi, field terisi tidak ditimpa)."
+
+  tasks:
+    - name: 'Precheck (GUARD) — Wajib dijalankan via `agra check -i <inventory>`'
+      ansible.builtin.assert:
+        that:
+          - _agra_cli_inventory_explicit_confirmed | default(false) | bool
+        fail_msg: >-
+          Jalankan precheck via CLI: agra check -i <inventory>.
+          (CLI meng-inject /etc/agra/globals.yml + passwords.yml dan memastikan inventory dipilih eksplisit.)
+        quiet: true
+
+    # ── TOPOLOGI ────────────────────────────────────────────────────────
+    - name: 'Precheck (TOPOLOGI) — Minimal 1 host di group [monitoring]'
+      ansible.builtin.assert:
+        that: _monitoring_hosts | length >= 1
+        fail_msg: >-
+          Group [monitoring] kosong atau tidak ada. Tambahkan minimal 1 host ke
+          [monitoring] di inventory (ARCHITECTURE.md §4).
+        quiet: true
+
+    - name: 'Precheck (TOPOLOGI) — Minimal 1 host di group [node_exporter]'
+      ansible.builtin.assert:
+        that: groups['node_exporter'] | default([]) | length >= 1
+        fail_msg: >-
+          Group [node_exporter] kosong atau tidak ada. Tambahkan host yang ingin
+          dimonitor (mis. [node_exporter:children] monitoring).
+        quiet: true
+
+    - name: 'Precheck (TOPOLOGI) — Multi-node wajib monitoring_vip'
+      ansible.builtin.assert:
+        that: monitoring_vip | default('') | string | trim | length > 0
+        fail_msg: >-
+          [monitoring] berisi {{ _monitoring_hosts | length }} host tapi monitoring_vip kosong.
+          Set monitoring_vip: "<ip-vip>". {{ _fix_globals }}
+        quiet: true
+      when: _is_multinode | bool
+
+    # ── KEEPALIVED (multi-node) ─────────────────────────────────────────
+    # Role defaults are not visible in this localhost play — keep the
+    # fallbacks below in sync with roles/keepalived/defaults/main.yml.
+    - name: 'Precheck (KEEPALIVED) — Alamat unicast VRRP tiap node monitoring valid'
+      ansible.builtin.assert:
+        that:
+          - _ka_bad | length == 0
+          - _ka_ips | unique | length == _ka_ips | length
+          - (monitoring_vip | default('') | string | trim) not in _ka_ips
+        fail_msg: >-
+          keepalived memakai keepalived_unicast_ip (host_vars), atau ansible_host,
+          sebagai alamat VRRP unicast tiap node: {{ dict(_monitoring_hosts | zip(_ka_ips)) }}.
+          Semua wajib IPv4 literal, unik, dan bukan monitoring_vip. Tidak valid:
+          {{ _ka_bad }}. Jika ansible_host berupa hostname atau IP management, set
+          keepalived_unicast_ip: <ip di monitoring_vip_interface> di host_vars/<host>.yml
+          (var per-host — RULES.md §14.6).
+        quiet: true
+      vars:
+        _ka_ips: >-
+          {%- set out = [] -%}
+          {%- for h in _monitoring_hosts -%}
+          {%- set _ = out.append(hostvars[h]['keepalived_unicast_ip'] | default(hostvars[h]['ansible_host'] | default(h)) | string) -%}
+          {%- endfor -%}
+          {{ out }}
+        _ka_bad: >-
+          {%- set out = [] -%}
+          {%- for ip in _ka_ips -%}
+          {%- if not (ip is match('^([0-9]{1,3}\.){3}[0-9]{1,3}$') and (ip.split('.') | map('int') | max) <= 255) -%}
+          {%- set _ = out.append(ip) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ out }}
+      when:
+        - _is_multinode | bool
+        - enable_keepalived | default(true) | bool
+
+    - name: 'Precheck (KEEPALIVED) — Priority & weight menjamin failover'
+      ansible.builtin.assert:
+        that:
+          - _ka_router_id | int >= 1 and _ka_router_id | int <= 255
+          - _ka_weight | int < 0
+          - (_ka_weight | int) | abs > (_monitoring_hosts | length) - 1
+          - _ka_base | int <= 254
+          - _ka_base | int - ((_monitoring_hosts | length) - 1) >= 1
+        fail_msg: >-
+          Priority node = keepalived_priority_base ({{ _ka_base }}) dikurangi posisi
+          di [monitoring]; health check gagal menambah keepalived_weight ({{ _ka_weight }}).
+          Agar VIP pindah dari node yang tidak sehat, weight wajib negatif dan |weight| >
+          jumlah node - 1 ({{ (_monitoring_hosts | length) - 1 }}); priority semua node
+          wajib 1..254; keepalived_router_id ({{ _ka_router_id }}) wajib 1..255. {{ _fix_globals }}
+        quiet: true
+      vars:
+        _ka_base: "{{ keepalived_priority_base | default(150) }}"
+        _ka_weight: "{{ keepalived_weight | default(-50) }}"
+        _ka_router_id: "{{ keepalived_router_id | default(51) }}"
+      when:
+        - _is_multinode | bool
+        - enable_keepalived | default(true) | bool
+
+    # ── VERSI ───────────────────────────────────────────────────────────
+    - name: 'Precheck (VERSI) — <service>_tag wajib terisi'
+      ansible.builtin.assert:
+        that: lookup('ansible.builtin.vars', item ~ '_tag', default='') | string | trim | length > 0
+        fail_msg: "{{ item }}_tag kosong. Set {{ item }}_tag: \"<versi>\". {{ _fix_globals }}"
+        quiet: true
+      loop: [prometheus, grafana, node_exporter]
+
+    # ── GRAFANA DATABASE ────────────────────────────────────────────────
+    - name: 'Precheck (GRAFANA DB) — grafana_database valid'
+      ansible.builtin.assert:
+        that: _grafana_database in ['sqlite', 'mysql', 'postgresql']
+        fail_msg: "grafana_database='{{ _grafana_database }}' tidak valid (sqlite | mysql | postgresql). {{ _fix_globals }}"
+        quiet: true
+
+    - name: 'Precheck (GRAFANA DB) — External DB wajib host + password'
+      ansible.builtin.assert:
+        that:
+          - grafana_database_host | default('') | string | trim | length > 0
+          - grafana_database_password | default('') | string | length > 0
+        fail_msg: >-
+          grafana_database={{ _grafana_database }} butuh grafana_database_host
+          (globals.yml) dan grafana_database_password (passwords.yml) terisi.
+        quiet: true
+      when: _grafana_database in ['mysql', 'postgresql']
+
+    # HA Grafana = several nodes sharing ONE external database (DESIGN §5).
+    # agra never provisions it (RULES §9) and does not sync SQLite files.
+    - name: 'Precheck (GRAFANA HA) — enable_ha_grafana wajib database eksternal'
+      ansible.builtin.assert:
+        that: _grafana_database in ['mysql', 'postgresql']
+        fail_msg: >-
+          enable_ha_grafana=true butuh grafana_database mysql atau postgresql
+          (sekarang '{{ _grafana_database }}'): semua node Grafana memakai satu
+          database eksternal yang sudah ada. agra tidak menyinkronkan file SQLite
+          antar node dan tidak memasang database (PRD §4). Siapkan database, isi
+          grafana_database / grafana_database_host / grafana_database_port di
+          globals.yml dan grafana_database_password di passwords.yml, ATAU set
+          enable_ha_grafana=false.
+        quiet: true
+      when:
+        - enable_grafana | default(true) | bool
+        - enable_ha_grafana | default(false) | bool
+
+    - name: 'Precheck (GRAFANA DB) — grafana_database_host hanya untuk mysql/postgresql'
+      ansible.builtin.assert:
+        that: grafana_database_host | default('') | string | trim | length == 0
+        fail_msg: >-
+          grafana_database='sqlite' (file lokal di tiap node) tetapi
+          grafana_database_host='{{ grafana_database_host }}' terisi. Hapus
+          grafana_database_host, atau set grafana_database ke mysql/postgresql. {{ _fix_globals }}
+        quiet: true
+      when: _grafana_database == 'sqlite'
+
+    - name: 'Precheck (GRAFANA DB) — WARNING beberapa node Grafana dengan SQLite masing-masing'
+      ansible.builtin.debug:
+        msg: >-
+          ⚠️ [grafana] berisi {{ groups['grafana'] | length }} node dengan
+          grafana_database=sqlite: setiap node punya grafana.db sendiri. Dashboard,
+          user, dan alert yang dibuat lewat UI di satu node TIDAK ada di node lain
+          (hanya isi provisioning yang sama), dan setelah VIP failover pengguna
+          melihat Grafana yang berbeda. Untuk state bersama: enable_ha_grafana=true
+          + database eksternal.
+      when:
+        - enable_grafana | default(true) | bool
+        - _grafana_database == 'sqlite'
+        - groups['grafana'] | default([]) | length > 1
+
+    # ── SECRETS (passwords.yml) ─────────────────────────────────────────
+    - name: 'Precheck (SECRET) — grafana_admin_password >= 8 karakter dan bukan "admin"'
+      ansible.builtin.assert:
+        that:
+          - grafana_admin_password | default('') | string | length >= 8
+          - grafana_admin_password | default('') | string != 'admin'
+        fail_msg: >-
+          grafana_admin_password di /etc/agra/passwords.yml kosong, < 8 karakter,
+          atau 'admin'. {{ _fix_passwords }} Jika grafana.db sudah dibuat dengan
+          password lama, reset via: docker exec -it agra-grafana grafana-cli admin
+          reset-admin-password <password-baru>
+        quiet: true
+      when: enable_grafana | default(true) | bool
+
+    - name: 'Precheck (SECRET) — grafana_secret_key >= 16 karakter, bukan placeholder'
+      ansible.builtin.assert:
+        that:
+          - grafana_secret_key | default('') | string | length >= 16
+          - "'CHANGE_ME' not in (grafana_secret_key | default('') | string | upper)"
+        fail_msg: "grafana_secret_key di /etc/agra/passwords.yml kosong, < 16 karakter, atau placeholder CHANGE_ME. {{ _fix_passwords }}"
+        quiet: true
+      when: enable_grafana | default(true) | bool
+
+    - name: 'Precheck (SECRET) — keepalived_auth_pass wajib terisi dan bukan default role'
+      ansible.builtin.assert:
+        that:
+          - keepalived_auth_pass | default('') | string | trim | length > 0
+          - keepalived_auth_pass | default('') | string != 'A9ra!P4s'
+        fail_msg: >-
+          Multi-node HA butuh keepalived_auth_pass unik di /etc/agra/passwords.yml
+          (saat ini kosong atau masih default role 'A9ra!P4s'). {{ _fix_passwords }}
+        quiet: true
+      when:
+        - _is_multinode | bool
+        - enable_keepalived | default(true) | bool
+
+    - name: 'Precheck (SECRET) — Backup S3 wajib access/secret key'
+      ansible.builtin.assert:
+        that:
+          - backup_s3_bucket | default('') | string | trim | length > 0
+          - backup_s3_access_key | default('') | string | length > 0
+          - backup_s3_secret_key | default('') | string | length > 0
+        fail_msg: >-
+          backup_s3_enabled=true butuh backup_s3_bucket (globals.yml) serta
+          backup_s3_access_key + backup_s3_secret_key (passwords.yml) terisi.
+        quiet: true
+      when: backup_s3_enabled | default(false) | bool
+
+    # ── TLS (control node, /etc/agra/ssl) ───────────────────────────────
+    - name: 'Precheck (TLS) — Stat cert & key di control node'
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: false
+      loop:
+        - "{{ _tls_cert_path }}"
+        - "{{ _tls_key_path }}"
+      register: _tls_stat
+      when: _needs_tls | bool
+
+    - name: 'Precheck (TLS) — Cert & key wajib ada dan terbaca'
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.readable
+        fail_msg: >-
+          {{ item.item }} {{ 'tidak terbaca oleh user saat ini' if item.stat.exists else 'tidak ditemukan' }}.
+          {{ 'Perbaiki ownership: sudo chown -R "$USER:$USER" /etc/agra'
+             if item.stat.exists else
+             'Jalankan `agra certificates generate`, atau set tls_cert_path/tls_key_path ke cert CA-signed.' }}
+        quiet: true
+      loop: "{{ _tls_stat.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: _needs_tls | bool
+
+    - name: 'Precheck (TLS) — Cek cert expired dalam 30 hari'
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, "{{ _tls_cert_path }}", -noout, -checkend, "2592000"]
+      register: _tls_checkend
+      changed_when: false
+      failed_when: _tls_checkend.rc not in [0, 1]
+      when: _needs_tls | bool
+
+    - name: 'Precheck (TLS) — WARNING cert expired / < 30 hari'
+      ansible.builtin.debug:
+        msg: >-
+          ⚠️ TLS cert {{ _tls_cert_path }} sudah expired atau expired dalam < 30 hari.
+          Self-signed: jalankan `agra tls regenerate`. CA-signed: perbarui di CA anda.
+      when:
+        - _needs_tls | bool
+        - _tls_checkend.rc | default(0) == 1
+
+    # ── EXPOSURE ────────────────────────────────────────────────────────
+    # Allowed, but it is a conscious choice (RULES.md §4 warning, §7 HTTPS default).
+    - name: 'Precheck (EXPOSURE) — WARNING Grafana tanpa HTTPS'
+      ansible.builtin.debug:
+        msg: >-
+          ⚠️ {{ 'enable_nginx=false: Grafana listen langsung di 0.0.0.0:' ~ (grafana_port | default(3000))
+                ~ ' (HTTP, tanpa TLS)' if not enable_nginx | default(true) | bool
+                else 'enable_https=false: nginx melayani Grafana via HTTP port ' ~ (nginx_http_port | default(80)) }}
+          — password login Grafana terkirim tanpa enkripsi. Prometheus tetap hanya
+          di 127.0.0.1. Untuk HTTPS: enable_nginx=true + enable_https=true lalu
+          `agra certificates generate`.
+      when: not _needs_tls | bool
+
+- name: 'AGRA PRECHECK 2/3 — Koneksi + bootstrap node (Docker)'
+  hosts: all
+  gather_facts: false
+  any_errors_fatal: true
+  tags: ['always', 'precheck']
+  tasks:
+    - name: 'Precheck (NODE KONEKSI) — Ping semua host'
+      ansible.builtin.ping:
+
+    - name: 'Precheck — Gather facts'
+      ansible.builtin.setup:
+        gather_subset: ['!all', 'distribution', 'network', 'virtual']
+
+    # The database must be reachable from the Grafana nodes, not from the control node.
+    - name: 'Precheck (GRAFANA DB) — External DB reachable dari node Grafana'
+      ansible.builtin.wait_for:
+        host: "{{ grafana_database_host }}"
+        port: "{{ grafana_database_port | default(3306 if grafana_database == 'mysql' else 5432) | int }}"
+        timeout: 5
+        msg: >-
+          External DB {{ grafana_database }} {{ grafana_database_host }}:{{ grafana_database_port | default(3306 if grafana_database == 'mysql' else 5432) }}
+          tidak tercapai dari {{ inventory_hostname }} dalam 5 detik. Cek host/port,
+          firewall, dan service database.
+      when:
+        - enable_grafana | default(true) | bool
+        - grafana_database | default('sqlite') in ['mysql', 'postgresql']
+        - inventory_hostname in groups['grafana'] | default([])
+
+    # keepalived binds the VIP to this interface; checked here with the node's
+    # own facts instead of halfway through the deploy (RULES §4).
+    - name: 'Precheck (HA) — monitoring_vip_interface ada di node monitoring'
+      ansible.builtin.assert:
+        that: _pc_vip_iface in ansible_facts['interfaces']
+        fail_msg: >-
+          monitoring_vip_interface='{{ _pc_vip_iface }}' tidak ada di {{ inventory_hostname }}
+          (interface: {{ ansible_facts['interfaces'] | join(', ') }}). keepalived memasang
+          monitoring_vip di interface ini. Set monitoring_vip_interface per host di
+          host_vars/{{ inventory_hostname }}.yml (bukan globals.yml — RULES.md §14.6).
+        quiet: true
+      vars:
+        _pc_vip_iface: "{{ monitoring_vip_interface | default(ansible_facts['default_ipv4']['interface'] | default('eth0')) }}"
+      when:
+        - inventory_hostname in groups['monitoring'] | default([])
+        - groups['monitoring'] | length > 1
+        - enable_keepalived | default(true) | bool
+
+    # Pola Kolla-Ansible bootstrap-servers. Hanya di managed node anggota
+    # [monitoring] / [node_exporter] (control node dilewati kecuali AIO).
+    # Runtime = Docker Engine di semua distro (ARCHITECTURE.md §3): docker.io di
+    # Debian/Ubuntu, docker-ce dari download.docker.com di keluarga RHEL.
+    - name: 'Precheck (BOOTSTRAP NODE) — Update packages + install & verify Docker'
+      when: >-
+        inventory_hostname in (groups['monitoring'] | default([]))
+        or inventory_hostname in (groups['node_exporter'] | default([]))
+      become: true
+      tags: ['bootstrap']
+      vars:
+        _pc_docker_repo_distro: >-
+          {{ 'fedora' if ansible_facts['distribution'] == 'Fedora'
+             else 'rhel' if ansible_facts['distribution'] == 'RedHat' else 'centos' }}
+      block:
+        # podman-docker installs `docker` as a shell wrapper around podman: no
+        # docker.service, and --restart=always does not survive a reboot. It
+        # also conflicts with docker-ce. agra does not remove it on its own.
+        - name: 'Bootstrap — Detect podman-docker (`docker` = wrapper podman)'
+          ansible.builtin.command:
+            argv: [sh, -c, 'p=$(command -v docker) && grep -qsI podman "$p"']
+          register: _pc_podman_docker
+          changed_when: false
+          failed_when: false
+
+        - name: 'Bootstrap — docker bukan podman-docker'
+          ansible.builtin.assert:
+            that: _pc_podman_docker.rc != 0
+            fail_msg: >-
+              `docker` di {{ inventory_hostname }} adalah podman-docker (wrapper podman).
+              agra butuh Docker Engine: hapus podman-docker
+              ({{ 'dnf remove podman-docker' if ansible_facts['os_family'] == 'RedHat' else 'apt remove podman-docker' }};
+              podman sendiri boleh tetap terpasang), lalu jalankan `agra check` lagi.
+            quiet: true
+
+        - name: 'Bootstrap (Debian) — apt update cache'
+          ansible.builtin.apt:
+            update_cache: true
+            cache_valid_time: 3600
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: 'Bootstrap (Debian) — apt safe-upgrade'
+          ansible.builtin.apt:
+            upgrade: safe
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: 'Bootstrap (Debian) — Install Docker + prerequisites'
+          ansible.builtin.apt:
+            name: [apt-transport-https, ca-certificates, curl, gnupg, lsb-release, docker.io, python3-docker]
+            state: present
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: 'Bootstrap (RedHat) — dnf upgrade (paket terpasang)'
+          ansible.builtin.dnf:
+            name: '*'
+            state: latest
+            update_only: true
+            update_cache: true
+          when: ansible_facts['os_family'] == 'RedHat'
+
+        - name: 'Bootstrap (RedHat) — Repository Docker CE (download.docker.com)'
+          ansible.builtin.yum_repository:
+            name: docker-ce-stable
+            description: Docker CE Stable - $basearch
+            baseurl: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/$releasever/$basearch/stable"
+            gpgkey: "https://download.docker.com/linux/{{ _pc_docker_repo_distro }}/gpg"
+            gpgcheck: true
+          when: ansible_facts['os_family'] == 'RedHat'
+
+        # iptables-nft in the same transaction: with EPEL enabled dnf may satisfy
+        # docker-ce's `iptables` with iptables-legacy, whose nat table modern
+        # kernels do not load — dockerd then refuses to start.
+        - name: 'Bootstrap (RedHat) — Install Docker CE'
+          ansible.builtin.dnf:
+            name: [iptables-nft, docker-ce, docker-ce-cli, containerd.io]
+            state: present
+          when: ansible_facts['os_family'] == 'RedHat'
+
+        - name: 'Bootstrap — Start & enable docker.service'
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: true
+
+        - name: 'Bootstrap — Verify Docker daemon (docker info)'
+          ansible.builtin.command:
+            argv: [docker, info]
+          changed_when: false
+
+        - name: 'Bootstrap (Debian) — Cek /var/run/reboot-required'
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: _reboot_required
+          when: ansible_facts['os_family'] == 'Debian'
+
+        - name: 'Bootstrap — WARNING node butuh reboot'
+          ansible.builtin.debug:
+            msg: >-
+              ⚠️ {{ inventory_hostname }} butuh reboot setelah upgrade kernel/libc.
+              Disarankan reboot sebelum `agra deploy`.
+          when: _reboot_required.stat.exists | default(false)
+
+- name: 'AGRA PRECHECK 3/3 — Summary'
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+  tags: ['always', 'precheck']
+  tasks:
+    - name: 'Precheck — SUMMARY'
+      ansible.builtin.debug:
+        msg:
+          - "✅ AGRA PRECHECK PASSED"
+          - "Topologi: {{ groups['monitoring'] | length }} monitoring node(s), {{ groups['node_exporter'] | length }} node_exporter target(s)"
+          - "Grafana database: {{ grafana_database | default('sqlite') }}"
+          - "HA: enable_ha_grafana={{ enable_ha_grafana | default(false) }}; keepalived={{ groups['monitoring'] | length > 1 }}"
+          - "Docker siap di semua node bootstrap. Selanjutnya: agra deploy -i <inventory>"

@@ -1,0 +1,3 @@
+---
+- name: Shared checks
+  ansible.builtin.import_playbook: ../shared/verify.yml

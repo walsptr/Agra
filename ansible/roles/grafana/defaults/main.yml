@@ -1,0 +1,68 @@
+---
+enable_grafana: true
+enable_ha_grafana: false
+grafana_port: 3000
+grafana_container_name: agra-grafana
+grafana_image: grafana/grafana-oss
+grafana_tag: 11.2.0
+grafana_data_dir: /var/lib/agra/grafana
+grafana_config_dir: /etc/grafana
+grafana_provisioning_dir: "{{ grafana_config_dir }}/provisioning"
+grafana_dashboards_override_dir: "/etc/agra/config/grafana/dashboards"
+grafana_admin_user: admin
+
+grafana_uid: 472
+grafana_gid: 0
+grafana_docker_user: "{{ grafana_uid }}:{{ grafana_gid }}"
+grafana_dir_mode: "2770"
+grafana_file_mode: "0640"
+grafana_file_public_mode: "0644"
+
+# ⚠️ CONTAINER INTERNAL PATHS (inside grafana container - grafana.ini inside container MUST USE THESE!)
+# Sesuai official image defaults grafana/grafana-oss image. JANGAN DIGANTI!
+grafana_container_config_dir: /etc/grafana
+grafana_container_data_dir: /var/lib/grafana
+grafana_container_provisioning_dir: /etc/grafana/provisioning
+grafana_container_plugins_dir: "{{ grafana_container_data_dir }}/plugins"
+grafana_container_log_dir: /var/log/grafana
+grafana_container_sqlite_path: "{{ grafana_container_data_dir }}/grafana.db"
+
+grafana_database: sqlite
+grafana_database_ssl_mode: disable
+grafana_database_host: ""
+grafana_database_port: >-
+  {% if grafana_database == 'mysql' %}3306{% elif grafana_database == 'postgresql' %}5432{% else %}0{% endif %}
+grafana_database_name: grafana
+grafana_database_user: grafana
+grafana_database_password: ""
+grafana_sqlite_path: "{{ grafana_data_dir }}/grafana.db"
+
+# Unified alerting HA (enable_ha_grafana): Grafana nodes gossip on this port so
+# an alert fires once, not once per node. Peers = other [grafana] nodes,
+# addressed like keepalived (keepalived_unicast_ip, else ansible_host).
+grafana_alerting_ha_port: 9094
+
+# ⚠️ VARIABEL INI TIDAK BOLEH di-inlin default value Jinja2 TEMPLATE NESTED!
+#    Nested ternary parentheses mismatch -> "unexpected '}' expected ')'" PARSE ERROR FATAL
+#    SEBELUM role task dijalankan (Ansible evaluate SEMUA default inline template AWAL!)
+#
+# COMPUTE REAL VALUE DILAKUKAN DI: roles/grafana/tasks/main.yml set_fact (SEBELUM config.yml + docker.yml)
+grafana_server_domain: ""
+grafana_server_root_url: ""
+
+grafana_server_serve_from_sub_path: "false"
+grafana_server_protocol: http
+grafana_log_level: info
+# ⚠️ DEFAULT VALUE HANYA FALLBACK JIKA passwords.yml BELUM DI-GENERATE (user pertama deploy tanpa agra genpwd).
+# REAL VALUE SELALU di-load dari /etc/agra/passwords.yml via include_vars di playbook pre_tasks.
+# Precheck assertion akan FAIL jika grafana_secret_key == '' atau grafana_admin_password == 'admin'.
+grafana_secret_key: ""
+grafana_admin_password: ""
+
+# Grafana binds here (GF_SERVER_HTTP_ADDR). Behind nginx only loopback, so the
+# container's --network=host never puts :3000 on the node's interfaces.
+grafana_web_listen_address: "{{ (enable_nginx | default(true) | bool) | ternary('127.0.0.1:' ~ grafana_port, '0.0.0.0:' ~ grafana_port) | trim }}"
+
+grafana_prometheus_datasource_name: Prometheus
+grafana_prometheus_datasource_uid: prometheus-main
+grafana_prometheus_datasource_url: "http://127.0.0.1:{{ prometheus_port | default(9090) }}"

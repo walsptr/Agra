@@ -1,0 +1,40 @@
+---
+# Molecule's ephemeral dir outlives `molecule destroy`: start every run from a
+# clean control-node state (no version record, lifecycle phase or backups).
+- name: Reset control-node test state
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Remove state left by a previous run
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/{{ item }}"
+        state: absent
+      loop: [installed_versions.yml, phase, backups, restored_backup]
+
+# Stand-in for `agra certificates generate` (which writes /etc/agra/ssl): a
+# self-signed pair in the ephemeral dir, where agra-vars.yml points tls_*_path.
+- name: Self-signed TLS certificate on the control node
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Certificate directory
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/ssl"
+        state: directory
+        mode: '0750'
+    - name: Generate certificate and key
+      ansible.builtin.command:
+        argv: [openssl, req, -x509, -newkey, rsa:2048, -nodes, -days, '30', -subj, /CN=agra-molecule,
+               -keyout, "{{ tls_key_path }}", -out, "{{ tls_cert_path }}"]
+        creates: "{{ tls_cert_path }}"
+      when: enable_https | default(true) | bool
+
+# prepare = `agra check`: validate config, then bootstrap every node (Docker).
+# The CLI sets the guard var after confirming an explicit inventory; molecule's
+# inventory is always explicit.
+- name: Precheck
+  ansible.builtin.import_playbook: ../../../ansible/playbooks/precheck.yml
+  vars:
+    _agra_cli_inventory_explicit_confirmed: true

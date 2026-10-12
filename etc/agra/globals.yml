@@ -1,0 +1,106 @@
+---
+# 1. Global
+
+# 2. Grafana
+enable_grafana: true
+# HA Grafana: semua node [grafana] memakai SATU database eksternal MySQL/
+# PostgreSQL yang sudah ada (agra tidak memasang database). Wajib
+# grafana_database mysql|postgresql; password di passwords.yml
+# (grafana_database_password). sqlite = file lokal per node.
+enable_ha_grafana: false
+grafana_database: sqlite
+grafana_database_host: ""
+# Default mengikuti grafana_database (mysql 3306, postgresql 5432):
+# grafana_database_port: 5432
+grafana_database_name: grafana
+grafana_database_user: grafana
+grafana_database_ssl_mode: disable
+grafana_image: grafana/grafana-oss
+grafana_tag: "11.2.0"
+grafana_data_dir: /var/lib/agra/grafana
+# ⚠️ SECRET TIDAK BOLEH ADA DI globals.yml! Lihat RULES.md §7:
+#    grafana_admin_password, grafana_secret_key, dsb hanya boleh disimpan di
+#    /etc/agra/passwords.yml (chmod 0600).
+#    Set via command: `agra genpwd` (mengisi field yang masih kosong).
+grafana_domain: ""
+
+# 3. Prometheus
+enable_prometheus: true
+prometheus_retention_time: 15d
+prometheus_retention_size: ""
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+prometheus_data_dir: /var/lib/agra/prometheus
+prometheus_image: prom/prometheus
+prometheus_tag: v2.53.0
+# Prometheus TIDAK punya auth: default hanya listen 127.0.0.1 (dipakai Grafana
+# + backup) dan tidak dipublikasikan nginx. Untuk membukanya lewat nginx:
+#   - prometheus_domain: "prom.example.com" → server block sendiri di port
+#     80/443 (cert opsional tls_prometheus_cert_path/tls_prometheus_key_path)
+#   - expose_prometheus_via_nginx: true → path /prometheus/ di site Grafana
+# Admin API (/api/v1/admin/*) dan /-/quit, /-/reload selalu diblok nginx.
+expose_prometheus_via_nginx: false
+prometheus_domain: ""
+
+# 4. Node Exporter
+enable_node_exporter: true
+node_exporter_port: 9100
+node_exporter_image: prom/node-exporter
+node_exporter_tag: v1.8.2
+node_exporter_collectors_enabled: []
+node_exporter_collectors_disabled: []
+node_exporter_textfile_dir: ""
+
+# 5. Monitoring VIP/Keepalived
+monitoring_vip: ""
+# monitoring_vip_interface: per-host (default: interface utama host).
+# JANGAN set di sini — globals.yml di-inject sebagai extra-vars dan akan
+# menimpa nilai untuk SEMUA host. Set di inventory host_vars/<host>.yml
+# (RULES.md §14.6).
+keepalived_router_id: 51
+keepalived_check_interval: 2
+keepalived_fall_count: 3
+keepalived_rise_count: 2
+# keepalived_auth_pass: secret → /etc/agra/passwords.yml (agra genpwd)
+
+# 6. Nginx/TLS
+enable_nginx: true
+enable_https: true
+# Grafana di https://<monitoring_vip | grafana_domain | ip-node>/ (port 443,
+# port 80 redirect), dengan atau tanpa grafana_domain.
+tls_cert_path: /etc/agra/ssl/agra.crt
+tls_key_path: /etc/agra/ssl/agra.key
+tls_ca_path: /etc/agra/ssl/agra-ca.crt
+tls_self_signed_days_valid: 3650
+# ── Dedicated SSL paths PER SERVICE (scalable untuk multi-domain berbeda cert) ──
+# Jika dikosongkan ("") → FALLBACK otomatis ke global tls_cert_path / tls_key_path (backward compat).
+# Path source ini DIBACA dari CONTROL NODE saat deploy (biasanya /etc/agra/ssl/),
+# lalu di-copy otomatis ke managed node /etc/nginx/ssl/<service>.{crt,key} oleh role nginx config task block custom copy.
+
+# Dedicated cert untuk Grafana default HTTPS server block (server_name = grafana_domain / monitoring_vip):
+tls_grafana_cert_path: ""
+tls_grafana_key_path: ""
+
+# Dedicated cert untuk Prometheus dedicated HTTPS server block (jika prometheus_domain diisi):
+# Contoh custom: /etc/letsencrypt/live/prometheus.example.com/fullchain.pem
+tls_prometheus_cert_path: ""
+tls_prometheus_key_path: ""
+
+# ── Advanced: Nginx worker ownership override (HANYA JIKA custom image/UID host BEDA default) ──
+# Default: uid=101, gid=101 (user nginx di image nginx alpine official).
+# Uncomment DAN ISI HANYA JIKA Anda pakai custom nginx image dengan UID/GID BEDA
+# nginx_uid: 101
+# nginx_gid: 101
+# nginx_dir_mode: "0755"
+
+# 7. Backup & Restore
+backup_root_dir: /var/lib/agra/backups          # di master (groups['monitoring'][0])
+# Salinan setiap backup di CONTROL NODE (dibaca `agra backup list` / `agra restore`).
+backup_control_node_dir: /etc/agra/backups
+backup_retention_count: 7
+backup_include_prometheus_tsdb: false
+backup_s3_enabled: false
+backup_s3_bucket: ""
+backup_s3_endpoint: ""
+backup_s3_region: ""
+# backup_s3_access_key / backup_s3_secret_key: secret → /etc/agra/passwords.yml

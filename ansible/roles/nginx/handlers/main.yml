@@ -1,0 +1,47 @@
+---
+# Container yang belum ada (mis. `deploy --tags config` di host baru) bukan
+# error — akan dibuat dengan config baru saat deploy penuh. Error lain
+# (daemon mati, config invalid) WAJIB gagal, bukan `|| true`.
+# Urutan handler = urutan di file ini: syntax check SEBELUM reload/restart,
+# sehingga config invalid menghentikan play sebelum nginx di-reload.
+- name: nginx syntax check
+  listen: "nginx syntax check"
+  ansible.builtin.command:
+    cmd: docker exec {{ nginx_container_name }} nginx -t
+  register: _h_result
+  changed_when: false
+  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
+  when:
+    - enable_nginx | default(true) | bool
+
+- name: restart nginx
+  ansible.builtin.debug:
+    msg: "Restart nginx triggered"
+  changed_when: true
+  notify:
+    - restart nginx docker
+
+- name: reload nginx
+  ansible.builtin.debug:
+    msg: "Reload nginx triggered"
+  changed_when: true
+  notify:
+    - reload nginx docker
+
+- name: restart nginx docker
+  ansible.builtin.command:
+    cmd: docker restart {{ nginx_container_name }}
+  register: _h_result
+  changed_when: _h_result.rc == 0
+  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
+  when:
+    - enable_nginx | default(true) | bool
+
+- name: reload nginx docker
+  ansible.builtin.command:
+    cmd: docker exec {{ nginx_container_name }} nginx -s reload
+  register: _h_result
+  changed_when: _h_result.rc == 0
+  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
+  when:
+    - enable_nginx | default(true) | bool

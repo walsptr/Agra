@@ -1,0 +1,29 @@
+---
+# Used directly (`yamllint .`) and by ansible-lint.
+extends: default
+
+ignore: |
+  .venv/
+  .git/
+  *.egg-info/
+  # local secrets file (gitignored) — never read by tooling
+  etc/agra/passwords.yml
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  colons:
+    max-spaces-after: -1  # aligned key/value columns are used on purpose
+  document-start: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false

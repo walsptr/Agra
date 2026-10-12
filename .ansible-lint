@@ -1,0 +1,23 @@
+---
+# Run from the repo root: `ansible-lint`. Existing violations are baselined in
+# .ansible-lint-ignore (one line per file + rule) so new code cannot add more;
+# delete a line there when the PR that fixes it lands.
+exclude_paths:
+  - .venv/
+  - .github/
+  - etc/agra/  # vars templates copied to /etc/agra, not playbooks
+
+kinds:
+  - vars: "**/agra-vars.yml"  # molecule stand-in for globals/passwords overrides
+
+skip_list:
+  # RULES.md §2: feature flags are enable_<service> and task-local registers
+  # are _private names — both deliberately not prefixed with the role name.
+  - var-naming[no-role-prefix]
+
+warn_list:
+  - yaml[line-length]
+  - name[casing]
+  - name[template]
+  - jinja[spacing]
+  - key-order[task]

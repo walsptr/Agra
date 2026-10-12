@@ -1,0 +1,4 @@
+# = [project].dependencies di pyproject.toml (dicek tests/unit/test_packaging.py).
+# Install normal: ./install.sh atau pip install . — file ini untuk tool yang butuh requirements.txt.
+PyYAML>=6.0
+ansible-core>=2.16

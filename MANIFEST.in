@@ -1,0 +1,7 @@
+# sdist: semua yang dipasang setup.py data_files (lihat setup.py).
+include ansible.cfg requirements.txt install.sh
+graft ansible
+graft inventory
+graft etc/agra
+exclude etc/agra/passwords.yml etc/agra/passwords.yml.bak
+global-exclude __pycache__ *.py[cod] *.retry

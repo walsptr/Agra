@@ -1,0 +1,9 @@
+---
+# Internal helper used by every service role (DESIGN.md §1B). Callers pass:
+agra_container_name: ""          # container name, e.g. agra-grafana
+agra_container_image: ""         # <image>:<tag>
+agra_container_options: []       # `docker run` options before the image (no --name / --label)
+agra_container_command: []       # arguments after the image
+# Seconds the container must stay `running` with a stable restart count after
+# this role ran (crash loops under --restart=always look like success otherwise).
+agra_container_stable_seconds: 5

@@ -1,0 +1,9 @@
+---
+# agra rollback — rolling apply versi lama. CLI menentukan target versi
+# (default: `previous` di /etc/agra/.installed_versions.yml, atau --<svc>-tag)
+# dan mem-pass-nya sebagai extra-vars. Alur rolling, health gate, dan
+# pencatatan versi identik dengan upgrade (DESIGN.md §7).
+- name: Rolling rollback
+  ansible.builtin.import_playbook: upgrade_monitoring.yml
+  vars:
+    agra_lifecycle_action: rollback

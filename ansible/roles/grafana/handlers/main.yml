@@ -1,0 +1,19 @@
+---
+# Container yang belum ada (mis. `deploy --tags config` di host baru) bukan
+# error — akan dibuat dengan config baru saat deploy penuh. Error lain
+# (daemon mati, config invalid) WAJIB gagal, bukan `|| true`.
+- name: restart grafana
+  ansible.builtin.debug:
+    msg: "Restart grafana triggered"
+  changed_when: true
+  notify:
+    - restart grafana docker
+
+- name: restart grafana docker
+  ansible.builtin.command:
+    cmd: docker restart {{ grafana_container_name }}
+  register: _h_result
+  changed_when: _h_result.rc == 0
+  failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
+  when:
+    - enable_grafana | default(true) | bool

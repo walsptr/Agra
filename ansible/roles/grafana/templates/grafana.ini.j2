@@ -1,0 +1,92 @@
+# Grafana config — agra default template
+# OVERRIDE DENGAN: /etc/agra/config/grafana/grafana.ini.j2 (first_found)
+
+[paths]
+data = {{ grafana_container_data_dir }}
+temp_data_lifetime = 24h
+logs = {{ grafana_container_log_dir }}
+plugins = {{ grafana_container_plugins_dir }}
+provisioning = {{ grafana_container_provisioning_dir }}
+
+[server]
+protocol = {{ grafana_server_protocol }}
+http_port = {{ grafana_port }}
+domain = {{ grafana_server_domain }}
+root_url = {{ grafana_server_root_url | trim }}
+serve_from_sub_path = {{ grafana_server_serve_from_sub_path }}
+static_root_path = public
+enable_gzip = true
+
+[database]
+{% if grafana_database == 'sqlite' %}
+type = sqlite3
+path = {{ grafana_container_sqlite_path }}
+cache_mode = private
+wal = true
+{% elif grafana_database == 'mysql' %}
+type = mysql
+host = {{ grafana_database_host }}:{{ grafana_database_port }}
+name = {{ grafana_database_name }}
+user = {{ grafana_database_user }}
+password = """{{ grafana_database_password }}"""
+ssl_mode = {{ grafana_database_ssl_mode }}
+max_open_conn = 100
+max_idle_conn = 100
+conn_max_lifetime = 14400
+{% elif grafana_database == 'postgresql' %}
+type = postgres
+host = {{ grafana_database_host }}:{{ grafana_database_port }}
+name = {{ grafana_database_name }}
+user = {{ grafana_database_user }}
+password = """{{ grafana_database_password }}"""
+ssl_mode = {{ grafana_database_ssl_mode }}
+{% endif %}
+
+[security]
+admin_user = {{ _gf_safe_admin_user | default(grafana_admin_user) | default('admin') | string | trim }}
+admin_password = """{{ _gf_safe_admin_password | default(grafana_admin_password) | string | trim }}"""
+secret_key = """{{ _gf_safe_secret_key | default(grafana_secret_key) | string | trim }}"""
+disable_brute_force_login_protection = false
+
+[users]
+allow_sign_up = false
+auto_assign_org = true
+auto_assign_org_role = Viewer
+
+[auth.anonymous]
+enabled = false
+
+[log]
+mode = console file
+level = {{ grafana_log_level }}
+
+[log.file]
+log_rotate = true
+max_lines = 1000000
+max_size_shift = 28
+daily_rotate = true
+max_days = 7
+
+[analytics]
+reporting_enabled = false
+check_for_updates = true
+check_for_plugin_updates = false
+
+[metrics]
+enabled            = true
+environment        = production
+
+[feature_toggles]
+
+{% if enable_ha_grafana | default(false) | bool and groups['grafana'] | default([]) | length > 1 %}
+{%- macro node_ip(host) -%}
+{{ hostvars[host]['keepalived_unicast_ip'] | default(hostvars[host]['ansible_host'] | default(host)) }}
+{%- endmacro %}
+# HA (DESIGN §5): every node shares the external DB and gossips alert state,
+# so an alert rule fires once instead of once per Grafana node.
+[unified_alerting]
+enabled = true
+ha_listen_address = {{ node_ip(inventory_hostname) }}:{{ grafana_alerting_ha_port }}
+ha_advertise_address = {{ node_ip(inventory_hostname) }}:{{ grafana_alerting_ha_port }}
+ha_peers = {% for h in groups['grafana'] %}{{ node_ip(h) }}:{{ grafana_alerting_ha_port }}{{ ',' if not loop.last else '' }}{% endfor %}
+{% endif %}
