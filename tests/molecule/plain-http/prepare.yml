@@ -68,16 +68,30 @@
       when: "'molecule-s3' not in _fixtures.stdout_lines"
       changed_when: true
 
+    # Over TCP, as Grafana connects: the image's client and server disagree
+    # on the socket path (ERROR 2002 on GitHub). First start initialises the
+    # data dir; no_log hides the password, so on failure show the container
+    # log instead.
     - name: Wait until MySQL accepts the Grafana user
-      ansible.builtin.command:
-        argv: [docker, exec, molecule-mysql, mysql, "-u{{ grafana_database_user }}", "-p{{ grafana_database_password }}",
-               "{{ grafana_database_name }}", -e, SELECT 1]
-      register: _mysql_ready
-      until: _mysql_ready.rc == 0
-      retries: 40
-      delay: 3
-      changed_when: false
-      no_log: true
+      block:
+        - name: Query as the Grafana user
+          ansible.builtin.command:
+            argv: [docker, exec, molecule-mysql, mysql, --protocol=TCP, -h127.0.0.1, "-u{{ grafana_database_user }}",
+                   "-p{{ grafana_database_password }}", "{{ grafana_database_name }}", -e, SELECT 1]
+          register: _mysql_ready
+          until: _mysql_ready.rc == 0
+          retries: 100
+          delay: 3
+          changed_when: false
+          no_log: true
+      rescue:
+        - name: MySQL container state and log
+          ansible.builtin.shell: docker ps -a --filter name=molecule-mysql; docker logs --tail 60 molecule-mysql 2>&1
+          register: _mysql_log
+          changed_when: false
+        - name: Fail with the MySQL log
+          ansible.builtin.fail:
+            msg: "{{ ['MySQL fixture did not accept the Grafana user:'] + _mysql_log.stdout_lines }}"
 
     - name: Wait until the S3 bucket answers
       ansible.builtin.uri:

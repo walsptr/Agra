@@ -47,8 +47,9 @@
 
     - name: Grafana's tables are in MySQL
       ansible.builtin.command:
-        argv: [docker, exec, molecule-mysql, mysql, "-u{{ grafana_database_user }}", "-p{{ grafana_database_password }}",
-               "{{ grafana_database_name }}", -N, -e, SHOW TABLES LIKE 'dashboard']
+        # TCP: the image's client and server disagree on the socket path.
+        argv: [docker, exec, molecule-mysql, mysql, --protocol=TCP, -h127.0.0.1, "-u{{ grafana_database_user }}",
+               "-p{{ grafana_database_password }}", "{{ grafana_database_name }}", -N, -e, SHOW TABLES LIKE 'dashboard']
       register: _tables
       delegate_to: agra-db1
       changed_when: false

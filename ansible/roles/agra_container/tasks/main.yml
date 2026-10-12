@@ -71,9 +71,15 @@
 
 # Stopped, outdated or mis-specified containers are replaced, never reused:
 # a stopped container with the same name made `docker run` fail before.
+# A --pid=host container can take over 10 s to exit after SIGKILL; dockerd
+# gives up at 10 s ("PID ... is zombie") although it exits right after.
 - name: Container ({{ agra_container_name }}) - Remove outdated container
   ansible.builtin.command:
     argv: [docker, rm, -f, "{{ agra_container_name }}"]
+  register: _agra_ct_rm
+  until: _agra_ct_rm.rc == 0
+  retries: 3
+  delay: 5
   changed_when: true
   when: _agra_ct_create | bool and _agra_ct_exists | bool
 

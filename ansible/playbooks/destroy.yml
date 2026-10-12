@@ -48,7 +48,10 @@
       failed_when: _ds_ka_stop.rc != 0 and 'no such container' not in (_ds_ka_stop.stderr | lower)
 
     # Container yang memang tidak ada bukan error ("No such container").
-    # Error lain (daemon mati, permission) WAJIB gagal.
+    # Error lain (daemon mati, permission) WAJIB gagal. Container --pid=host
+    # (node_exporter) bisa butuh > 10 detik untuk keluar setelah SIGKILL;
+    # dockerd menyerah di 10 detik ("PID ... is zombie") lalu container tetap
+    # keluar sesaat kemudian — jadi dicoba ulang.
     - name: 'Destroy — Remove agra containers'
       ansible.builtin.command:
         argv: [docker, rm, -f, "{{ item }}"]
@@ -59,6 +62,9 @@
         - "{{ nginx_container_name | default('agra-nginx') }}"
         - "{{ keepalived_container_name | default('agra-keepalived') }}"
       register: _ds_rm
+      until: _ds_rm.rc == 0 or 'no such container' in (_ds_rm.stderr | lower)
+      retries: 3
+      delay: 5
       changed_when: _ds_rm.rc == 0 and _ds_rm.stdout | trim | length > 0
       failed_when: _ds_rm.rc != 0 and 'no such container' not in (_ds_rm.stderr | lower)
 
