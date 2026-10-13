@@ -4,7 +4,8 @@ Dijalankan pertama ke **semua** host di inventory (host monitoring dan host
 yang dimonitor). Docker Engine sendiri dipasang oleh `agra check`; role ini
 memastikan `docker.service` berjalan, memasang paket OS dasar, dan mengatur
 firewall per host. Container memakai `--network=host` — tidak
-ada Docker network khusus.
+ada Docker network khusus; network `agra_network` peninggalan agra lama
+dihapus selama masih kosong (dipakai container lain → warning saja).
 
 Firewall (ufw/firewalld, terdeteksi otomatis) hanya membuka:
 
@@ -18,8 +19,15 @@ Firewall (ufw/firewalld, terdeteksi otomatis) hanya membuka:
 | `grafana_alerting_ha_port` tcp+udp | node `[grafana]` lain | `[grafana]`, jika `enable_ha_grafana` |
 | `common_firewall_ports_tcp` | mana saja | semua |
 
-Prometheus (9090) tidak pernah dibuka. Aturan yang dibuka versi agra lama
-tidak dihapus otomatis.
+Prometheus (9090) tidak pernah dibuka.
+
+Aturan yang tidak lagi diperlukan host itu (dibuka agra versi lama, port
+yang berubah, peer yang keluar dari inventory) dihapus **hanya di ufw** dan
+hanya jika masih membawa komentar yang ditulis agra (`'agra monitoring port
+N'`, `'agra node_exporter scrape'`, `'agra grafana alerting HA'`); rule port SSH
+tidak pernah dihapus. Rule firewalld tidak punya penanda pemilik, jadi
+port yang dulu dibuka agra (80, 443, 3000, 9090) hanya dilaporkan sebagai
+warning beserta perintah penghapusannya.
 
 ## Variabel utama
 

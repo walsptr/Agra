@@ -313,3 +313,101 @@
     - _common_firewall_detected == 'firewalld'
     - common_firewall_tool != 'none'
   tags: ['common', 'firewall', 'grafana']
+
+# ── Rules agra no longer wants on this host ─────────────────────────────
+# Older agra opened 80/443 on every host and 3000/9090 to everyone when nginx
+# was off; peers and ports change with the inventory. Only rules agra can
+# prove are its own are removed: ufw keeps the comment agra wrote (an
+# operator who re-adds the same rule replaces the comment, and the rule is
+# theirs again). The SSH port is never removed.
+- name: Common - List ufw rules (with their comments)
+  ansible.builtin.command:
+    argv: [ufw, show, added]
+  register: _common_ufw_added
+  changed_when: false
+  when:
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']
+
+- name: Common - agra ufw rules that this host no longer needs
+  ansible.builtin.set_fact:
+    _common_ufw_stale: >-
+      {%- set ports = _common_ports_tcp | unique | list -%}
+      {%- set scrapers = _common_scrapers | default([]) | map(attribute='addrs') | flatten | list -%}
+      {%- set ha_peers = _common_gf_ha_peers | default([]) | map('string') | list -%}
+      {%- set ne_port = node_exporter_port | default(9100) | string -%}
+      {%- set ha_port = grafana_alerting_ha_port | default(9094) | string -%}
+      {%- set ssh_port = ansible_port | default(22) | string -%}
+      {%- set out = [] -%}
+      {%- for line in _common_ufw_added.stdout_lines if line is match("ufw allow .* comment 'agra [^']*'$") -%}
+        {%- set comment = line | regex_search("comment '(agra [^']*)'$", '\\1') | first -%}
+        {%- set spec = line | regex_replace(" comment '.*'$", '') -%}
+        {%- set port = ((spec | regex_search('port (\\d+)', '\\1')) or (spec | regex_search('^ufw allow (\\d+)/', '\\1')) or ['']) | first -%}
+        {%- set src = ((spec | regex_search(' from (\\S+)', '\\1')) or ['any']) | first -%}
+        {%- set keep = (src == 'any' and port in ports) if comment is match('agra monitoring port ')
+                  else (port == ne_port and src in scrapers) if comment == 'agra node_exporter scrape'
+                  else (port == ha_port and src in ha_peers) if comment == 'agra grafana alerting HA'
+                  else true -%}
+        {%- if not keep and port != ssh_port -%}
+          {%- set _ = out.append({'spec': spec, 'comment': comment}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+  when: _common_ufw_added is not skipped
+  tags: ['common', 'firewall']
+
+- name: Common - Remove agra ufw rules this host no longer needs
+  ansible.builtin.command:
+    argv: "{{ ['ufw', 'delete'] + item.spec.split()[1:] + ['comment', item.comment] }}"
+  loop: "{{ _common_ufw_stale | default([]) }}"
+  loop_control:
+    label: "{{ item.spec }}"
+  changed_when: true
+  tags: ['common', 'firewall']
+
+- name: Common - Remove VRRP rules when this host has no monitoring peers (ufw before.rules)
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/before.rules
+    marker: "# {mark} agra VRRP from monitoring peers"
+    state: absent
+  notify: ['reload ufw']
+  when:
+    - _common_vrrp_peers is not defined
+    - _common_firewall_detected == 'ufw'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall', 'vrrp']
+
+# firewalld rules carry no owner: a port can as well be the operator's own
+# web server. Report what older agra opened (22/80/443 everywhere, 3000/9090
+# without nginx — in zone `public`, current agra uses the default zone) and is
+# no longer wanted here, with the command to remove it; never remove it.
+- name: Common - List firewalld ports (default zone and public)
+  ansible.builtin.command:
+    argv: "{{ ['firewall-cmd', '--permanent', '--list-ports'] + item }}"
+  loop: [[], ['--zone=public']]
+  register: _common_firewalld_open
+  changed_when: false
+  when:
+    - _common_firewall_detected == 'firewalld'
+    - common_firewall_tool != 'none'
+  tags: ['common', 'firewall']
+
+- name: Common - WARNING firewalld ports agra no longer opens on this host
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: firewalld di {{ inventory_hostname }} masih membuka {{ _stale | join(', ') }}
+      yang tidak lagi dibuka agra di host ini (agra versi lama membukanya). agra tidak
+      menghapusnya karena rule firewalld tidak punya penanda pemilik. Jika memang dari agra:
+      {% for p in _stale %}firewall-cmd --permanent --zone=<zone> --remove-port={{ p }};
+      {% endfor %}firewall-cmd --reload
+  vars:
+    _open: "{{ _common_firewalld_open.results | map(attribute='stdout') | join(' ') | split | unique | list }}"
+    _old_agra: "{{ ['80', '443', '3000', '9090', nginx_http_port | default(80) | string,
+                    nginx_https_port | default(443) | string, grafana_port | default(3000) | string,
+                    prometheus_port | default(9090) | string] | map('regex_replace', '$', '/tcp') | list }}"
+    _stale: "{{ _open | select('in', _old_agra) | reject('in', _common_ports_tcp | map('regex_replace', '$', '/tcp') | list) | list }}"
+  when:
+    - _common_firewalld_open is not skipped
+    - _stale | length > 0
+  tags: ['common', 'firewall']

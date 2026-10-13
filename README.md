@@ -120,7 +120,7 @@ Ditentukan oleh grup di inventory, bukan oleh var:
 | File | Isi |
 |---|---|
 | `/etc/agra/globals.yml` | Semua var fitur & versi. Di-inject CLI sebagai extra-vars ke setiap playbook, jadi selalu menang atas inventory |
-| `/etc/agra/passwords.yml` | Secret saja (0600). `agra genpwd` mengisi field kosong; kredensial S3 diisi manual |
+| `/etc/agra/passwords.yml` | Secret saja (0600). `agra genpwd` mengisi field kosong; password database eksternal dan kredensial S3 diisi manual |
 | `host_vars/<host>.yml` (di samping inventory) | Hanya `monitoring_vip_interface` dan `keepalived_unicast_ip` |
 | `/etc/agra/config/<service>/` | Override template (opsional), lihat di bawah |
 

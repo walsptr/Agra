@@ -56,10 +56,10 @@ def _check_etc_vars_readable() -> None:
     sys.exit(2)
 
 
-def _extra_var_keys(raw: str) -> Set[str]:
-    """Nama var dalam satu argumen -e (KEY=VALUE..., JSON/YAML, atau @file).
+def extra_var_values(raw: str) -> Dict[str, object]:
+    """Var dalam satu argumen -e (KEY=VALUE..., JSON/YAML, atau @file) dengan nilainya.
 
-    Best effort: bentuk yang tidak terbaca → set kosong (urutan argv tetap
+    Best effort: bentuk yang tidak terbaca → dict kosong (urutan argv tetap
     menjamin nilai dari CLI yang menang).
     """
     raw = raw.strip()
@@ -73,10 +73,10 @@ def _extra_var_keys(raw: str) -> Set[str]:
             import yaml
             data = yaml.safe_load(raw)
         else:
-            return {tok.split("=", 1)[0] for tok in shlex.split(raw) if "=" in tok}
+            return dict(tok.split("=", 1) for tok in shlex.split(raw) if "=" in tok)
     except Exception:
-        return set()
-    return set(data) if isinstance(data, dict) else set()
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def check_extra_vars_conflicts(extra_vars_raw: Optional[Iterable[str]], cli_vars: Iterable[str]) -> None:
@@ -89,7 +89,7 @@ def check_extra_vars_conflicts(extra_vars_raw: Optional[Iterable[str]], cli_vars
         extra_vars_raw = [extra_vars_raw]
     keys: Set[str] = set()
     for raw in extra_vars_raw or []:
-        keys |= _extra_var_keys(raw)
+        keys |= set(extra_var_values(raw))
     clash = sorted(keys & set(cli_vars))
     if clash:
         raise ExtraVarsConflictError(

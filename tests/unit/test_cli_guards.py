@@ -85,11 +85,16 @@ def test_genpwd_force_confirmed_is_passed_to_the_playbook(monkeypatch):
     assert calls[0][1]["extra_vars"] == {"genpwd_force": True, "genpwd_confirm": True}
 
 
-def test_genpwd_does_not_invent_s3_credentials():
+def test_genpwd_does_not_invent_third_party_credentials():
+    # A random value passes precheck but never matches what the DBA or the
+    # S3 provider issued (PR 21: grafana_database_password).
     import yaml
 
     from agra.constants import PLAYBOOK_DIR
 
     play = yaml.safe_load((PLAYBOOK_DIR / "genpwd.yml").read_text())[0]
     generated = {f["key"] for f in play["vars"]["genpwd_fields"]}
-    assert not generated & {"backup_s3_access_key", "backup_s3_secret_key"}
+    operator = {f["key"] for f in play["vars"]["genpwd_operator_fields"]}
+    third_party = {"grafana_database_password", "backup_s3_access_key", "backup_s3_secret_key"}
+    assert not generated & third_party
+    assert operator == third_party

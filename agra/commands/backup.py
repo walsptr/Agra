@@ -7,6 +7,7 @@ backup list = PURE PYTHON parse manifest .yml di direktori backup CONTROL NODE
 from __future__ import annotations
 import argparse
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -105,12 +106,21 @@ def cmd_list(args: argparse.Namespace) -> int:
         if as_json:
             print("[]")
         return 0
+    if not bdir.is_dir():
+        error(f"{bdir} bukan direktori. -d / backup_control_node_dir harus menunjuk direktori backup di control node.")
+        return 2
 
     if yaml is None:
         error("PyYAML TIDAK TERINSTALL (required untuk backup list). Install: pip install PyYAML>=6.0")
         return 2
 
-    entries = _list_entries(bdir)
+    try:
+        entries = _list_entries(bdir)
+    except PermissionError as e:
+        error(f"Tidak bisa membaca {e.filename or bdir} sebagai user saat ini.")
+        print(f'Perbaiki ownership (backup di control node milik operator user): sudo chown -R "$USER:$USER" {bdir}',
+              file=sys.stderr)
+        return 2
     if as_json:
         print(json.dumps(entries, indent=2, default=str))
         return 0

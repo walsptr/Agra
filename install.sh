@@ -9,6 +9,12 @@
 # - Boleh dijalankan dari direktori mana pun dan berulang kali (idempotent).
 # - pip TIDAK pernah menyentuh Python sistem (PEP 668): selalu ke venv — venv
 #   yang sedang aktif ($VIRTUAL_ENV) atau $AGRA_VENV.
+
+# `sh install.sh` (dash di Debian/Ubuntu) tidak mengenal pipefail/BASH_SOURCE:
+# jalankan ulang dengan bash. Sengaja POSIX sampai baris exec ini.
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -26,7 +32,7 @@ fi
 # membawa python3 = 3.9, jadi pilih interpreter terbaru yang tersedia.
 find_python() {
     local py
-    for py in ${AGRA_PYTHON:-} python3.13 python3.12 python3.11 python3.10 python3; do
+    for py in ${AGRA_PYTHON:-} python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
         if command -v "$py" >/dev/null 2>&1 \
             && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
             command -v "$py"

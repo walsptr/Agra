@@ -121,3 +121,33 @@
 
 - name: Shared prepare
   ansible.builtin.import_playbook: ../shared/prepare.yml
+
+# What an older agra left on the nodes (PR 22), after `agra check` installed
+# Docker: an empty `agra_network`, ufw rules it opened everywhere (80/443 —
+# this scenario's nginx is on 8080/8443 — and 3000 to everyone when nginx was
+# off) and a scrape rule for a Prometheus node that is gone. The operator's own
+# rule must survive.
+- name: Fixture — leftovers from an older agra
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Old ufw rules agra opened (with agra's comment)
+      ansible.builtin.command:
+        argv: [ufw, allow, proto, tcp, from, any, to, any, port, "{{ item }}", comment, "agra monitoring port {{ item }}"]
+      loop: ['80', '443', '3000']
+      changed_when: true
+    - name: Scrape rule for a Prometheus node that left the inventory
+      ansible.builtin.command:
+        argv: [ufw, allow, proto, tcp, from, 172.28.0.99, to, any, port, '9100', comment, agra node_exporter scrape]
+      changed_when: true
+    - name: The operator's own rule
+      ansible.builtin.command:
+        argv: [ufw, allow, proto, tcp, from, any, to, any, port, '9443', comment, operator dashboard]
+      changed_when: true
+    - name: Old agra_network (agra < PR 10)
+      ansible.builtin.command:
+        argv: [docker, network, create, --driver=bridge, agra_network]
+      register: _old_net
+      changed_when: true
+      failed_when: _old_net.rc != 0 and 'already exists' not in _old_net.stderr

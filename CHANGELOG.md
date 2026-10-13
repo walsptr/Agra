@@ -27,11 +27,16 @@ Rilis pertama.
   `rollback`, `destroy`, `backup create|list`, `restore`, `tls`,
   `certificates`.
 - Konfigurasi hanya di `/etc/agra/globals.yml` dan secret di
-  `/etc/agra/passwords.yml` (0600), di-inject sebagai extra-vars.
+  `/etc/agra/passwords.yml` (0600), di-inject sebagai extra-vars. `genpwd`
+  hanya membuat secret milik agra; password database eksternal dan
+  kredensial S3 diisi operator.
+- `deploy` memberi warning jika versi di `globals.yml` berbeda dari versi
+  terpasang (ganti versi lewat `upgrade`).
 - Override template per service di `/etc/agra/config/<service>/`.
 - Operasi destruktif (`destroy`, `restore`, `genpwd --force`) wajib
   `--yes-i-really-mean-it`.
-- `install.sh` memasang agra di venv milik operator user; wheel/sdist
+- `install.sh` (bash, juga lewat `sh install.sh`) memasang agra di venv
+  milik operator user dengan Python 3.10–3.14 terbaru yang ada; wheel/sdist
   membawa playbook di `<venv>/share/agra/`.
 
 ### Operasi
@@ -49,7 +54,8 @@ Rilis pertama.
 - Grafana dan Prometheus hanya listen di loopback di belakang nginx;
   Prometheus hanya dipublikasikan jika diminta, Admin API selalu diblok.
 - Firewall (ufw/firewalld) hanya membuka port nginx dan node_exporter untuk
-  node `[prometheus]`.
+  node `[prometheus]`. Rule ufw berkomentar agra yang tidak lagi dibutuhkan
+  (termasuk dari versi lama) dihapus saat deploy; di firewalld dilaporkan.
 - Password admin Grafana di-set lewat stdin, tidak terlihat di `ps`.
 
 ### Test

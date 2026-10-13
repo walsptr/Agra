@@ -29,9 +29,8 @@ def run_genpwd(args: argparse.Namespace) -> int:
 
     if args.force and not getattr(args, "yes_i_really_mean_it", False):
         error("genpwd --force DIBLOKIR: tanpa --yes-i-really-mean-it.")
-        warn("--force mengganti semua secret: grafana_secret_key baru membuat password datasource dan "
-             "data terenkripsi lain di database Grafana tidak terbaca; grafana_database_password baru "
-             "harus di-set juga di database eksternal; semua sesi login berakhir.")
+        warn("--force mengganti semua secret yang dibuat agra: grafana_secret_key baru membuat password "
+             "datasource dan data terenkripsi lain di database Grafana tidak terbaca; semua sesi login berakhir.")
         warn("Untuk mengisi field yang kosong saja: agra genpwd (tanpa --force).")
         return 1
 

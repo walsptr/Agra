@@ -7,11 +7,13 @@ tidak ada sudo / re-exec root. Masalah permission = perbaiki ownership.
 """
 from __future__ import annotations
 import argparse
+import ipaddress
 import os
 import re
 import socket
 import platform
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -104,7 +106,11 @@ def _resolve_paths(args: argparse.Namespace) -> Tuple[str, str, str, str]:
     return cert, key, dh, ca
 
 
-def _detect_custom(g: Dict[str, Any], cert: str, key: str) -> Tuple[bool, str]:
+def _detect_custom(g: Dict[str, Any], cert: str, key: Optional[str] = None) -> Tuple[bool, str]:
+    """Apakah cert (dan key, jika diberikan) BUKAN self-signed default /etc/agra/ssl.
+
+    key=None: hanya cert yang dinilai (`certificates info` tidak punya key).
+    """
     tls_cert_globals = g.get("tls_cert_path", "") or ""
     tls_key_globals = g.get("tls_key_path", "") or ""
     reasons: List[str] = []
@@ -119,11 +125,81 @@ def _detect_custom(g: Dict[str, Any], cert: str, key: str) -> Tuple[bool, str]:
     ssl_dir_default = Path(DEFAULT_CERT).parent
     if Path(cert).parent != ssl_dir_default and cert != DEFAULT_CERT:
         reasons.append(f"Cert path ke luar AGRA_SSL_DIR: '{cert}'")
-    if Path(key).parent != ssl_dir_default and key != DEFAULT_KEY:
+    if key is not None and Path(key).parent != ssl_dir_default and key != DEFAULT_KEY:
         reasons.append(f"Key path ke luar AGRA_SSL_DIR: '{key}'")
     if reasons:
         return True, " ; ".join(reasons)
     return False, ""
+
+
+def _globals_path(g: Dict[str, Any], var: str, default: str = "") -> str:
+    value = g.get(var, "")
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _cert_kind(g: Dict[str, Any], cert_path: str) -> str:
+    """Peran cert yang diperiksa `certificates info`, untuk memilih saran perbaikan.
+
+    self-signed: cert default yang dikelola `agra tls regenerate`.
+    custom     : cert yang dipakai nginx (tls_cert_path / tls_grafana_cert_path /
+                 tls_prometheus_cert_path) tapi disediakan operator.
+    other      : file lain (`-c`) — tidak dipakai nginx agra.
+    """
+    real = os.path.realpath(cert_path)
+    global_cert = _globals_path(g, "tls_cert_path", DEFAULT_CERT)
+    if real == os.path.realpath(global_cert):
+        key = _globals_path(g, "tls_key_path", DEFAULT_KEY)
+        return "custom" if _detect_custom(g, global_cert, key)[0] else "self-signed"
+    dedicated = [_globals_path(g, v) for v in ("tls_grafana_cert_path", "tls_prometheus_cert_path")]
+    if any(d and real == os.path.realpath(d) for d in dedicated):
+        return "custom"
+    return "other"
+
+
+def _renew_hint(g: Dict[str, Any], cert_path: str) -> List[str]:
+    kind = _cert_kind(g, cert_path)
+    if kind == "self-signed":
+        return ["Regenerate self-signed cert default + distribusi ke host [monitoring]:",
+                f"  {MAGENTA}{BOLD}agra tls regenerate -i <inventory>{RESET}"]
+    if kind == "custom":
+        return ["Cert ini adalah CUSTOM cert yang dipakai nginx. Perbarui di CA/sumbernya (agra tidak "
+                "meregenerate cert custom), lalu distribusikan:",
+                f"  {MAGENTA}{BOLD}agra deploy -i <inventory> --tags nginx{RESET}"]
+    configured = _globals_path(g, "tls_cert_path", DEFAULT_CERT)
+    return [f"Cert ini tidak dipakai nginx agra (tls_cert_path = {configured}) dan tidak dikelola agra — "
+            "perbarui di sumbernya."]
+
+
+def _print_hint(first, lines: List[str]) -> None:
+    first(lines[0])
+    for line in lines[1:]:
+        print(line, file=sys.stderr if first is warn else sys.stdout)
+
+
+# openssl -subj: `/` memisahkan RDN dan `+` menggabungkan RDN (multi-valued),
+# jadi keduanya (dan `\` sendiri) harus di-escape di dalam nilai.
+_SUBJ_SPECIAL = re.compile(r"([\\/+])")
+_HOSTNAME = re.compile(r"^(\*\.)?(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?$")
+
+
+def _subj_value(value: Any) -> str:
+    text = "".join(ch for ch in str(value) if ch.isprintable()).strip()
+    return _SUBJ_SPECIAL.sub(r"\\\1", text)
+
+
+def _san_entry(name: str) -> Optional[str]:
+    """`IP:x` untuk alamat IP, `DNS:x` untuk hostname valid, None selain itu.
+
+    Tanpa ini `--cn 10.0.0.5` menjadi `DNS:10.0.0.5` (browser menolak cert untuk
+    IP itu) dan koma di CN menyisipkan entri SAN tambahan.
+    """
+    try:
+        return f"IP:{ipaddress.ip_address(name)}"
+    except ValueError:
+        pass
+    if len(name) <= 253 and _HOSTNAME.match(name):
+        return f"DNS:{name}"
+    return None
 
 
 def _resolve_cn(args: argparse.Namespace, g: Dict[str, Any]) -> str:
@@ -218,10 +294,17 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return 3
 
     cn = _resolve_cn(args, g)
-    san: List[str] = [f"DNS:{cn}", "DNS:localhost", "IP:127.0.0.1"]
-    vip = str(g.get("monitoring_vip") or "").strip()
-    if vip:
-        san.append(f"IP:{vip}")
+    san: List[str] = []
+    for label, name in (("CN", cn), ("monitoring_vip", str(g.get("monitoring_vip") or "").strip())):
+        if not name:
+            continue
+        entry = _san_entry(name)
+        if entry:
+            san.append(entry)
+        else:
+            warn(f"{label} {name!r} bukan hostname atau alamat IP — tidak dimasukkan ke SAN "
+                 "(browser hanya mencocokkan SAN).")
+    san += ["DNS:localhost", "IP:127.0.0.1"]
     final_san = list(dict.fromkeys(san))
     san_str = ",".join(final_san)
     C = g.get("tls_self_signed_country") or "ID"
@@ -234,7 +317,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         days = int(days)
     except (TypeError, ValueError):
         days = DEFAULT_DAYS
-    subj = f"/C={C}/ST={ST}/L={L}/O={O}/OU={OU}/CN={cn}"
+    subj = "".join(f"/{k}={_subj_value(v)}" for k, v in (("C", C), ("ST", ST), ("L", L), ("O", O), ("OU", OU), ("CN", cn)))
 
     info(f"Generate RSA 2048 key + self-signed x509 ({days} hari): {key}, {cert}")
     rc = _write_atomic([
@@ -272,17 +355,19 @@ def cmd_info(args: argparse.Namespace) -> int:
     if isinstance(ec, str) and ec.strip():
         cert_path = ec.strip()
     else:
-        g = load_globals_file()
-        fg = g.get("tls_cert_path", "") or ""
-        cert_path = fg.strip() if isinstance(fg, str) and fg.strip() else DEFAULT_CERT
+        cert_path = _globals_path(load_globals_file(), "tls_cert_path", DEFAULT_CERT)
     print(f"{BOLD}Cert path (resolved):{RESET} {CYAN}{cert_path}{RESET}")
+    g = load_globals_file()
     p = Path(cert_path)
     if not p.exists():
         if not os.access(p.parent, os.X_OK):
             _ssl_permission_hint(p.parent)
             return 3
         warn(f"File cert TIDAK DITEMUKAN di: {cert_path}")
-        print(f"{GRAY}Tips: Gunakan {BOLD}agra certificates generate{RESET}{GRAY} untuk membuat self-signed cert default.{RESET}")
+        if _cert_kind(g, cert_path) == "self-signed":
+            print(f"{GRAY}Tips: Gunakan {BOLD}agra certificates generate{RESET}{GRAY} untuk membuat self-signed cert default.{RESET}")
+        else:
+            print(f"{GRAY}Tips: Periksa path-nya — agra hanya membuat self-signed cert di {DEFAULT_CERT}.{RESET}")
         print(f"{GRAY}Tips: Gunakan --cert-path /path/custom.crt untuk cek cert di lokasi lain.{RESET}")
         return 1
     rc, out, err = _run_openssl(["x509", "-in", str(p), "-noout", "-issuer", "-subject", "-dates", "-ext", "subjectAltName"])
@@ -354,24 +439,12 @@ def cmd_info(args: argparse.Namespace) -> int:
             print()
             if days_remaining < 0: error("CERT SUDAH EXPIRED!")
             else: error("CERT AKAN EXPIRED KURANG DARI 7 HARI! (RED CRITICAL)")
-            g2 = load_globals_file()
-            ict, _ = _detect_custom(g2, cert_path, "")
-            if ict:
-                warn("Cert ini adalah CUSTOM cert. Update custom cert anda MANUAL, lalu jalankan:")
-                print(f"  {MAGENTA}{BOLD}agra deploy --tags nginx{RESET}")
-            else:
-                warn("Regenerate self-signed cert default SEKARANG:")
-                print(f"  {MAGENTA}{BOLD}agra certificates generate --force{RESET}")
+            _print_hint(warn, _renew_hint(g, cert_path))
             return 2
         elif days_remaining < 30:
             print()
-            warn("CERT AKAN EXPIRED KURANG DARI 30 HARI! (YELLOW WARNING) — segera regenerate cert.")
-            g2 = load_globals_file()
-            ict, _ = _detect_custom(g2, cert_path, "")
-            if ict:
-                info("Cert ini adalah CUSTOM cert. Update custom cert manual lalu `agra deploy --tags nginx`.")
-            else:
-                info("Regenerate self-signed cert default: `agra certificates generate --force`")
+            warn("CERT AKAN EXPIRED KURANG DARI 30 HARI! (YELLOW WARNING) — segera perbarui cert.")
+            _print_hint(info, _renew_hint(g, cert_path))
             return 0
     print()
     info("Cert validity OK.")

@@ -57,7 +57,7 @@ def test_data_files_never_ship_a_real_passwords_file():
 def test_passwords_template_matches_genpwd_and_is_empty():
     template = yaml.safe_load((REPO_ROOT / "etc/agra/passwords.yml.example").read_text())
     play = yaml.safe_load((PLAYBOOK_DIR / "genpwd.yml").read_text())[0]
-    genpwd_keys = [f["key"] for f in play["vars"]["genpwd_fields"]] + play["vars"]["genpwd_operator_fields"]
+    genpwd_keys = [f["key"] for f in play["vars"]["genpwd_fields"] + play["vars"]["genpwd_operator_fields"]]
 
     assert list(template) == genpwd_keys
     assert set(template) == set(SECRET_KEYS)

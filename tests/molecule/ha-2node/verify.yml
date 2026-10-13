@@ -208,3 +208,32 @@
       loop: [agra-grafana, agra-nginx]
       loop_control:
         loop_var: _service
+
+# prepare.yml planted rules and a network an older agra left behind (PR 22).
+- name: Verify — leftovers from an older agra are gone, the operator's rule is not
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: List ufw rules
+      ansible.builtin.command:
+        argv: [ufw, show, added]
+      register: _rules
+      changed_when: false
+
+    - name: Stale agra rules removed, operator rule and current agra rules kept
+      ansible.builtin.assert:
+        that:
+          - _rules.stdout is not search("ufw allow (80|443|3000)/tcp")
+          - _rules.stdout is not search("172\.28\.0\.99")
+          - _rules.stdout is search("ufw allow 9443/tcp comment 'operator dashboard'")
+          - _rules.stdout is search("ufw allow 22/tcp comment 'agra monitoring port 22'")
+          - (inventory_hostname in groups['monitoring']) == (_rules.stdout is search("ufw allow 8443/tcp comment 'agra monitoring port 8443'"))
+        fail_msg: "{{ _rules.stdout_lines }}"
+
+    - name: Docker network agra_network is gone
+      ansible.builtin.command:
+        argv: [docker, network, inspect, agra_network]
+      register: _net
+      changed_when: false
+      failed_when: _net.rc == 0

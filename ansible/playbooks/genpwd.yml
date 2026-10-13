@@ -18,28 +18,29 @@
     genpwd_force: false
     genpwd_confirm: false
     # Secret yang DIBUAT agra — WAJIB sinkron dengan SCHEMA.md §8. Kredensial
-    # yang diterbitkan pihak lain (backup_s3_access_key/secret_key dari
-    # provider S3) tidak di-generate: nilai acak lolos precheck tapi tidak
-    # pernah valid. Field itu tetap ada (kosong) dan diisi operator.
+    # yang diterbitkan pihak lain (password user database eksternal dari DBA,
+    # key S3 dari provider) tidak di-generate: nilai acak lolos precheck tapi
+    # tidak pernah valid. Field itu tetap ada (kosong) dan diisi operator.
     genpwd_fields:
       - { key: grafana_admin_password, length: 16 }
-      - { key: grafana_database_password, length: 16 }
       - { key: grafana_secret_key, length: 32 }
       # keepalived VRRP auth_pass type PASS dibatasi 8 karakter.
       - { key: keepalived_auth_pass, length: 8 }
-    genpwd_operator_fields: [backup_s3_access_key, backup_s3_secret_key]
+    genpwd_operator_fields:
+      - { key: grafana_database_password, source: 'password user database Grafana, jika grafana_database mysql/postgresql' }
+      - { key: backup_s3_access_key, source: 'dari provider S3, jika backup_s3_enabled' }
+      - { key: backup_s3_secret_key, source: 'dari provider S3, jika backup_s3_enabled' }
 
   tasks:
-    # --force mengganti SEMUA secret: grafana_secret_key baru membuat data
-    # terenkripsi di database Grafana (password datasource, dsb.) tidak bisa
-    # dibaca, dan grafana_database_password baru tidak cocok dengan database
-    # eksternal. Destruktif → konfirmasi eksplisit (RULES §8).
+    # --force mengganti SEMUA genpwd_fields: grafana_secret_key baru membuat
+    # data terenkripsi di database Grafana (password datasource, dsb.) tidak
+    # bisa dibaca. Destruktif → konfirmasi eksplisit (RULES §8).
     - name: Assert --force dikonfirmasi
       ansible.builtin.assert:
         that: not genpwd_force | bool or genpwd_confirm | bool
         fail_msg: >-
-          genpwd --force mengganti semua secret (termasuk grafana_secret_key dan
-          grafana_database_password). Jalankan: agra genpwd --force --yes-i-really-mean-it
+          genpwd --force mengganti semua secret yang dibuat agra (termasuk
+          grafana_secret_key). Jalankan: agra genpwd --force --yes-i-really-mean-it
         quiet: true
 
     - name: Stat /etc/agra
@@ -90,8 +91,8 @@
               {%- set _ = out.update({f.key: lookup('ansible.builtin.password', '/dev/null length=' ~ f.length ~ ' chars=ascii_letters,digits')}) -%}
             {%- endif -%}
           {%- endfor -%}
-          {%- for k in genpwd_operator_fields if k not in out -%}
-            {%- set _ = out.update({k: ''}) -%}
+          {%- for f in genpwd_operator_fields if f.key not in out -%}
+            {%- set _ = out.update({f.key: ''}) -%}
           {%- endfor -%}
           {{ out }}
         _pwd_status: >-
@@ -100,9 +101,9 @@
             {%- set filled = (_pwd_existing | default({})).get(f.key) | default('', true) | string | trim | length > 0 -%}
             {%- set _ = out.append(f.key ~ ': ' ~ ('RETAIN' if filled and not genpwd_force | bool else 'NEW')) -%}
           {%- endfor -%}
-          {%- for k in genpwd_operator_fields -%}
-            {%- set filled = (_pwd_existing | default({})).get(k) | default('', true) | string | trim | length > 0 -%}
-            {%- set _ = out.append(k ~ ': ' ~ ('RETAIN' if filled else 'KOSONG — isi manual dari provider S3 jika backup_s3_enabled')) -%}
+          {%- for f in genpwd_operator_fields -%}
+            {%- set filled = (_pwd_existing | default({})).get(f.key) | default('', true) | string | trim | length > 0 -%}
+            {%- set _ = out.append(f.key ~ ': ' ~ ('RETAIN' if filled else 'KOSONG — isi manual (' ~ f.source ~ ')')) -%}
           {%- endfor -%}
           {{ out }}
       no_log: true

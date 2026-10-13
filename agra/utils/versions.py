@@ -1,12 +1,13 @@
 """Baca /etc/agra/.installed_versions.yml dan bandingkan major version tag."""
 from __future__ import annotations
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import yaml
 
 from agra.constants import INSTALLED_VERSIONS_FILE
 from agra.utils.paths import load_globals_file
+from agra.utils.run_playbook import extra_var_values
 
 # Service yang bisa di-rollback → nama variabel tag-nya.
 SERVICE_TAG_VARS: Dict[str, str] = {
@@ -43,6 +44,20 @@ def globals_versions() -> Dict[str, str]:
     """Tag versi dari globals.yml — fallback `current` jika belum ada catatan versi."""
     data = load_globals_file()
     return {var: str(data[var]) for var in SERVICE_TAG_VARS.values() if var in data}
+
+
+def version_drift(extra_vars_raw: Optional[Iterable[str]] = None) -> Dict[str, Tuple[str, str]]:
+    """{tag_var: (tercatat, yang akan dipakai)} untuk tag yang berbeda dari `current`.
+
+    Yang akan dipakai = globals.yml, ditimpa -e (urutan sama dengan argv
+    ansible-playbook). Var yang tidak tercatat (mis. deploy pertama, atau
+    nginx_tag yang hanya ada di role defaults) tidak dibandingkan.
+    """
+    recorded = entry_versions(load_installed_versions(), "current")
+    target = globals_versions()
+    for raw in extra_vars_raw or []:
+        target.update({k: str(v) for k, v in extra_var_values(raw).items() if k in SERVICE_TAG_VARS.values()})
+    return {var: (recorded[var], tag) for var, tag in target.items() if var in recorded and recorded[var] != tag}
 
 
 def partial_rollout_note(limit: Optional[str]) -> Optional[str]:

@@ -2,8 +2,13 @@
 from __future__ import annotations
 import argparse
 from typing import List
+import yaml
+
+from agra.constants import INSTALLED_VERSIONS_FILE
 from agra.utils.cli_args import add_inventory_argument
+from agra.utils.colors import BOLD, MAGENTA, RESET, warn
 from agra.utils.run_playbook import run_playbook
+from agra.utils.versions import version_drift
 
 
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
@@ -22,6 +27,24 @@ def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentP
     return p
 
 
+def _warn_version_drift(extra_vars_raw: List[str]) -> None:
+    """Deploy dengan tag baru = upgrade tanpa pengaman: semua host sekaligus,
+    tanpa backup otomatis dan tanpa health gate. Tidak diblokir (deploy tetap
+    cara menerapkan config), tapi operator harus tahu sebelum terjadi."""
+    try:
+        drift = version_drift(extra_vars_raw)
+    except (OSError, yaml.YAMLError) as e:
+        warn(f"Tidak bisa membandingkan versi dengan {INSTALLED_VERSIONS_FILE}: {e}")
+        return
+    if not drift:
+        return
+    warn(f"Versi yang akan di-deploy BERBEDA dari versi terpasang ({INSTALLED_VERSIONS_FILE}):")
+    for var, (old, new) in sorted(drift.items()):
+        warn(f"  {var}: {old} → {new}")
+    warn("`agra deploy` mengganti versi di semua host SEKALIGUS, tanpa backup otomatis dan tanpa health gate. "
+         f"Untuk ganti versi gunakan {MAGENTA}{BOLD}agra upgrade{RESET} (rolling, backup dulu, bisa di-rollback).")
+
+
 def run_deploy(args: argparse.Namespace) -> int:
     tags_flat: List[str] = []
     for t in args.tags or []:
@@ -34,6 +57,7 @@ def run_deploy(args: argparse.Namespace) -> int:
     if isinstance(user_evar, str):
         user_evar = [user_evar]
     merged_evar = ["_agra_cli_inventory_explicit_confirmed=true"] + list(user_evar)
+    _warn_version_drift(list(user_evar))
 
     return run_playbook(
         "deploy",

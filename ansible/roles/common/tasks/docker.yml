@@ -26,3 +26,38 @@
     state: started
     enabled: true
   tags: ['common', 'docker', 'service']
+
+# agra before PR 10 created a bridge network `agra_network` on every host that
+# no container ever joined (all agra containers use --network=host). Remove
+# it while it is still empty; a network something has joined since is not
+# agra's to remove.
+- name: Common (Docker) - Inspect leftover agra_network (agra < PR 10)
+  ansible.builtin.command:
+    argv: [docker, network, inspect, --format, "{{ '{{' }} len .Containers {{ '}}' }}", agra_network]
+  register: _common_legacy_net
+  changed_when: false
+  failed_when:
+    - _common_legacy_net.rc != 0
+    - _common_legacy_net.stderr | lower is not search('no such network|not found')
+  tags: ['common', 'docker', 'network']
+
+- name: Common (Docker) - Remove empty leftover agra_network
+  ansible.builtin.command:
+    argv: [docker, network, rm, agra_network]
+  changed_when: true
+  when:
+    - _common_legacy_net.rc == 0
+    - _common_legacy_net.stdout | trim == '0'
+  tags: ['common', 'docker', 'network']
+
+- name: Common (Docker) - WARNING leftover agra_network is in use
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Docker network agra_network (dibuat agra lama, tidak dipakai agra lagi)
+      masih dipakai {{ _common_legacy_net.stdout | trim }} container di {{ inventory_hostname }},
+      jadi tidak dihapus. Jika container itu bukan milik anda lagi: docker network disconnect
+      agra_network <container>, lalu docker network rm agra_network.
+  when:
+    - _common_legacy_net.rc == 0
+    - _common_legacy_net.stdout | trim != '0'
+  tags: ['common', 'docker', 'network']

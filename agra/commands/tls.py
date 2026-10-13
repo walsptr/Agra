@@ -15,7 +15,7 @@ from agra.commands import certificates
 from agra.utils.colors import info, warn, error, section, BOLD, RESET, YELLOW, MAGENTA, GRAY
 from agra.utils.paths import load_globals_file
 from agra.utils.cli_args import add_inventory_argument
-from agra.utils.run_playbook import run_playbook
+from agra.utils.run_playbook import build_ansible_command, run_playbook
 
 REGENERATE_CONFIRM = "REGENERATE"
 
@@ -31,6 +31,19 @@ def cmd_regenerate(args: argparse.Namespace) -> int:
         print(f"  {GRAY}- {reason}{RESET}")
         print(f"Perbarui cert custom anda manual, lalu: {MAGENTA}{BOLD}agra deploy --tags nginx{RESET}")
         return 1
+
+    deploy_kwargs = dict(
+        inventory=getattr(args, "inventory", None),
+        tags=["nginx"],
+        limit=getattr(args, "limit", None),
+        extra_vars_raw=getattr(args, "extra_vars", None) or None,
+        verbosity=getattr(args, "verbose", 0),
+    )
+    # Semua yang bisa menggagalkan distribusi di control node (inventory,
+    # globals/passwords, ansible, -e) dicek SEBELUM cert diganti — kalau gagal
+    # sesudahnya, cert di control node sudah baru sementara host masih memakai
+    # yang lama, dan cert lama tidak bisa dikembalikan.
+    build_ansible_command("deploy", **deploy_kwargs)
 
     interactive = os.environ.get("AGRA_NON_INTERACTIVE", "") != "1" and not getattr(args, "auto_yes", False)
     if interactive:
@@ -51,16 +64,16 @@ def cmd_regenerate(args: argparse.Namespace) -> int:
         return rc
 
     info("Cert baru siap di control node. Distribusi ke managed host via deploy --tags nginx ...")
-    return run_playbook(
+    rc = run_playbook(
         "deploy",
-        inventory=getattr(args, "inventory", None),
-        tags=["nginx"],
-        limit=getattr(args, "limit", None),
-        extra_vars_raw=getattr(args, "extra_vars", None) or None,
-        verbosity=getattr(args, "verbose", 0),
+        **deploy_kwargs,
         description="Deploy --tags nginx (copy cert baru control node → managed host + reload nginx)",
         abort_on_nonzero=False,
     )
+    if rc != 0:
+        error(f"Cert baru sudah ada di {cert}, tetapi belum sampai ke semua host. Perbaiki penyebabnya, lalu "
+              "jalankan ulang distribusinya saja (JANGAN regenerate lagi): agra deploy -i <inventory> --tags nginx")
+    return rc
 
 
 def setup_parser(subparsers: "argparse._SubParsersAction") -> argparse.ArgumentParser:
