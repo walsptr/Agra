@@ -5,7 +5,7 @@ mengikuti [Semantic Versioning](https://semver.org/); selama 0.x, perubahan
 yang tidak kompatibel bisa terjadi di versi minor dan selalu ditandai
 **Breaking**. Versi tercatat di satu tempat: `agra/__init__.py`.
 
-## [0.1.0] - belum dirilis
+## [0.1.0] - 2026-10-13
 
 Rilis pertama.
 
