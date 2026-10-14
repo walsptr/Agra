@@ -77,7 +77,25 @@ if [ -z "${VIRTUAL_ENV:-}" ]; then
     ln -sfn "$VENV/bin/agra" "$BIN_DIR/agra"
     case ":$PATH:" in
         *":$BIN_DIR:"*) ;;
-        *) echo "WARNING: $BIN_DIR belum ada di PATH — tambahkan ke ~/.bashrc: export PATH=\"$BIN_DIR:\$PATH\"" ;;
+        *)
+            # Tambahkan ke rc file shell login user — sekali saja (penanda
+            # di bawah), jadi install.sh tetap idempotent.
+            case "$(basename "${SHELL:-bash}")" in
+                zsh) SHELL_RC="$HOME/.zshrc" ;;
+                bash) SHELL_RC="$HOME/.bashrc" ;;
+                *) SHELL_RC="$HOME/.profile" ;;
+            esac
+            PATH_MARKER="# agra: ~/.local/bin di PATH (install.sh)"
+            if [ -n "${AGRA_NO_MODIFY_PATH:-}" ]; then
+                echo "WARNING: $BIN_DIR belum ada di PATH — tambahkan ke $SHELL_RC: export PATH=\"$BIN_DIR:\$PATH\""
+            else
+                if ! grep -qxF "$PATH_MARKER" "$SHELL_RC" 2>/dev/null; then
+                    printf '\n%s\nexport PATH="$HOME/.local/bin:$PATH"\n' "$PATH_MARKER" >> "$SHELL_RC"
+                    echo "PATH: $BIN_DIR ditambahkan ke $SHELL_RC"
+                fi
+                PATH_HINT="source $SHELL_RC"
+            fi
+            ;;
     esac
 fi
 
@@ -105,6 +123,9 @@ if [ -f "$AGRA_ETC/ssl/agra.key" ]; then chmod 0600 "$AGRA_ETC/ssl/agra.key"; fi
 echo "$AGRA_ETC owned by $AGRA_OPERATOR:$AGRA_OPERATOR_GROUP"
 echo "agra: $("$VENV/bin/agra" --version)"
 echo "Next:"
+if [ -n "${PATH_HINT:-}" ]; then
+    echo "  0. $PATH_HINT        # atau buka terminal baru, supaya \`agra\` ada di PATH"
+fi
 echo "  1. edit $AGRA_ETC/globals.yml"
 echo "  2. agra genpwd                 # isi secret yang masih kosong di $AGRA_ETC/passwords.yml"
 echo "  3. agra check -i <inventory>"

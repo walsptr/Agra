@@ -347,3 +347,37 @@ def test_install_sh_looks_for_every_supported_python():
     assert classifiers
     assert [f"python{v}" for v in sorted(classifiers, key=lambda v: -int(v.split(".")[1]))] == \
         [py for py in searched if py.startswith("python3.")]
+
+
+def _run_install_path_block(tmp_path, shell, **env):
+    # Only the `agra` symlink + PATH part of install.sh: the rest needs pip and sudo.
+    text = (PROJECT_ROOT / "install.sh").read_text()
+    block = text[text.index("# `agra` di PATH"):text.index("# ── /etc/agra")]
+    (tmp_path / "venv/bin").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "venv/bin/agra").touch()
+    script = f"set -euo pipefail\nVENV={tmp_path}/venv\n{block}\necho \"hint=${{PATH_HINT:-}}\"\n"
+    return subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=True,
+        env={"HOME": str(tmp_path), "SHELL": shell, "PATH": "/usr/bin:/bin", **env},
+    ).stdout
+
+
+@pytest.mark.parametrize("shell,rc", [("/bin/bash", ".bashrc"), ("/usr/bin/zsh", ".zshrc"), ("/bin/sh", ".profile")])
+def test_install_sh_puts_local_bin_on_path_once(tmp_path, shell, rc):
+    first = _run_install_path_block(tmp_path, shell)
+    second = _run_install_path_block(tmp_path, shell)
+
+    assert f"hint=source {tmp_path}/{rc}" in first and "ditambahkan" in first
+    assert "ditambahkan" not in second
+    assert (tmp_path / rc).read_text().count('export PATH="$HOME/.local/bin:$PATH"') == 1
+    assert subprocess.run(
+        ["bash", "-c", f"PATH=/usr/bin:/bin; . {tmp_path}/{rc}; command -v agra"],
+        capture_output=True, text=True, env={"HOME": str(tmp_path)},
+    ).stdout.strip() == f"{tmp_path}/.local/bin/agra"
+
+
+def test_install_sh_leaves_rc_alone_when_asked(tmp_path):
+    out = _run_install_path_block(tmp_path, "/bin/bash", AGRA_NO_MODIFY_PATH="1")
+
+    assert "WARNING" in out and "hint=\n" in out
+    assert not (tmp_path / ".bashrc").exists()

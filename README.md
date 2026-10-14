@@ -29,6 +29,11 @@ aktif / `$AGRA_VENV`) berisi agra + ansible-core, menautkan `~/.local/bin/agra`,
 dan menyiapkan `/etc/agra` (milik user Anda) dari template tanpa menimpa file
 yang sudah ada. RHEL/Rocky 9: `sudo dnf install python3.12` dulu.
 
+Jika `~/.local/bin` belum ada di PATH, `install.sh` menambahkannya sekali ke
+`~/.bashrc` (zsh: `~/.zshrc`, shell lain: `~/.profile`); jalankan
+`source ~/.bashrc` atau buka terminal baru. `AGRA_NO_MODIFY_PATH=1
+./Agra/install.sh` jika tidak ingin rc file disentuh.
+
 Tanpa checkout: `pip install <wheel/sdist agra>` di venv juga bisa — playbook
 terpasang di `<venv>/share/agra/`; salin `share/agra/etc/agra/globals.yml` dan
 `passwords.yml.example` ke `/etc/agra/` (`passwords.yml`, mode 0600).

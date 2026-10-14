@@ -5,6 +5,21 @@ mengikuti [Semantic Versioning](https://semver.org/); selama 0.x, perubahan
 yang tidak kompatibel bisa terjadi di versi minor dan selalu ditandai
 **Breaking**. Versi tercatat di satu tempat: `agra/__init__.py`.
 
+## [Unreleased]
+
+### Diubah
+
+- `install.sh` menambahkan `~/.local/bin` ke PATH di `~/.bashrc` (zsh:
+  `~/.zshrc`, shell lain: `~/.profile`) jika belum ada, sekali saja, lalu
+  meminta `source` rc file tersebut — sebelumnya hanya WARNING untuk diedit
+  manual. `AGRA_NO_MODIFY_PATH=1` mempertahankan perilaku lama.
+- `agra check` kini juga memperingatkan key `globals.yml` dari layout lama
+  yang diam-diam diabaikan: `grafana_sqlite_sync_method`,
+  `grafana_sqlite_sync_interval` (HA Grafana = database eksternal saja),
+  `agra_deployment_mode`, `*_native_version`, `backup_destination_type`,
+  `backup_destination_path`, `backup_retention_days`,
+  `enable_scheduled_backup`, `backup_schedule_cron`.
+
 ## [0.1.0] - 2026-10-13
 
 Rilis pertama.

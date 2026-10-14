@@ -71,6 +71,31 @@ def test_check_warns_about_globals_keys_that_no_longer_exist(tmp_path, monkeypat
     assert not [w for w in warnings if "enable_https" in w]
 
 
+# Keys of the globals.yml layout from before PR 4–9 (SQLite sync, native
+# mode, scheduled backup): install.sh never overwrites /etc/agra/globals.yml,
+# so upgraded control nodes still carry them.
+OLD_LAYOUT_KEYS = [
+    "agra_deployment_mode", "grafana_native_version", "prometheus_native_version",
+    "node_exporter_native_version", "grafana_sqlite_sync_method", "grafana_sqlite_sync_interval",
+    "backup_destination_type", "backup_destination_path", "backup_retention_days",
+    "enable_scheduled_backup", "backup_schedule_cron",
+]
+
+
+def test_check_warns_about_every_key_of_the_old_globals_layout(tmp_path, monkeypatch):
+    import agra.commands.check as check
+
+    globals_file = tmp_path / "globals.yml"
+    globals_file.write_text("".join(f"{key}: x\n" for key in OLD_LAYOUT_KEYS))
+    warnings = []
+    monkeypatch.setattr(check, "GLOBALS_FILE", globals_file)
+    monkeypatch.setattr(check, "warn", warnings.append)
+
+    check._warn_misplaced_globals_keys()
+
+    assert [key for key in OLD_LAYOUT_KEYS if not any(f"'{key}' sudah dihapus" in w for w in warnings)] == []
+
+
 def test_genpwd_force_needs_confirmation(no_playbook_run):
     assert main(["genpwd", "--force"]) != 0
 

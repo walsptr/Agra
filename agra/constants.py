@@ -103,4 +103,17 @@ REMOVED_KEYS = {
     "node_exporter_file_mode": "Tidak ada file config node_exporter yang dirender.",
     # PR 11
     "prometheus_skip_head": "Owner dir/file Prometheus: prometheus_uid / prometheus_gid.",
+    # Layout globals.yml sebelum PR 4–9: masih ada di /etc/agra lama karena
+    # install.sh tidak pernah menimpa globals.yml.
+    "agra_deployment_mode": "agra Docker-only.",
+    "grafana_native_version": "agra Docker-only: versi Grafana = grafana_tag.",
+    "prometheus_native_version": "agra Docker-only: versi Prometheus = prometheus_tag.",
+    "node_exporter_native_version": "agra Docker-only: versi Node Exporter = node_exporter_tag.",
+    "grafana_sqlite_sync_method": "Sinkronisasi SQLite antar node sudah dihapus: HA Grafana (enable_ha_grafana) wajib grafana_database mysql/postgresql eksternal.",
+    "grafana_sqlite_sync_interval": "Sinkronisasi SQLite antar node sudah dihapus: HA Grafana (enable_ha_grafana) wajib grafana_database mysql/postgresql eksternal.",
+    "backup_destination_type": "Backup selalu di backup_root_dir (master) lalu diambil ke backup_control_node_dir; S3 opsional lewat backup_s3_enabled.",
+    "backup_destination_path": "Backup di master: backup_root_dir; salinan di control node: backup_control_node_dir.",
+    "backup_retention_days": "Retensi berdasarkan jumlah: backup_retention_count (atau `agra backup create -n N`).",
+    "enable_scheduled_backup": "agra tidak menjadwalkan backup; jadwalkan `agra backup create -i <inventory>` di cron control node.",
+    "backup_schedule_cron": "agra tidak menjadwalkan backup; jadwalkan `agra backup create -i <inventory>` di cron control node.",
 }
