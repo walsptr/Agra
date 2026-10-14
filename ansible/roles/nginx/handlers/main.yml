@@ -54,10 +54,17 @@
   when:
     - enable_nginx | default(true) | bool
 
+# agra_container flushes handlers right after `docker run`, and `restart nginx
+# docker` runs just before this one: nginx may not have written its pid file
+# yet ("open() /var/run/nginx.pid failed"). Wait for it; any other error fails
+# at once.
 - name: reload nginx docker
   ansible.builtin.command:
     cmd: docker exec {{ nginx_container_name }} nginx -s reload
   register: _h_result
+  until: _h_result.rc == 0 or nginx_pid_path not in _h_result.stderr
+  retries: 15
+  delay: 2
   changed_when: _h_result.rc == 0
   failed_when: _h_result.rc != 0 and 'no such container' not in (_h_result.stderr | lower)
   when:

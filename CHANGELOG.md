@@ -14,11 +14,16 @@ yang tidak kompatibel bisa terjadi di versi minor dan selalu ditandai
   meminta `source` rc file tersebut — sebelumnya hanya WARNING untuk diedit
   manual. `AGRA_NO_MODIFY_PATH=1` mempertahankan perilaku lama.
 - `agra check` kini juga memperingatkan key `globals.yml` dari layout lama
-  yang diam-diam diabaikan: `grafana_sqlite_sync_method`,
-  `grafana_sqlite_sync_interval` (HA Grafana = database eksternal saja),
-  `agra_deployment_mode`, `*_native_version`, `backup_destination_type`,
-  `backup_destination_path`, `backup_retention_days`,
-  `enable_scheduled_backup`, `backup_schedule_cron`.
+  yang selama ini diam-diam diabaikan: sinkronisasi SQLite antar node (HA
+  Grafana hanya dengan database MySQL/PostgreSQL eksternal), mode native,
+  dan backup terjadwal/berbasis hari.
+
+### Diperbaiki
+
+- Reload nginx dan Prometheus tidak lagi gagal saat container baru saja
+  dibuat atau di-restart (`open() "/var/run/nginx.pid" failed`, koneksi
+  ditolak): handler menunggu sampai container siap, error lain tetap
+  langsung gagal.
 
 ## [0.1.0] - 2026-10-13
 

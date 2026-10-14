@@ -26,10 +26,16 @@
     - enable_prometheus | default(true) | bool
 
 # --web.enable-lifecycle selalu aktif (tasks/config.yml) — 403 = error nyata.
+# Container yang baru dibuat/di-restart (agra_container flush handler tepat
+# setelah `docker run`) belum listen: tunggu selama koneksi ditolak (status -1).
 - name: reload prometheus docker
   ansible.builtin.uri:
     url: "http://{{ prometheus_web_listen_address | regex_replace('^0\\.0\\.0\\.0', '127.0.0.1') }}/-/reload"
     method: POST
     status_code: [200, 204]
+  register: _h_reload
+  until: _h_reload.status | default(-1) != -1
+  retries: 15
+  delay: 2
   when:
     - enable_prometheus | default(true) | bool

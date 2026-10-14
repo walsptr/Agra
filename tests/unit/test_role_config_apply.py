@@ -5,6 +5,7 @@ the keepalived health check fits inside its vrrp_script timeout."""
 from __future__ import annotations
 
 import http.server
+import os
 import shutil
 import subprocess
 import threading
@@ -184,3 +185,91 @@ def test_healthcheck_finishes_inside_the_vrrp_script_timeout(delays, healthy, sl
     assert (rc == 0) is healthy
     if not healthy:
         assert "FAIL prometheus" in (tmp_path / "ka.log").read_text()
+
+
+# ── reload handlers: a container started a moment ago is waited for ────────
+# agra_container flushes handlers right after `docker run`, so a reload can
+# reach nginx before it wrote its pid file, or Prometheus before it listens.
+def _run_handler(tmp_path, role, notify, extra_vars):
+    play = tmp_path / "handler.yml"
+    play.write_text(yaml.safe_dump([{
+        "hosts": "mon1", "gather_facts": False, "become": False,
+        "vars_files": [str(ROLES / role / "defaults/main.yml")],
+        "tasks": [{"ansible.builtin.debug": {"msg": "changed"}, "changed_when": True, "notify": [notify]}],
+        "handlers": [{"ansible.builtin.import_tasks": str(ROLES / role / "handlers/main.yml")}],
+    }]))
+    return run_playbook_locally(
+        tmp_path, str(play), "[monitoring]\nmon1 ansible_connection=local ansible_become=false\n", extra_vars)
+
+
+@pytest.fixture
+def fake_docker(tmp_path, monkeypatch):
+    """`docker` that prints `stderr` and fails for the first `failures` calls."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "docker-calls"
+
+    def make(failures, stderr):
+        script = bin_dir / "docker"
+        script.write_text(
+            "#!/bin/sh\n"
+            f"n=$(($(cat {calls} 2>/dev/null || echo 0) + 1)); echo $n > {calls}\n"
+            f"[ $n -gt {failures} ] && exit 0\n"
+            f"echo '{stderr}' >&2; exit 1\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+        return lambda: int(calls.read_text())
+    return make
+
+
+NGINX_NO_PID = 'nginx: [error] open() "/var/run/nginx.pid" failed (2: No such file or directory)'
+
+
+@needs_ansible
+@pytest.mark.parametrize("failures,stderr,ok,attempts", [
+    (2, NGINX_NO_PID, True, 3),                            # still starting: waited for
+    (99, "nginx: [emerg] unknown directive \"x\"", False, 1),  # real error: fails at once
+])
+def test_nginx_reload_waits_for_a_starting_container(failures, stderr, ok, attempts, fake_docker, tmp_path):
+    count = fake_docker(failures, stderr)
+
+    result = _run_handler(tmp_path, "nginx", "reload nginx", {"nginx_container_name": "agra-nginx"})
+
+    assert (result.returncode == 0) is ok, result.stdout[-2000:]
+    assert count() == attempts
+
+
+class _Reload(http.server.BaseHTTPRequestHandler):
+    status = 200
+    hits = 0
+
+    def do_POST(self):  # noqa: N802
+        type(self).hits += 1
+        self.send_response(self.status)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+@needs_ansible
+@pytest.mark.parametrize("starts_after,status,ok", [(3, 200, True), (0, 403, False)])
+def test_prometheus_reload_waits_for_a_starting_container(starts_after, status, ok, tmp_path):
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    handler = type("Reload", (_Reload,), {"status": status, "hits": 0})
+
+    def serve_later():
+        time.sleep(starts_after)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=serve_later, daemon=True).start()
+    time.sleep(0.5 if not starts_after else 0)
+
+    result = _run_handler(tmp_path, "prometheus", "reload prometheus",
+                          {"prometheus_web_listen_address": f"127.0.0.1:{port}"})
+
+    assert (result.returncode == 0) is ok, result.stdout[-2000:]
+    assert handler.hits == 1  # a 403 is not retried
