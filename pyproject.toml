@@ -8,7 +8,7 @@ name = "agra"
 dynamic = ["version"]
 description = "Ansible deployment + lifecycle management monitoring stack (Grafana + Prometheus + Node Exporter, Kolla-Ansible pattern)"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 # ansible-core >= 2.16 (dependency) butuh Python >= 3.10 di control node.
 requires-python = ">=3.10"
 authors = [{name = "Agra Contributors"}]

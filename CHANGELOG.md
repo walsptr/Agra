@@ -9,6 +9,8 @@ yang tidak kompatibel bisa terjadi di versi minor dan selalu ditandai
 
 ### Diubah
 
+- Lisensi diganti dari MIT ke Apache License 2.0 (`LICENSE`,
+  `pyproject.toml`); teks lisensi tidak lagi disalin di `README.md`.
 - `install.sh` menambahkan `~/.local/bin` ke PATH di `~/.bashrc` (zsh:
   `~/.zshrc`, shell lain: `~/.profile`) jika belum ada, sekali saja, lalu
   meminta `source` rc file tersebut — sebelumnya hanya WARNING untuk diedit
